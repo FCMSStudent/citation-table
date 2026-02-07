@@ -54,7 +54,7 @@ export function generateNarrativeSummary(studies: StudyResult[], query: string):
     // Add outcomes - paraphrase without causal language
     if (study.outcomes?.length > 0) {
       const outcomeDescriptions = study.outcomes
-        ?.filter(o => o.key_result)
+        .filter(o => o.key_result)
         .map(o => {
           // Sanitize to remove causal claims - be specific to avoid matching "because"
           let result = o.key_result || '';
