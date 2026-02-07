@@ -56,11 +56,11 @@ export function generateNarrativeSummary(studies: StudyResult[], query: string):
       const outcomeDescriptions = study.outcomes
         .filter(o => o.key_result)
         .map(o => {
-          // Sanitize to remove causal claims
+          // Sanitize to remove causal claims - be specific to avoid matching "because"
           let result = o.key_result || '';
-          result = result.replace(/\bcaused?\b/gi, 'was associated with');
-          result = result.replace(/\bled to\b/gi, 'was associated with');
-          result = result.replace(/\bresulted in\b/gi, 'was associated with');
+          result = result.replace(/\b(cause|caused|causes|causing)\b/gi, 'was associated with');
+          result = result.replace(/\b(led to|leads to)\b/gi, 'was associated with');
+          result = result.replace(/\b(resulted in|results in)\b/gi, 'was associated with');
           return `${o.outcome_measured}: ${result}`;
         });
       

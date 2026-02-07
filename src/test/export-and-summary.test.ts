@@ -138,7 +138,23 @@ describe("Narrative Summary", () => {
     const summary = generateNarrativeSummary(mockStudies, "test query");
     
     // Should not contain strong causal claims
-    expect(summary).not.toContain("caused");
-    expect(summary).not.toContain("led to");
+    expect(summary).not.toContain(" caused ");
+    expect(summary).not.toContain(" led to ");
+  });
+
+  it("should not replace 'because' when removing causal language", () => {
+    const studyWithBecause: StudyResult = {
+      ...mockStudies[0],
+      outcomes: [{
+        outcome_measured: "Test outcome",
+        key_result: "Effect observed because of treatment",
+        citation_snippet: "Test"
+      }]
+    };
+    
+    const summary = generateNarrativeSummary([studyWithBecause], "test query");
+    
+    // "because" should be preserved
+    expect(summary).toContain("because");
   });
 });

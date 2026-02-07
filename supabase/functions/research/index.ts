@@ -245,10 +245,20 @@ function deduplicateAndMerge(openAlexPapers: UnifiedPaper[], s2Papers: UnifiedPa
     if (paper.doi) {
       const existingByDoi = doiMap.get(paper.doi);
       if (existingByDoi) {
-        // Merge: prefer Semantic Scholar for citation count
-        if (paper.source === "semantic_scholar") {
-          doiMap.set(paper.doi, { ...existingByDoi, citationCount: paper.citationCount });
+        // Merge: combine metadata from both sources
+        const merged = { ...existingByDoi };
+        // Prefer Semantic Scholar for citation count
+        if (paper.source === "semantic_scholar" && paper.citationCount !== undefined) {
+          merged.citationCount = paper.citationCount;
         }
+        // Merge identifiers - prefer non-null values
+        if (paper.pubmed_id && !merged.pubmed_id) {
+          merged.pubmed_id = paper.pubmed_id;
+        }
+        if (paper.openalex_id && !merged.openalex_id) {
+          merged.openalex_id = paper.openalex_id;
+        }
+        doiMap.set(paper.doi, merged);
         continue;
       }
       doiMap.set(paper.doi, paper);
