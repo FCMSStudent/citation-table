@@ -3,11 +3,23 @@ import { ResultsTable } from '@/components/ResultsTable';
 import { LoadingSkeleton } from '@/components/LoadingSkeleton';
 import { ErrorMessage } from '@/components/ErrorMessage';
 import { EmptyState } from '@/components/EmptyState';
+import { MedicalDisclaimer } from '@/components/MedicalDisclaimer';
+import { QueryNormalizationNotice } from '@/components/QueryNormalizationNotice';
 import { useResearch } from '@/hooks/useResearch';
 import { BookOpen } from 'lucide-react';
 
 const Index = () => {
-  const { results, isLoading, error, query, totalPapersSearched, search } = useResearch();
+  const { 
+    results, 
+    isLoading, 
+    error, 
+    query, 
+    normalizedQuery,
+    totalPapersSearched,
+    openalexCount,
+    semanticScholarCount,
+    search 
+  } = useResearch();
   
   const hasResults = results.length > 0;
   const showEmptyState = !isLoading && !hasResults && !error;
@@ -36,6 +48,23 @@ const Index = () => {
           <SearchInput onSearch={search} isLoading={isLoading} />
         </section>
 
+        {/* Medical disclaimer - show when results are present */}
+        {hasResults && (
+          <section className="mb-6">
+            <MedicalDisclaimer />
+          </section>
+        )}
+
+        {/* Query normalization notice */}
+        {normalizedQuery && query && (
+          <section className="mb-6">
+            <QueryNormalizationNotice 
+              originalQuery={query} 
+              normalizedQuery={normalizedQuery} 
+            />
+          </section>
+        )}
+
         {/* Error message */}
         {error && !hasResults && (
           <section className="mb-8 max-w-4xl mx-auto">
@@ -55,8 +84,11 @@ const Index = () => {
           <section className="mb-8">
             <ResultsTable 
               results={results} 
-              query={query} 
-              totalPapersSearched={totalPapersSearched} 
+              query={query}
+              normalizedQuery={normalizedQuery}
+              totalPapersSearched={totalPapersSearched}
+              openalexCount={openalexCount}
+              semanticScholarCount={semanticScholarCount}
             />
           </section>
         )}
@@ -67,11 +99,18 @@ const Index = () => {
 
       {/* Footer */}
       <footer className="border-t border-border py-6 mt-auto">
-        <div className="container max-w-7xl mx-auto px-4">
+        <div className="container max-w-7xl mx-auto px-4 space-y-3">
           <p className="text-center text-sm text-muted-foreground">
-            Powered by OpenAlex • All data extracted from paper abstracts • 
+            Powered by OpenAlex + Semantic Scholar • All data extracted from paper abstracts • 
             <span className="font-medium"> No inference beyond explicit text</span>
           </p>
+          <div className="text-center text-xs text-muted-foreground border-t border-border pt-3">
+            <p className="font-medium mb-1">Explicit Non-Goals:</p>
+            <p>
+              This system does NOT: perform meta-analyses, rank/compare/recommend interventions, 
+              assess study quality or bias, generate clinical guidance, or replace expert judgment.
+            </p>
+          </div>
         </div>
       </footer>
     </div>

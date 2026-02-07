@@ -7,7 +7,10 @@ interface UseResearchReturn {
   isLoading: boolean;
   error: string | null;
   query: string;
+  normalizedQuery: string | undefined;
   totalPapersSearched: number;
+  openalexCount: number | undefined;
+  semanticScholarCount: number | undefined;
   search: (question: string) => Promise<void>;
   clearResults: () => void;
 }
@@ -17,7 +20,10 @@ export function useResearch(): UseResearchReturn {
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [query, setQuery] = useState('');
+  const [normalizedQuery, setNormalizedQuery] = useState<string | undefined>(undefined);
   const [totalPapersSearched, setTotalPapersSearched] = useState(0);
+  const [openalexCount, setOpenalexCount] = useState<number | undefined>(undefined);
+  const [semanticScholarCount, setSemanticScholarCount] = useState<number | undefined>(undefined);
 
   const search = useCallback(async (question: string) => {
     if (!question.trim()) {
@@ -45,6 +51,9 @@ export function useResearch(): UseResearchReturn {
 
       setResults(data?.results || []);
       setTotalPapersSearched(data?.total_papers_searched || 0);
+      setNormalizedQuery(data?.normalized_query);
+      setOpenalexCount(data?.openalex_count);
+      setSemanticScholarCount(data?.semantic_scholar_count);
       
       if (data?.message) {
         setError(data.message);
@@ -61,7 +70,10 @@ export function useResearch(): UseResearchReturn {
     setResults([]);
     setError(null);
     setQuery('');
+    setNormalizedQuery(undefined);
     setTotalPapersSearched(0);
+    setOpenalexCount(undefined);
+    setSemanticScholarCount(undefined);
   }, []);
 
   return {
@@ -69,7 +81,10 @@ export function useResearch(): UseResearchReturn {
     isLoading,
     error,
     query,
+    normalizedQuery,
     totalPapersSearched,
+    openalexCount,
+    semanticScholarCount,
     search,
     clearResults,
   };

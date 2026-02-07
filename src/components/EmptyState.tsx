@@ -21,7 +21,7 @@ export function EmptyState() {
           <FileSearch className="h-5 w-5 text-primary mb-2" />
           <h3 className="font-medium text-foreground mb-1">Semantic Search</h3>
           <p className="text-sm text-muted-foreground">
-            Searches 25+ papers via OpenAlex using your natural language query
+            Searches OpenAlex + Semantic Scholar using your natural language query
           </p>
         </div>
         
