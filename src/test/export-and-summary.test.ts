@@ -165,7 +165,7 @@ describe("Narrative Summary", () => {
         doi: null,
         pubmed_id: null,
         openalex_id: null,
-        formatted: null as unknown as string // Simulating the runtime error scenario
+        formatted: null // Simulating the runtime error scenario
       }
     };
     
