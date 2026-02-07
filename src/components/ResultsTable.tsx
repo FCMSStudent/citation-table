@@ -284,7 +284,7 @@ export function ResultsTable({
                           : <NullValue />}
                       </td>
                       <td className="max-w-2xl">
-                        {result.outcomes.length > 0 ? (
+                        {result.outcomes?.length > 0 ? (
                           <ul className="list-disc list-inside space-y-1 text-sm">
                             {result.outcomes.map((outcome, idx) => (
                               <li key={idx}>
@@ -327,7 +327,7 @@ export function ResultsTable({
                                 </div>
                               )}
                               
-                              {result.outcomes.length > 0 && (
+                              {result.outcomes?.length > 0 && (
                                 <div>
                                   <h4 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground mb-1">
                                     Supporting Text (Per Outcome)
