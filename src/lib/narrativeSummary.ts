@@ -52,7 +52,7 @@ export function generateNarrativeSummary(studies: StudyResult[], query: string):
     finding += ` (${citation})`;
     
     // Add outcomes - paraphrase without causal language
-    if (study.outcomes.length > 0) {
+    if (study.outcomes?.length > 0) {
       const outcomeDescriptions = study.outcomes
         .filter(o => o.key_result)
         .map(o => {

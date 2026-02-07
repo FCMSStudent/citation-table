@@ -17,16 +17,18 @@ function generateRISEntry(study: StudyResult): string {
   
   // Authors - extract from formatted citation if possible
   const citation = study.citation.formatted;
-  const authorMatch = citation.match(/^([^(]+)\(/);
-  if (authorMatch) {
-    const authorsStr = authorMatch[1].trim();
-    // Split by comma and "et al."
-    const authors = authorsStr.split(/,|\set al\./).map(a => a.trim()).filter(a => a.length > 0);
-    authors.forEach(author => {
-      if (author && author !== 'et al.') {
-        lines.push(`AU  - ${author}`);
-      }
-    });
+  if (citation) {
+    const authorMatch = citation.match(/^([^(]+)\(/);
+    if (authorMatch) {
+      const authorsStr = authorMatch[1].trim();
+      // Split by comma and "et al."
+      const authors = authorsStr.split(/,|\set al\./).map(a => a.trim()).filter(a => a.length > 0);
+      authors.forEach(author => {
+        if (author && author !== 'et al.') {
+          lines.push(`AU  - ${author}`);
+        }
+      });
+    }
   }
   
   // Publication year
