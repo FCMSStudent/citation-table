@@ -98,8 +98,8 @@ export function ResultsTable({
     if (!sortField) return results;
     
     return [...results].sort((a, b) => {
-      let aVal: any = a[sortField];
-      let bVal: any = b[sortField];
+      const aVal: string | number | null | undefined = a[sortField];
+      const bVal: string | number | null | undefined = b[sortField];
       
       // Handle nulls
       if (aVal === null && bVal === null) return 0;

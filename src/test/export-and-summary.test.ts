@@ -46,7 +46,7 @@ describe("RIS Export", () => {
     const studies = [mockStudy, { ...mockStudy, study_id: "test-456" }];
     const ris = generateRISFile(studies);
     
-    const erCount = (ris.match(/ER  - /g) || []).length;
+    const erCount = (ris.match(/ER {2}- /g) || []).length;
     expect(erCount).toBe(2);
   });
 });
