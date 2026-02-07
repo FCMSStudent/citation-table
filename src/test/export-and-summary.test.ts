@@ -157,4 +157,24 @@ describe("Narrative Summary", () => {
     // "because" should be preserved
     expect(summary).toContain("because");
   });
+
+  it("should handle null or undefined citation.formatted", () => {
+    const studyWithNullCitation: StudyResult = {
+      ...mockStudies[0],
+      citation: {
+        doi: null,
+        pubmed_id: null,
+        openalex_id: null,
+        formatted: null // Simulating the runtime error scenario
+      }
+    };
+    
+    // Should not throw an error
+    expect(() => generateNarrativeSummary([studyWithNullCitation], "test query")).not.toThrow();
+    
+    const summary = generateNarrativeSummary([studyWithNullCitation], "test query");
+    
+    // Should use "Unknown" as the author name
+    expect(summary).toContain("Unknown");
+  });
 });

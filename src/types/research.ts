@@ -10,7 +10,7 @@ export interface Citation {
   doi: string | null;
   pubmed_id: string | null;
   openalex_id: string | null;
-  formatted: string; // APA-style formatted citation
+  formatted: string | null; // APA-style formatted citation
 }
 
 export interface StudyResult {

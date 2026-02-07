@@ -80,7 +80,12 @@ export function generateNarrativeSummary(studies: StudyResult[], query: string):
 /**
  * Extract first author from formatted citation
  */
-function extractFirstAuthor(citation: string): string {
+function extractFirstAuthor(citation: string | null | undefined): string {
+  // Handle null/undefined citations
+  if (!citation) {
+    return 'Unknown';
+  }
+  
   // Extract first author before first comma or "et al."
   // Handle formats like "Smith et al. (2023)" or "Smith, J. (2023)"
   const match = citation.match(/^([^,(]+)/);
