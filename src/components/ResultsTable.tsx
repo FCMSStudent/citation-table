@@ -286,7 +286,7 @@ export function ResultsTable({
                       <td className="max-w-2xl">
                         {result.outcomes?.length > 0 ? (
                           <ul className="list-disc list-inside space-y-1 text-sm">
-                            {result.outcomes.map((outcome, idx) => (
+                            {result.outcomes?.map((outcome, idx) => (
                               <li key={idx}>
                                 <strong>{outcome.outcome_measured}:</strong>{' '}
                                 {outcome.key_result || <NullValue text="Not reported" />}
@@ -332,7 +332,7 @@ export function ResultsTable({
                                   <h4 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground mb-1">
                                     Supporting Text (Per Outcome)
                                   </h4>
-                                  {result.outcomes.map((outcome, idx) => (
+                                  {result.outcomes?.map((outcome, idx) => (
                                     <blockquote 
                                       key={idx} 
                                       className="border-l-2 border-primary/30 pl-3 italic text-foreground mb-2"
