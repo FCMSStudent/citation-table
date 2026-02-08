@@ -35,6 +35,7 @@ export function SearchInput({ onSearch, isLoading }: SearchInputProps) {
             placeholder="Enter your research question..."
             className="research-input pl-12 pr-28"
             disabled={isLoading}
+            aria-label="Research question"
           />
           <Button
             type="submit"
@@ -59,8 +60,12 @@ export function SearchInput({ onSearch, isLoading }: SearchInputProps) {
           {exampleQueries.map((q, i) => (
             <button
               key={i}
-              onClick={() => setQuestion(q)}
-              className="text-sm text-primary hover:underline focus:outline-none focus:underline"
+              onClick={() => {
+                setQuestion(q);
+                onSearch(q);
+              }}
+              className="text-sm text-primary hover:underline focus:outline-none focus:underline text-left"
+              aria-label={`Search for: ${q}`}
             >
               {q.length > 50 ? q.slice(0, 50) + '...' : q}
             </button>
