@@ -85,14 +85,24 @@ interface UnifiedPaper {
 function reconstructAbstract(invertedIndex: Record<string, number[]> | undefined): string {
   if (!invertedIndex) return "";
   
-  const positions: Array<[string, number]> = [];
-  for (const [word, indices] of Object.entries(invertedIndex)) {
+  // Find max index to determine array size
+  let maxIndex = 0;
+  for (const indices of Object.values(invertedIndex)) {
     for (const index of indices) {
-      positions.push([word, index]);
+      if (index > maxIndex) maxIndex = index;
     }
   }
-  positions.sort((a, b) => a[1] - b[1]);
-  return positions.map(([word]) => word).join(" ");
+
+  // Build array of words at their positions
+  const words = new Array(maxIndex + 1);
+  for (const [word, indices] of Object.entries(invertedIndex)) {
+    for (const index of indices) {
+      words[index] = word;
+    }
+  }
+
+  // Filter out any potential gaps and join
+  return words.filter(word => word !== undefined).join(" ");
 }
 
 // Format citation in APA style
@@ -234,48 +244,46 @@ async function searchSemanticScholar(query: string): Promise<UnifiedPaper[]> {
 function deduplicateAndMerge(openAlexPapers: UnifiedPaper[], s2Papers: UnifiedPaper[]): UnifiedPaper[] {
   const doiMap = new Map<string, UnifiedPaper>();
   const titleMap = new Map<string, UnifiedPaper>();
+  const uniquePapers = new Set<UnifiedPaper>();
   
   // Process all papers
   const allPapers = [...openAlexPapers, ...s2Papers];
   
   for (const paper of allPapers) {
     const normalizedTitle = paper.title.toLowerCase().trim();
+    const doi = paper.doi?.toLowerCase().trim();
+
+    // Try to find existing paper by DOI or Title
+    const existingPaper = (doi ? doiMap.get(doi) : undefined) || titleMap.get(normalizedTitle);
     
-    // Check for DOI match first
-    if (paper.doi) {
-      const existingByDoi = doiMap.get(paper.doi);
-      if (existingByDoi) {
-        // Merge: combine metadata from both sources
-        const merged = { ...existingByDoi };
-        // Prefer Semantic Scholar for citation count
-        if (paper.source === "semantic_scholar" && paper.citationCount !== undefined) {
-          merged.citationCount = paper.citationCount;
-        }
-        // Merge identifiers - prefer non-null values
-        if (paper.pubmed_id && !merged.pubmed_id) {
-          merged.pubmed_id = paper.pubmed_id;
-        }
-        if (paper.openalex_id && !merged.openalex_id) {
-          merged.openalex_id = paper.openalex_id;
-        }
-        doiMap.set(paper.doi, merged);
-        continue;
+    if (existingPaper) {
+      // Merge: combine metadata from current paper into existingPaper
+      // Prefer Semantic Scholar for citation count
+      if (paper.source === "semantic_scholar" && paper.citationCount !== undefined) {
+        existingPaper.citationCount = paper.citationCount;
       }
-      doiMap.set(paper.doi, paper);
+      // Merge identifiers - prefer non-null values
+      if (paper.pubmed_id && !existingPaper.pubmed_id) {
+        existingPaper.pubmed_id = paper.pubmed_id;
+      }
+      if (paper.openalex_id && !existingPaper.openalex_id) {
+        existingPaper.openalex_id = paper.openalex_id;
+      }
+      // If we found it by title but now have a DOI, update doiMap
+      if (doi && !existingPaper.doi) {
+        existingPaper.doi = paper.doi;
+        doiMap.set(doi, existingPaper);
+      }
     } else {
-      // Fallback to title matching for papers without DOI
-      if (titleMap.has(normalizedTitle)) {
-        continue; // Skip duplicate
-      }
+      // New unique paper
+      uniquePapers.add(paper);
+      if (doi) doiMap.set(doi, paper);
       titleMap.set(normalizedTitle, paper);
     }
   }
   
-  // Combine unique papers
-  const uniquePapers = [...doiMap.values(), ...titleMap.values()];
-  console.log(`[Deduplication] ${allPapers.length} total -> ${uniquePapers.length} unique papers`);
-  
-  return uniquePapers;
+  console.log(`[Deduplication] ${allPapers.length} total -> ${uniquePapers.size} unique papers`);
+  return Array.from(uniquePapers);
 }
 
 // Extract data using LLM with strict prompting per meta prompt
