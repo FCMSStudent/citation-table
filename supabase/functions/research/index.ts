@@ -427,9 +427,18 @@ serve(async (req) => {
   try {
     const { question } = await req.json();
     
+    // Security: Input validation
     if (!question || typeof question !== "string" || question.trim().length < 5) {
       return new Response(
         JSON.stringify({ error: "Please provide a valid research question (at least 5 characters)" }),
+        { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    }
+
+    // Security: Limit input length to prevent DoS/excessive token usage
+    if (question.length > 500) {
+      return new Response(
+        JSON.stringify({ error: "Question is too long (maximum 500 characters)" }),
         { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
     }
@@ -522,12 +531,24 @@ serve(async (req) => {
     );
 
   } catch (error) {
+    // Security: Log detailed error internally, but return generic message to client
+    // to avoid leaking sensitive system information or stack traces
     console.error("[Research] Error:", error);
-    const message = error instanceof Error ? error.message : "An unexpected error occurred";
+
+    let clientMessage = "An unexpected error occurred while processing your research question";
+    let statusCode = 500;
+
+    if (error instanceof Error) {
+      // Allow specific safe error messages through if they are useful to the user
+      if (error.message.includes("Rate limit") || error.message.includes("API credits")) {
+        clientMessage = error.message;
+        statusCode = 429;
+      }
+    }
     
     return new Response(
-      JSON.stringify({ error: message }),
-      { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      JSON.stringify({ error: clientMessage }),
+      { status: statusCode, headers: { ...corsHeaders, "Content-Type": "application/json" } }
     );
   }
 });
