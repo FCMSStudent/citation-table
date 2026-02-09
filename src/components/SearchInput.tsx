@@ -64,7 +64,7 @@ export function SearchInput({ onSearch, isLoading }: SearchInputProps) {
                 setQuestion(q);
                 onSearch(q);
               }}
-              className="text-sm text-primary hover:underline focus:outline-none focus:underline text-left"
+              className="text-sm text-primary hover:underline focus-ring rounded-sm px-1 -mx-1 text-left"
               aria-label={`Search for: ${q}`}
             >
               {q.length > 50 ? q.slice(0, 50) + '...' : q}

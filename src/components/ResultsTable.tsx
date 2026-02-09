@@ -40,17 +40,21 @@ function SortableHeader({
   
   return (
     <th 
-      className="cursor-pointer select-none hover:bg-secondary/50 transition-colors"
-      onClick={() => onSort(field)}
+      className="p-0 border-b border-[hsl(var(--table-border))]"
+      aria-sort={isActive ? (currentDirection === 'asc' ? 'ascending' : 'descending') : 'none'}
     >
-      <div className="flex items-center gap-1">
+      <button
+        type="button"
+        onClick={() => onSort(field)}
+        className="w-full h-full px-4 py-3 flex items-center gap-1 hover:bg-secondary/50 transition-colors focus-ring font-semibold text-sm text-foreground text-left"
+      >
         {label}
         {isActive && (
           currentDirection === 'asc' 
             ? <ChevronUp className="h-4 w-4" />
             : <ChevronDown className="h-4 w-4" />
         )}
-      </div>
+      </button>
     </th>
   );
 }
@@ -251,8 +255,17 @@ export function ResultsTable({
                   <>
                     <tr 
                       key={result.study_id}
-                      className="cursor-pointer"
+                      className="cursor-pointer focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-primary/50 outline-none"
                       onClick={() => toggleRow(result.study_id)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter' || e.key === ' ') {
+                          e.preventDefault();
+                          toggleRow(result.study_id);
+                        }
+                      }}
+                      tabIndex={0}
+                      role="button"
+                      aria-expanded={isExpanded}
                     >
                       <td className="w-8">
                         <ChevronRight 
