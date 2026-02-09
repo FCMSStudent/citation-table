@@ -1,5 +1,5 @@
 import { useState, useCallback } from 'react';
-import { supabase } from '@/integrations/supabase/client';
+import { supabase, supabaseConfigError } from '@/integrations/supabase/client';
 import type { StudyResult, ResearchResponse } from '@/types/research';
 
 interface UseResearchReturn {
@@ -35,6 +35,12 @@ export function useResearch(): UseResearchReturn {
     setError(null);
     setResults([]);
     setQuery(question);
+
+    if (!supabase) {
+      setError(supabaseConfigError ?? 'Supabase is not configured.');
+      setIsLoading(false);
+      return;
+    }
 
     try {
       const { data, error: fnError } = await supabase.functions.invoke<ResearchResponse>('research', {
