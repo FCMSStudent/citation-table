@@ -151,7 +151,14 @@ function normalizeQuery(query: string): { normalized: string; wasNormalized: boo
 // Query OpenAlex API
 async function searchOpenAlex(query: string): Promise<UnifiedPaper[]> {
   const encodedQuery = encodeURIComponent(query);
-  const url = `https://api.openalex.org/works?search=${encodedQuery}&filter=has_abstract:true&per_page=25&sort=relevance_score:desc`;
+  const apiKey = Deno.env.get("OPENALEX_API_KEY");
+  
+  // Build URL with API key if available
+  let url = `https://api.openalex.org/works?search=${encodedQuery}&filter=has_abstract:true&per_page=25&sort=relevance_score:desc`;
+  if (apiKey) {
+    url += `&api_key=${apiKey}`;
+    console.log(`[OpenAlex] Using API key for polite pool access`);
+  }
   
   console.log(`[OpenAlex] Searching: ${query}`);
   
@@ -181,7 +188,7 @@ async function searchOpenAlex(query: string): Promise<UnifiedPaper[]> {
       authors: work.authorships?.map(a => a.author.display_name) || ["Unknown"],
       venue: work.primary_location?.source?.display_name || "",
       doi: work.doi || null,
-      pubmed_id: null, // OpenAlex doesn't directly provide PubMed ID
+      pubmed_id: null,
       openalex_id: work.id,
       source: "openalex" as const,
       citationCount: work.cited_by_count,
@@ -217,7 +224,7 @@ async function searchSemanticScholar(query: string): Promise<UnifiedPaper[]> {
     const papers: SemanticScholarPaper[] = data.data || [];
     console.log(`[SemanticScholar] Found ${papers.length} papers`);
     
-    // Convert to unified format
+    // Convert to unified format - fix null to undefined for publicationTypes
     return papers
       .filter(paper => paper.abstract && paper.abstract.length > 50)
       .map(paper => ({
@@ -232,7 +239,7 @@ async function searchSemanticScholar(query: string): Promise<UnifiedPaper[]> {
         openalex_id: null,
         source: "semantic_scholar" as const,
         citationCount: paper.citationCount,
-        publicationTypes: paper.publicationTypes,
+        publicationTypes: paper.publicationTypes ?? undefined,
       }));
   } catch (error) {
     console.error(`[SemanticScholar] Error:`, error);
