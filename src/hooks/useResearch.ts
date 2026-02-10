@@ -1,5 +1,5 @@
 import { useState, useCallback } from 'react';
-import { supabase, supabaseConfigError } from '@/integrations/supabase/client';
+import { supabaseClient, isSupabaseConfigured } from '@/lib/supabase';
 import type { StudyResult, ResearchResponse } from '@/types/research';
 
 interface UseResearchReturn {
@@ -36,19 +36,43 @@ export function useResearch(): UseResearchReturn {
     setResults([]);
     setQuery(question);
 
-    if (!supabase) {
-      setError(supabaseConfigError ?? 'Supabase is not configured.');
-      setIsLoading(false);
-      return;
-    }
-
     try {
-      const { data, error: fnError } = await supabase.functions.invoke<ResearchResponse>('research', {
-        body: { question },
-      });
+      let data: ResearchResponse | null = null;
 
-      if (fnError) {
-        throw new Error(fnError.message || 'Failed to search');
+      if (isSupabaseConfigured && supabaseClient) {
+        // Use Supabase client when configured
+        const { data: responseData, error: fnError } = await supabaseClient.functions.invoke<ResearchResponse>('research', {
+          body: { question },
+        });
+
+        if (fnError) {
+          throw new Error(fnError.message || 'Failed to search');
+        }
+
+        data = responseData;
+      } else {
+        // Direct fetch to edge function when Supabase not configured
+        // This works because edge functions are publicly accessible via their URL
+        const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL;
+        
+        if (!SUPABASE_URL) {
+          throw new Error('Cannot search: VITE_SUPABASE_URL is not set. Please configure your environment variables.');
+        }
+
+        const response = await fetch(`${SUPABASE_URL}/functions/v1/research`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({ question }),
+        });
+
+        if (!response.ok) {
+          const errorData = await response.json().catch(() => ({}));
+          throw new Error(errorData.error || `Search failed: ${response.statusText}`);
+        }
+
+        data = await response.json();
       }
 
       if (data?.error) {
