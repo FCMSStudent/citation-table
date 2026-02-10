@@ -1,9 +1,17 @@
 /**
  * Supabase Configuration Module
  * 
- * This module provides optional Supabase integration.
- * Search functionality works WITHOUT Supabase - it only needs OpenAlex + Semantic Scholar.
- * Supabase is used for: authentication, search history, saved queries, and user preferences.
+ * This module provides Supabase integration for the Research Assistant.
+ * 
+ * ARCHITECTURE:
+ * - The research API is a Supabase edge function, so VITE_SUPABASE_URL is REQUIRED
+ * - VITE_SUPABASE_PUBLISHABLE_KEY is OPTIONAL and only needed for:
+ *   - User authentication
+ *   - Search history
+ *   - Saved queries
+ *   - User preferences
+ * 
+ * Search functionality works with just the URL - the edge function is publicly accessible.
  */
 
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
@@ -40,9 +48,11 @@ export const supabaseClient: SupabaseClient<Database> | null = isSupabaseConfigu
 // Log configuration status for developers (not users)
 if (import.meta.env.DEV) {
   if (isSupabaseConfigured) {
-    console.info('[Supabase] ✓ Configured - auth/history/saving enabled');
+    console.info('[Supabase] ✓ Fully configured - search + auth/history/saving enabled');
+  } else if (SUPABASE_URL) {
+    console.info('[Supabase] ◐ Partially configured - search enabled, auth/history/saving disabled');
+    console.info('[Supabase] To enable auth features: Set VITE_SUPABASE_PUBLISHABLE_KEY');
   } else {
-    console.info('[Supabase] ○ Not configured - search will work, but auth/history/saving disabled');
-    console.info('[Supabase] To enable: Set VITE_SUPABASE_URL and VITE_SUPABASE_PUBLISHABLE_KEY');
+    console.info('[Supabase] ✗ Not configured - set VITE_SUPABASE_URL to enable search');
   }
 }

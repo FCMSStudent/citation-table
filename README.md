@@ -22,18 +22,19 @@ A React + Vite research assistant that provides citation-grounded evidence extra
    npm install
    ```
 
-2. **Configure environment variables (OPTIONAL)**
+2. **Configure environment variables**
    
-   **Search works without any configuration!** Supabase is only needed for auth/history/saving features.
+   The app requires your Supabase project URL to function (the backend research API is hosted as a Supabase edge function). The publishable key is optional and only needed for auth/history/saving features.
    
-   To enable Supabase features:
    ```sh
    # Copy the example file
    cp .env.example .env.local
    
-   # Edit .env.local and add your Supabase credentials
+   # Edit .env.local and add your Supabase URL (REQUIRED)
    # Get these from: https://supabase.com/dashboard (Project Settings > API)
    VITE_SUPABASE_URL=https://your-project.supabase.co
+   
+   # Optionally add the publishable key for auth/history/saving features
    VITE_SUPABASE_PUBLISHABLE_KEY=your-anon-public-key
    ```
 
@@ -44,16 +45,20 @@ A React + Vite research assistant that provides citation-grounded evidence extra
    
    The app will run at http://localhost:8080
 
-### What Works Without Supabase?
+### What Works Without Supabase Publishable Key?
+
+When you have the URL configured but not the publishable key:
 
 ✅ **Full search functionality** - OpenAlex + Semantic Scholar queries  
 ✅ **AI extraction** - Structured data extraction from papers  
 ✅ **Export features** - RIS citations and narrative summaries  
 ✅ **All UI features** - Filtering, sorting, viewing results
 
-❌ **Authentication** - Requires Supabase  
-❌ **Search history** - Requires Supabase  
-❌ **Saved queries** - Requires Supabase
+❌ **Authentication** - Requires publishable key  
+❌ **Search history** - Requires publishable key  
+❌ **Saved queries** - Requires publishable key
+
+**Note:** VITE_SUPABASE_URL is required because the research API is a Supabase edge function.
 
 ## Deployment
 
@@ -63,9 +68,9 @@ A React + Vite research assistant that provides citation-grounded evidence extra
 
 2. **Connect your repository** to your hosting provider
 
-3. **Set environment variables** in hosting provider dashboard (OPTIONAL):
-   - `VITE_SUPABASE_URL` - Your Supabase project URL
-   - `VITE_SUPABASE_PUBLISHABLE_KEY` - Your Supabase anon/public key
+3. **Set environment variables** in hosting provider dashboard:
+   - `VITE_SUPABASE_URL` - Your Supabase project URL (**REQUIRED** for search)
+   - `VITE_SUPABASE_PUBLISHABLE_KEY` - Your Supabase anon/public key (optional, for auth/history/saving)
 
 4. **Deploy** - The app will work immediately for search functionality
 
