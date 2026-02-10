@@ -6,7 +6,7 @@ import { PreprintBadge } from './PreprintBadge';
 import { ReviewTypeBadge } from './ReviewTypeBadge';
 import { SourceBadge } from './SourceBadge';
 import { Button } from './ui/button';
-import { cn } from '@/lib/utils';
+import { cn, sanitizeUrl } from '@/lib/utils';
 import { downloadRISFile } from '@/lib/risExport';
 import { generateNarrativeSummary } from '@/lib/narrativeSummary';
 
@@ -374,7 +374,7 @@ export function ResultsTable({
                               <div className="flex gap-3">
                                 {result.citation.doi && (
                                   <a 
-                                    href={`https://doi.org/${result.citation.doi}`}
+                                    href={sanitizeUrl(`https://doi.org/${result.citation.doi}`)}
                                     target="_blank"
                                     rel="noopener noreferrer"
                                     className="inline-flex items-center gap-1 text-primary hover:underline text-sm"
@@ -387,7 +387,7 @@ export function ResultsTable({
                                 
                                 {result.citation.openalex_id && (
                                   <a 
-                                    href={result.citation.openalex_id}
+                                    href={sanitizeUrl(result.citation.openalex_id)}
                                     target="_blank"
                                     rel="noopener noreferrer"
                                     className="inline-flex items-center gap-1 text-primary hover:underline text-sm"
@@ -400,7 +400,7 @@ export function ResultsTable({
                                 
                                 {result.source === "semantic_scholar" && (
                                   <a 
-                                    href={`https://www.semanticscholar.org/paper/${result.study_id}`}
+                                    href={sanitizeUrl(`https://www.semanticscholar.org/paper/${result.study_id}`)}
                                     target="_blank"
                                     rel="noopener noreferrer"
                                     className="inline-flex items-center gap-1 text-primary hover:underline text-sm"

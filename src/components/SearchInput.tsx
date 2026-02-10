@@ -36,6 +36,7 @@ export function SearchInput({ onSearch, isLoading }: SearchInputProps) {
             className="research-input pl-12 pr-28"
             disabled={isLoading}
             aria-label="Research question"
+            maxLength={500}
           />
           <Button
             type="submit"
