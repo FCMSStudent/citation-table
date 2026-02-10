@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useCallback, memo } from 'react';
 import { ChevronDown, ChevronUp, ChevronRight, ExternalLink, Download, FileText, Code } from 'lucide-react';
 import type { StudyResult, SortField, SortDirection } from '@/types/research';
 import { StudyBadge } from './StudyBadge';
@@ -22,6 +22,178 @@ interface ResultsTableProps {
 function NullValue({ text = "Not reported" }: { text?: string }) {
   return <span className="null-value">{text}</span>;
 }
+
+/**
+ * Optimized ResultRow component that uses React.memo to prevent unnecessary re-renders
+ * when other rows are toggled. This reduces the rendering work from O(N) to O(1)
+ * for row expansion/collapse interactions.
+ */
+const ResultRow = memo(({
+  result,
+  isExpanded,
+  onToggle
+}: {
+  result: StudyResult;
+  isExpanded: boolean;
+  onToggle: (id: string) => void;
+}) => {
+  return (
+    <>
+      <tr
+        className="cursor-pointer"
+        onClick={() => onToggle(result.study_id)}
+      >
+        <td className="w-8">
+          <ChevronRight
+            className={cn(
+              "h-4 w-4 text-muted-foreground transition-transform",
+              isExpanded && "rotate-90"
+            )}
+          />
+        </td>
+        <td className="max-w-md">
+          <div className="line-clamp-2 font-medium">
+            {result.title}
+          </div>
+        </td>
+        <td className="whitespace-nowrap">{result.year}</td>
+        <td>
+          <StudyBadge design={result.study_design} />
+        </td>
+        <td>
+          <div className="flex flex-col gap-1">
+            <PreprintBadge status={result.preprint_status} />
+            <ReviewTypeBadge reviewType={result.review_type} />
+            <SourceBadge source={result.source} citationCount={result.citationCount} />
+          </div>
+        </td>
+        <td className="whitespace-nowrap">
+          {result.sample_size !== null
+            ? result.sample_size.toLocaleString()
+            : <NullValue />}
+        </td>
+        <td className="max-w-2xl">
+          {result.outcomes?.length > 0 ? (
+            <ul className="list-disc list-inside space-y-1 text-sm">
+              {result.outcomes.map((outcome, idx) => (
+                <li key={idx}>
+                  <strong>{outcome.outcome_measured}:</strong>{' '}
+                  {outcome.key_result || <NullValue text="Not reported" />}
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <NullValue text="No outcomes reported" />
+          )}
+        </td>
+      </tr>
+      {isExpanded && (
+        <tr>
+          <td colSpan={7} className="p-0">
+            <div className="citation-panel">
+              <div className="space-y-3">
+                <div>
+                  <h4 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground mb-1">
+                    Citation
+                  </h4>
+                  <p className="text-foreground">{result.citation.formatted}</p>
+                  <div className="mt-1 flex gap-3 text-xs text-muted-foreground">
+                    {result.citation.doi && (
+                      <span>DOI: {result.citation.doi}</span>
+                    )}
+                    {result.citation.pubmed_id && (
+                      <span>PMID: {result.citation.pubmed_id}</span>
+                    )}
+                  </div>
+                </div>
+
+                {result.population && (
+                  <div>
+                    <h4 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground mb-1">
+                      Population (Verbatim)
+                    </h4>
+                    <p className="text-foreground">{result.population}</p>
+                  </div>
+                )}
+
+                {result.outcomes?.length > 0 && (
+                  <div>
+                    <h4 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground mb-1">
+                      Supporting Text (Per Outcome)
+                    </h4>
+                    {result.outcomes.map((outcome, idx) => (
+                      <blockquote
+                        key={idx}
+                        className="border-l-2 border-primary/30 pl-3 italic text-foreground mb-2"
+                      >
+                        <div className="text-xs font-medium not-italic mb-1">
+                          {outcome.outcome_measured}:
+                        </div>
+                        "{outcome.citation_snippet}"
+                      </blockquote>
+                    ))}
+                  </div>
+                )}
+
+                {result.abstract_excerpt && (
+                  <div>
+                    <h4 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground mb-1">
+                      Abstract Excerpt
+                    </h4>
+                    <blockquote className="border-l-2 border-primary/30 pl-3 italic text-foreground">
+                      "{result.abstract_excerpt}"
+                    </blockquote>
+                  </div>
+                )}
+
+                <div className="flex gap-3">
+                  {result.citation.doi && (
+                    <a
+                      href={`https://doi.org/${result.citation.doi}`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="inline-flex items-center gap-1 text-primary hover:underline text-sm"
+                      onClick={(e) => e.stopPropagation()}
+                    >
+                      View DOI
+                      <ExternalLink className="h-3 w-3" />
+                    </a>
+                  )}
+
+                  {result.citation.openalex_id && (
+                    <a
+                      href={result.citation.openalex_id}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="inline-flex items-center gap-1 text-primary hover:underline text-sm"
+                      onClick={(e) => e.stopPropagation()}
+                    >
+                      View on OpenAlex
+                      <ExternalLink className="h-3 w-3" />
+                    </a>
+                  )}
+
+                  {result.source === "semantic_scholar" && (
+                    <a
+                      href={`https://www.semanticscholar.org/paper/${result.study_id}`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="inline-flex items-center gap-1 text-primary hover:underline text-sm"
+                      onClick={(e) => e.stopPropagation()}
+                    >
+                      View on Semantic Scholar
+                      <ExternalLink className="h-3 w-3" />
+                    </a>
+                  )}
+                </div>
+              </div>
+            </div>
+          </td>
+        </tr>
+      )}
+    </>
+  );
+});
 
 function SortableHeader({ 
   label, 
@@ -69,7 +241,8 @@ export function ResultsTable({
   const [showNarrative, setShowNarrative] = useState(false);
   const [showJSON, setShowJSON] = useState(false);
 
-  const toggleRow = (id: string) => {
+  // Memoize toggleRow handler to prevent prop stability issues with ResultRow
+  const toggleRow = useCallback((id: string) => {
     setExpandedRows(prev => {
       const next = new Set(prev);
       if (next.has(id)) {
@@ -79,7 +252,7 @@ export function ResultsTable({
       }
       return next;
     });
-  };
+  }, []);
 
   const handleSort = (field: SortField) => {
     if (sortField === field) {
@@ -244,167 +417,14 @@ export function ResultsTable({
               </tr>
             </thead>
             <tbody>
-              {sortedResults.map((result) => {
-                const isExpanded = expandedRows.has(result.study_id);
-                
-                return (
-                  <>
-                    <tr 
-                      key={result.study_id}
-                      className="cursor-pointer"
-                      onClick={() => toggleRow(result.study_id)}
-                    >
-                      <td className="w-8">
-                        <ChevronRight 
-                          className={cn(
-                            "h-4 w-4 text-muted-foreground transition-transform",
-                            isExpanded && "rotate-90"
-                          )} 
-                        />
-                      </td>
-                      <td className="max-w-md">
-                        <div className="line-clamp-2 font-medium">
-                          {result.title}
-                        </div>
-                      </td>
-                      <td className="whitespace-nowrap">{result.year}</td>
-                      <td>
-                        <StudyBadge design={result.study_design} />
-                      </td>
-                      <td>
-                        <div className="flex flex-col gap-1">
-                          <PreprintBadge status={result.preprint_status} />
-                          <ReviewTypeBadge reviewType={result.review_type} />
-                          <SourceBadge source={result.source} citationCount={result.citationCount} />
-                        </div>
-                      </td>
-                      <td className="whitespace-nowrap">
-                        {result.sample_size !== null 
-                          ? result.sample_size.toLocaleString() 
-                          : <NullValue />}
-                      </td>
-                      <td className="max-w-2xl">
-                        {result.outcomes?.length > 0 ? (
-                          <ul className="list-disc list-inside space-y-1 text-sm">
-                            {result.outcomes.map((outcome, idx) => (
-                              <li key={idx}>
-                                <strong>{outcome.outcome_measured}:</strong>{' '}
-                                {outcome.key_result || <NullValue text="Not reported" />}
-                              </li>
-                            ))}
-                          </ul>
-                        ) : (
-                          <NullValue text="No outcomes reported" />
-                        )}
-                      </td>
-                    </tr>
-                    {isExpanded && (
-                      <tr key={`${result.study_id}-expanded`}>
-                        <td colSpan={7} className="p-0">
-                          <div className="citation-panel">
-                            <div className="space-y-3">
-                              <div>
-                                <h4 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground mb-1">
-                                  Citation
-                                </h4>
-                                <p className="text-foreground">{result.citation.formatted}</p>
-                                <div className="mt-1 flex gap-3 text-xs text-muted-foreground">
-                                  {result.citation.doi && (
-                                    <span>DOI: {result.citation.doi}</span>
-                                  )}
-                                  {result.citation.pubmed_id && (
-                                    <span>PMID: {result.citation.pubmed_id}</span>
-                                  )}
-                                </div>
-                              </div>
-                              
-                              {result.population && (
-                                <div>
-                                  <h4 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground mb-1">
-                                    Population (Verbatim)
-                                  </h4>
-                                  <p className="text-foreground">{result.population}</p>
-                                </div>
-                              )}
-                              
-                              {result.outcomes?.length > 0 && (
-                                <div>
-                                  <h4 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground mb-1">
-                                    Supporting Text (Per Outcome)
-                                  </h4>
-                                  {result.outcomes.map((outcome, idx) => (
-                                    <blockquote 
-                                      key={idx} 
-                                      className="border-l-2 border-primary/30 pl-3 italic text-foreground mb-2"
-                                    >
-                                      <div className="text-xs font-medium not-italic mb-1">
-                                        {outcome.outcome_measured}:
-                                      </div>
-                                      "{outcome.citation_snippet}"
-                                    </blockquote>
-                                  ))}
-                                </div>
-                              )}
-                              
-                              {result.abstract_excerpt && (
-                                <div>
-                                  <h4 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground mb-1">
-                                    Abstract Excerpt
-                                  </h4>
-                                  <blockquote className="border-l-2 border-primary/30 pl-3 italic text-foreground">
-                                    "{result.abstract_excerpt}"
-                                  </blockquote>
-                                </div>
-                              )}
-                              
-                              <div className="flex gap-3">
-                                {result.citation.doi && (
-                                  <a 
-                                    href={`https://doi.org/${result.citation.doi}`}
-                                    target="_blank"
-                                    rel="noopener noreferrer"
-                                    className="inline-flex items-center gap-1 text-primary hover:underline text-sm"
-                                    onClick={(e) => e.stopPropagation()}
-                                  >
-                                    View DOI
-                                    <ExternalLink className="h-3 w-3" />
-                                  </a>
-                                )}
-                                
-                                {result.citation.openalex_id && (
-                                  <a 
-                                    href={result.citation.openalex_id}
-                                    target="_blank"
-                                    rel="noopener noreferrer"
-                                    className="inline-flex items-center gap-1 text-primary hover:underline text-sm"
-                                    onClick={(e) => e.stopPropagation()}
-                                  >
-                                    View on OpenAlex
-                                    <ExternalLink className="h-3 w-3" />
-                                  </a>
-                                )}
-                                
-                                {result.source === "semantic_scholar" && (
-                                  <a 
-                                    href={`https://www.semanticscholar.org/paper/${result.study_id}`}
-                                    target="_blank"
-                                    rel="noopener noreferrer"
-                                    className="inline-flex items-center gap-1 text-primary hover:underline text-sm"
-                                    onClick={(e) => e.stopPropagation()}
-                                  >
-                                    View on Semantic Scholar
-                                    <ExternalLink className="h-3 w-3" />
-                                  </a>
-                                )}
-                              </div>
-                            </div>
-                          </div>
-                        </td>
-                      </tr>
-                    )}
-                  </>
-                );
-              })}
+              {sortedResults.map((result) => (
+                <ResultRow
+                  key={result.study_id}
+                  result={result}
+                  isExpanded={expandedRows.has(result.study_id)}
+                  onToggle={toggleRow}
+                />
+              ))}
             </tbody>
           </table>
         </div>
