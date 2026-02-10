@@ -18,7 +18,7 @@ import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 import type { Database } from '@/integrations/supabase/types';
 
 // Support multiple common environment variable names
-const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL ?? '';
+export const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL ?? '';
 
 const SUPABASE_KEY = 
   import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY ?? 
@@ -53,6 +53,6 @@ if (import.meta.env.DEV) {
     console.info('[Supabase] ◐ Partially configured - search enabled, auth/history/saving disabled');
     console.info('[Supabase] To enable auth features: Set VITE_SUPABASE_PUBLISHABLE_KEY');
   } else {
-    console.info('[Supabase] ✗ Not configured - set VITE_SUPABASE_URL to enable search');
+    console.info('[Supabase] ⚠ Not configured - set VITE_SUPABASE_URL to enable search');
   }
 }

@@ -60,6 +60,8 @@ When you have the URL configured but not the publishable key:
 
 **Note:** VITE_SUPABASE_URL is required because the research API is a Supabase edge function.
 
+**Without URL configured:** If you try to search without setting VITE_SUPABASE_URL, you'll see an error: "Cannot search: VITE_SUPABASE_URL is not set. Please configure your environment variables."
+
 ## Deployment
 
 ### Deploy to Vercel/Netlify/Other Hosting

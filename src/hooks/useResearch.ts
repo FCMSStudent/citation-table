@@ -1,5 +1,5 @@
 import { useState, useCallback } from 'react';
-import { supabaseClient, isSupabaseConfigured } from '@/lib/supabase';
+import { supabaseClient, isSupabaseConfigured, SUPABASE_URL } from '@/lib/supabase';
 import type { StudyResult, ResearchResponse } from '@/types/research';
 
 interface UseResearchReturn {
@@ -53,8 +53,6 @@ export function useResearch(): UseResearchReturn {
       } else {
         // Direct fetch to edge function when Supabase not configured
         // This works because edge functions are publicly accessible via their URL
-        const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL;
-        
         if (!SUPABASE_URL) {
           throw new Error('Cannot search: VITE_SUPABASE_URL is not set. Please configure your environment variables.');
         }
