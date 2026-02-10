@@ -1,4 +1,100 @@
-# Welcome to your Lovable project
+# Research Assistant - Citation Table
+
+A React + Vite research assistant that provides citation-grounded evidence extraction from scientific literature using OpenAlex and Semantic Scholar APIs.
+
+## Features
+
+- **Smart Literature Search**: Searches OpenAlex (25 papers) + Semantic Scholar (25 papers) in parallel
+- **AI-Powered Extraction**: Uses Google Gemini to extract structured study data from abstracts
+- **Citation Grounding**: Every result is tied to specific papers with DOI/PubMed/OpenAlex IDs
+- **Query Normalization**: Automatically converts evaluative language to neutral medical terms
+- **Export Options**: Download results as RIS citations or narrative summaries
+- **Optional Supabase Integration**: Auth, search history, and saved queries (when configured)
+
+## Quick Start
+
+### Local Development Setup
+
+1. **Clone and install dependencies**
+   ```sh
+   git clone <YOUR_GIT_URL>
+   cd <YOUR_PROJECT_NAME>
+   npm install
+   ```
+
+2. **Configure environment variables**
+   
+   The app requires your Supabase project URL to function (the backend research API is hosted as a Supabase edge function). The publishable key is optional and only needed for auth/history/saving features.
+   
+   ```sh
+   # Copy the example file
+   cp .env.example .env.local
+   
+   # Edit .env.local and add your Supabase URL (REQUIRED)
+   # Get these from: https://supabase.com/dashboard (Project Settings > API)
+   VITE_SUPABASE_URL=https://your-project.supabase.co
+   
+   # Optionally add the publishable key for auth/history/saving features
+   VITE_SUPABASE_PUBLISHABLE_KEY=your-anon-public-key
+   ```
+
+3. **Start development server**
+   ```sh
+   npm run dev
+   ```
+   
+   The app will run at http://localhost:8080
+
+### What Works Without Supabase Publishable Key?
+
+When you have the URL configured but not the publishable key:
+
+✅ **Full search functionality** - OpenAlex + Semantic Scholar queries  
+✅ **AI extraction** - Structured data extraction from papers  
+✅ **Export features** - RIS citations and narrative summaries  
+✅ **All UI features** - Filtering, sorting, viewing results
+
+❌ **Authentication** - Requires publishable key  
+❌ **Search history** - Requires publishable key  
+❌ **Saved queries** - Requires publishable key
+
+**Note:** VITE_SUPABASE_URL is required because the research API is a Supabase edge function.
+
+**Without URL configured:** If you try to search without setting VITE_SUPABASE_URL, you'll see an error: "Cannot search: VITE_SUPABASE_URL is not set. Please configure your environment variables."
+
+## Deployment
+
+### Deploy to Vercel/Netlify/Other Hosting
+
+1. **Push your code** to GitHub
+
+2. **Connect your repository** to your hosting provider
+
+3. **Set environment variables** in hosting provider dashboard:
+   - `VITE_SUPABASE_URL` - Your Supabase project URL (**REQUIRED** for search)
+   - `VITE_SUPABASE_PUBLISHABLE_KEY` - Your Supabase anon/public key (optional, for auth/history/saving)
+
+4. **Deploy** - The app will work immediately for search functionality
+
+### Supabase Edge Function Setup
+
+The `/research` edge function needs to be deployed to Supabase:
+
+1. Install Supabase CLI: https://supabase.com/docs/guides/cli
+2. Link your project: `supabase link --project-ref your-project-ref`
+3. Deploy functions: `supabase functions deploy research`
+4. Set the `LOVABLE_API_KEY` secret in your Supabase project
+
+## Project Structure
+
+- **Frontend** (React + Vite + TypeScript)
+  - `/src/pages/Index.tsx` - Main search page
+  - `/src/hooks/useResearch.ts` - Search logic
+  - `/src/components/` - UI components
+  - `/src/lib/supabase.ts` - Optional Supabase configuration
+
+- **Backend** (Supabase Edge Functions)
+  - `/supabase/functions/research/` - Research API that calls OpenAlex + Semantic Scholar
 
 ## Project info
 
