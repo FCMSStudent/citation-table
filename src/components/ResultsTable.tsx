@@ -37,20 +37,23 @@ function SortableHeader({
   onSort: (field: SortField) => void;
 }) {
   const isActive = currentSort === field;
+  const sortOrder = isActive ? (currentDirection === 'asc' ? 'ascending' : 'descending') : 'none';
   
   return (
-    <th 
-      className="cursor-pointer select-none hover:bg-secondary/50 transition-colors"
-      onClick={() => onSort(field)}
-    >
-      <div className="flex items-center gap-1">
+    <th aria-sort={sortOrder} className="p-0">
+      <button
+        type="button"
+        onClick={() => onSort(field)}
+        className="flex items-center gap-1 w-full h-full px-4 py-3 text-left font-semibold hover:bg-secondary/50 transition-colors focus-ring"
+        aria-label={`Sort by ${label}${isActive ? ` (${currentDirection === 'asc' ? 'ascending' : 'descending'})` : ''}`}
+      >
         {label}
         {isActive && (
           currentDirection === 'asc' 
             ? <ChevronUp className="h-4 w-4" />
             : <ChevronDown className="h-4 w-4" />
         )}
-      </div>
+      </button>
     </th>
   );
 }
@@ -251,16 +254,27 @@ export function ResultsTable({
                   <>
                     <tr 
                       key={result.study_id}
-                      className="cursor-pointer"
+                      className="cursor-pointer hover:bg-[hsl(var(--table-row-hover))] transition-colors"
                       onClick={() => toggleRow(result.study_id)}
                     >
                       <td className="w-8">
-                        <ChevronRight 
-                          className={cn(
-                            "h-4 w-4 text-muted-foreground transition-transform",
-                            isExpanded && "rotate-90"
-                          )} 
-                        />
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            toggleRow(result.study_id);
+                          }}
+                          className="flex items-center justify-center h-8 w-8 rounded-md hover:bg-secondary focus-ring transition-colors"
+                          aria-expanded={isExpanded}
+                          aria-label={isExpanded ? "Collapse study details" : "Expand study details"}
+                        >
+                          <ChevronRight
+                            className={cn(
+                              "h-4 w-4 text-muted-foreground transition-transform",
+                              isExpanded && "rotate-90"
+                            )}
+                          />
+                        </button>
                       </td>
                       <td className="max-w-md">
                         <div className="line-clamp-2 font-medium">
