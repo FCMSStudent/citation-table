@@ -1,5 +1,5 @@
 import { useState, useCallback } from 'react';
-import { supabaseClient, isSupabaseConfigured, SUPABASE_URL } from '@/lib/supabase';
+import { supabase } from '@/integrations/supabase/client';
 import type { StudyResult, ResearchResponse } from '@/types/research';
 
 interface UseResearchReturn {
@@ -39,9 +39,8 @@ export function useResearch(): UseResearchReturn {
     try {
       let data: ResearchResponse | null = null;
 
-      if (isSupabaseConfigured && supabaseClient) {
-        // Use Supabase client when configured
-        const { data: responseData, error: fnError } = await supabaseClient.functions.invoke<ResearchResponse>('research', {
+      if (supabase) {
+        const { data: responseData, error: fnError } = await supabase.functions.invoke<ResearchResponse>('research', {
           body: { question },
         });
 
@@ -51,17 +50,14 @@ export function useResearch(): UseResearchReturn {
 
         data = responseData;
       } else {
-        // Direct fetch to edge function when Supabase not configured
-        // This works because edge functions are publicly accessible via their URL
-        if (!SUPABASE_URL) {
-          throw new Error('Cannot search: VITE_SUPABASE_URL is not set. Please configure your environment variables.');
+        const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
+        if (!supabaseUrl) {
+          throw new Error('Cannot search: backend is not configured.');
         }
 
-        const response = await fetch(`${SUPABASE_URL}/functions/v1/research`, {
+        const response = await fetch(`${supabaseUrl}/functions/v1/research`, {
           method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
+          headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ question }),
         });
 
