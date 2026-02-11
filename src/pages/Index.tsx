@@ -26,6 +26,13 @@ const Index = () => {
 
   return (
     <div className="min-h-screen bg-background">
+      <a
+        href="#main-content"
+        className="sr-only focus:not-sr-only focus:absolute focus:top-4 focus:left-4 focus:z-[100] focus:px-4 focus:py-2 focus:bg-primary focus:text-primary-foreground focus:rounded-md focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 transition-all"
+      >
+        Skip to main content
+      </a>
+
       {/* Header */}
       <header className="border-b border-border bg-card/50 backdrop-blur-sm sticky top-0 z-10">
         <div className="container max-w-7xl mx-auto px-4 py-4">
@@ -42,7 +49,7 @@ const Index = () => {
       </header>
 
       {/* Main content */}
-      <main className="container max-w-7xl mx-auto px-4 py-8">
+      <main id="main-content" className="container max-w-7xl mx-auto px-4 py-8">
         {/* Search section */}
         <section className="mb-8">
           <SearchInput onSearch={search} isLoading={isLoading} />
