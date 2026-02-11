@@ -1,14 +1,11 @@
-import { useState, useMemo, useCallback, memo } from 'react';
-import { ChevronDown, ChevronUp, ChevronRight, ExternalLink, Download, FileText, Code } from 'lucide-react';
-import type { StudyResult, SortField, SortDirection } from '@/types/research';
-import { StudyBadge } from './StudyBadge';
-import { PreprintBadge } from './PreprintBadge';
-import { ReviewTypeBadge } from './ReviewTypeBadge';
-import { SourceBadge } from './SourceBadge';
+import { useState, useMemo } from 'react';
+import { Download, FileText, Code, Eye, EyeOff } from 'lucide-react';
+import type { StudyResult } from '@/types/research';
+import { StudyCard } from './StudyCard';
 import { Button } from './ui/button';
-import { cn, sanitizeUrl } from '@/lib/utils';
 import { downloadRISFile } from '@/lib/risExport';
 import { generateNarrativeSummary } from '@/lib/narrativeSummary';
+import { sortByRelevance, isLowValueStudy } from '@/utils/relevanceScore';
 
 interface ResultsTableProps {
   results: StudyResult[];
@@ -19,227 +16,7 @@ interface ResultsTableProps {
   semanticScholarCount?: number;
 }
 
-function NullValue({ text = "Not reported" }: { text?: string }) {
-  return <span className="null-value">{text}</span>;
-}
 
-function SortableHeader({ 
-  label, 
-  field, 
-  currentSort, 
-  currentDirection, 
-  onSort 
-}: { 
-  label: string; 
-  field: SortField; 
-  currentSort: SortField | null; 
-  currentDirection: SortDirection; 
-  onSort: (field: SortField) => void;
-}) {
-  const isActive = currentSort === field;
-  const sortOrder = isActive ? (currentDirection === 'asc' ? 'ascending' : 'descending') : 'none';
-  
-  return (
-    <th aria-sort={sortOrder} className="p-0">
-      <button
-        type="button"
-        onClick={() => onSort(field)}
-        className="flex items-center gap-1 w-full h-full px-4 py-3 text-left font-semibold hover:bg-secondary/50 transition-colors focus-ring"
-        aria-label={`Sort by ${label}${isActive ? ` (${currentDirection === 'asc' ? 'ascending' : 'descending'})` : ''}`}
-      >
-        {label}
-        {isActive && (
-          currentDirection === 'asc' 
-            ? <ChevronUp className="h-4 w-4" />
-            : <ChevronDown className="h-4 w-4" />
-        )}
-      </button>
-    </th>
-  );
-}
-
-/**
- * Optimized row component that only re-renders when its specific study data
- * or expansion state changes. This prevents O(N) re-renders when a single
- * row is toggled in the parent table.
- */
-const StudyRow = memo(({
-  result,
-  isExpanded,
-  onToggle
-}: {
-  result: StudyResult;
-  isExpanded: boolean;
-  onToggle: (id: string) => void;
-}) => {
-  return (
-    <>
-      <tr
-        className="cursor-pointer hover:bg-[hsl(var(--table-row-hover))] transition-colors"
-        onClick={() => onToggle(result.study_id)}
-      >
-        <td className="w-8">
-          <button
-            type="button"
-            onClick={(e) => {
-              e.stopPropagation();
-              onToggle(result.study_id);
-            }}
-            className="flex items-center justify-center h-8 w-8 rounded-md hover:bg-secondary focus-ring transition-colors"
-            aria-expanded={isExpanded}
-            aria-label={isExpanded ? "Collapse study details" : "Expand study details"}
-          >
-            <ChevronRight
-              className={cn(
-                "h-4 w-4 text-muted-foreground transition-transform",
-                isExpanded && "rotate-90"
-              )}
-            />
-          </button>
-        </td>
-        <td className="max-w-md">
-          <div className="line-clamp-2 font-medium">
-            {result.title}
-          </div>
-        </td>
-        <td className="whitespace-nowrap">{result.year}</td>
-        <td>
-          <StudyBadge design={result.study_design} />
-        </td>
-        <td>
-          <div className="flex flex-col gap-1">
-            <PreprintBadge status={result.preprint_status} />
-            <ReviewTypeBadge reviewType={result.review_type} />
-            <SourceBadge source={result.source} citationCount={result.citationCount} />
-          </div>
-        </td>
-        <td className="whitespace-nowrap">
-          {result.sample_size !== null
-            ? result.sample_size.toLocaleString()
-            : <NullValue />}
-        </td>
-        <td className="max-w-2xl">
-          {result.outcomes?.length > 0 ? (
-            <ul className="list-disc list-inside space-y-1 text-sm">
-              {result.outcomes.map((outcome, idx) => (
-                <li key={idx}>
-                  <strong>{outcome.outcome_measured}:</strong>{' '}
-                  {outcome.key_result || <NullValue text="Not reported" />}
-                </li>
-              ))}
-            </ul>
-          ) : (
-            <NullValue text="No outcomes reported" />
-          )}
-        </td>
-      </tr>
-      {isExpanded && (
-        <tr key={`${result.study_id}-expanded`}>
-          <td colSpan={7} className="p-0">
-            <div className="citation-panel">
-              <div className="space-y-3">
-                <div>
-                  <h4 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground mb-1">
-                    Citation
-                  </h4>
-                  <p className="text-foreground">{result.citation.formatted}</p>
-                  <div className="mt-1 flex gap-3 text-xs text-muted-foreground">
-                    {result.citation.doi && (
-                      <span>DOI: {result.citation.doi}</span>
-                    )}
-                    {result.citation.pubmed_id && (
-                      <span>PMID: {result.citation.pubmed_id}</span>
-                    )}
-                  </div>
-                </div>
-
-                {result.population && (
-                  <div>
-                    <h4 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground mb-1">
-                      Population (Verbatim)
-                    </h4>
-                    <p className="text-foreground">{result.population}</p>
-                  </div>
-                )}
-
-                {result.outcomes?.length > 0 && (
-                  <div>
-                    <h4 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground mb-1">
-                      Supporting Text (Per Outcome)
-                    </h4>
-                    {result.outcomes.map((outcome, idx) => (
-                      <blockquote
-                        key={idx}
-                        className="border-l-2 border-primary/30 pl-3 italic text-foreground mb-2"
-                      >
-                        <div className="text-xs font-medium not-italic mb-1">
-                          {outcome.outcome_measured}:
-                        </div>
-                        "{outcome.citation_snippet}"
-                      </blockquote>
-                    ))}
-                  </div>
-                )}
-
-                {result.abstract_excerpt && (
-                  <div>
-                    <h4 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground mb-1">
-                      Abstract Excerpt
-                    </h4>
-                    <blockquote className="border-l-2 border-primary/30 pl-3 italic text-foreground">
-                      "{result.abstract_excerpt}"
-                    </blockquote>
-                  </div>
-                )}
-
-                <div className="flex gap-3">
-                  {result.citation.doi && (
-                    <a
-                      href={sanitizeUrl(`https://doi.org/${result.citation.doi}`)}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="inline-flex items-center gap-1 text-primary hover:underline text-sm"
-                      onClick={(e) => e.stopPropagation()}
-                    >
-                      View DOI
-                      <ExternalLink className="h-3 w-3" />
-                    </a>
-                  )}
-
-                  {result.citation.openalex_id && (
-                    <a
-                      href={sanitizeUrl(result.citation.openalex_id)}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="inline-flex items-center gap-1 text-primary hover:underline text-sm"
-                      onClick={(e) => e.stopPropagation()}
-                    >
-                      View on OpenAlex
-                      <ExternalLink className="h-3 w-3" />
-                    </a>
-                  )}
-
-                  {result.source === "semantic_scholar" && (
-                    <a
-                      href={sanitizeUrl(`https://www.semanticscholar.org/paper/${result.study_id}`)}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="inline-flex items-center gap-1 text-primary hover:underline text-sm"
-                      onClick={(e) => e.stopPropagation()}
-                    >
-                      View on Semantic Scholar
-                      <ExternalLink className="h-3 w-3" />
-                    </a>
-                  )}
-                </div>
-              </div>
-            </div>
-          </td>
-        </tr>
-      )}
-    </>
-  );
-});
 
 export function ResultsTable({ 
   results, 
@@ -249,63 +26,28 @@ export function ResultsTable({
   openalexCount,
   semanticScholarCount,
 }: ResultsTableProps) {
-  const [expandedRows, setExpandedRows] = useState<Set<string>>(new Set());
-  const [sortField, setSortField] = useState<SortField | null>(null);
-  const [sortDirection, setSortDirection] = useState<SortDirection>('desc');
+  const [showExcludedStudies, setShowExcludedStudies] = useState(false);
   const [showNarrative, setShowNarrative] = useState(false);
   const [showJSON, setShowJSON] = useState(false);
 
-  // Memoize toggle handler to prevent unnecessary re-renders of StudyRow components.
-  // Using functional update pattern to keep dependencies stable.
-  const toggleRow = useCallback((id: string) => {
-    setExpandedRows(prev => {
-      const next = new Set(prev);
-      if (next.has(id)) {
-        next.delete(id);
-      } else {
-        next.add(id);
-      }
-      return next;
-    });
-  }, []);
+  // Sort results by relevance score (descending)
+  const sortedResults = useMemo(() => {
+    return sortByRelevance(results, normalizedQuery || query);
+  }, [results, query, normalizedQuery]);
 
-  const handleSort = (field: SortField) => {
-    if (sortField === field) {
-      setSortDirection(prev => prev === 'asc' ? 'desc' : 'asc');
-    } else {
-      setSortField(field);
-      setSortDirection('desc');
+  // Filter out low-value studies unless toggle is on
+  const filteredResults = useMemo(() => {
+    if (showExcludedStudies) {
+      return sortedResults;
     }
-  };
+    return sortedResults.filter(study => !isLowValueStudy(study));
+  }, [sortedResults, showExcludedStudies]);
+
+  const excludedCount = sortedResults.length - filteredResults.length;
 
   const handleExportRIS = () => {
     downloadRISFile(results, `research-${Date.now()}.ris`);
   };
-
-  const sortedResults = useMemo(() => {
-    if (!sortField) return results;
-    
-    return [...results].sort((a, b) => {
-      const aVal: string | number | null | undefined = a[sortField];
-      const bVal: string | number | null | undefined = b[sortField];
-      
-      // Handle nulls
-      if (aVal === null && bVal === null) return 0;
-      if (aVal === null) return 1;
-      if (bVal === null) return -1;
-      
-      // Compare
-      if (typeof aVal === 'number' && typeof bVal === 'number') {
-        return sortDirection === 'asc' ? aVal - bVal : bVal - aVal;
-      }
-      
-      const strA = String(aVal).toLowerCase();
-      const strB = String(bVal).toLowerCase();
-      return sortDirection === 'asc' 
-        ? strA.localeCompare(strB) 
-        : strB.localeCompare(strA);
-    });
-  }, [results, sortField, sortDirection]);
 
   const narrativeSummary = useMemo(() => {
     return generateNarrativeSummary(results, normalizedQuery || query);
@@ -321,8 +63,13 @@ export function ResultsTable({
       <div className="mb-4 space-y-3">
         <div className="flex items-center justify-between flex-wrap gap-2">
           <div className="text-sm text-muted-foreground">
-            Showing <strong>{results.length}</strong> extracted results from{' '}
+            Showing <strong>{filteredResults.length}</strong> {filteredResults.length === 1 ? 'result' : 'results'} from{' '}
             <strong>{totalPapersSearched}</strong> papers searched
+            {excludedCount > 0 && !showExcludedStudies && (
+              <span className="ml-2 text-amber-600 dark:text-amber-400">
+                ({excludedCount} low-value {excludedCount === 1 ? 'study' : 'studies'} hidden)
+              </span>
+            )}
             {(openalexCount !== undefined || semanticScholarCount !== undefined) && (
               <span className="ml-2">
                 ({openalexCount || 0} OpenAlex, {semanticScholarCount || 0} Semantic Scholar)
@@ -336,6 +83,27 @@ export function ResultsTable({
         
         {/* Action buttons */}
         <div className="flex items-center gap-2 flex-wrap">
+          {excludedCount > 0 && (
+            <Button
+              onClick={() => setShowExcludedStudies(!showExcludedStudies)}
+              variant={showExcludedStudies ? "default" : "outline"}
+              size="sm"
+              className="gap-2"
+            >
+              {showExcludedStudies ? (
+                <>
+                  <EyeOff className="h-4 w-4" />
+                  Hide excluded studies
+                </>
+              ) : (
+                <>
+                  <Eye className="h-4 w-4" />
+                  Show excluded studies ({excludedCount})
+                </>
+              )}
+            </Button>
+          )}
+          
           <Button
             onClick={handleExportRIS}
             variant="outline"
@@ -392,58 +160,32 @@ export function ResultsTable({
         )}
       </div>
 
-      {/* Results table */}
-      <div className="border border-border rounded-lg overflow-hidden bg-card">
-        <div className="overflow-x-auto">
-          <table className="results-table">
-            <thead>
-              <tr>
-                <th className="w-8"></th>
-                <SortableHeader 
-                  label="Title" 
-                  field="title" 
-                  currentSort={sortField} 
-                  currentDirection={sortDirection}
-                  onSort={handleSort}
-                />
-                <SortableHeader 
-                  label="Year" 
-                  field="year" 
-                  currentSort={sortField} 
-                  currentDirection={sortDirection}
-                  onSort={handleSort}
-                />
-                <SortableHeader 
-                  label="Design" 
-                  field="study_design" 
-                  currentSort={sortField} 
-                  currentDirection={sortDirection}
-                  onSort={handleSort}
-                />
-                <th>Status</th>
-                <SortableHeader 
-                  label="N" 
-                  field="sample_size" 
-                  currentSort={sortField} 
-                  currentDirection={sortDirection}
-                  onSort={handleSort}
-                />
-                <th>Outcomes & Results</th>
-              </tr>
-            </thead>
-            <tbody>
-              {sortedResults.map((result) => (
-                <StudyRow
-                  key={result.study_id}
-                  result={result}
-                  isExpanded={expandedRows.has(result.study_id)}
-                  onToggle={toggleRow}
-                />
-              ))}
-            </tbody>
-          </table>
-        </div>
+      {/* Results in card layout */}
+      <div className="space-y-4">
+        {filteredResults.map((result) => (
+          <StudyCard
+            key={result.study_id}
+            study={result}
+            query={normalizedQuery || query}
+            relevanceScore={result.relevanceScore}
+          />
+        ))}
       </div>
+
+      {/* Empty state when all studies are filtered */}
+      {filteredResults.length === 0 && results.length > 0 && (
+        <div className="text-center py-8 text-muted-foreground">
+          <p>All studies have been filtered out.</p>
+          <Button
+            onClick={() => setShowExcludedStudies(true)}
+            variant="outline"
+            size="sm"
+            className="mt-4"
+          >
+            Show {excludedCount} excluded {excludedCount === 1 ? 'study' : 'studies'}
+          </Button>
+        </div>
+      )}
     </div>
   );
 }
