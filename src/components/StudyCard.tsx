@@ -40,11 +40,11 @@ function highlightQueryTerms(text: string, query: string): React.ReactNode {
     );
     
     return isMatch ? (
-      <mark key={i} className="bg-yellow-200 dark:bg-yellow-900 font-medium">
+      <mark key={`${part}-${i}`} className="bg-yellow-200 dark:bg-yellow-900 font-medium">
         {part}
       </mark>
     ) : (
-      part
+      <span key={`${part}-${i}`}>{part}</span>
     );
   });
 }

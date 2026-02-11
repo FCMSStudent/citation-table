@@ -7,6 +7,13 @@ import { downloadRISFile } from '@/lib/risExport';
 import { generateNarrativeSummary } from '@/lib/narrativeSummary';
 import { sortByRelevance, isLowValueStudy } from '@/utils/relevanceScore';
 
+/**
+ * Helper function for pluralization
+ */
+function pluralize(count: number, singular: string, plural: string): string {
+  return count === 1 ? singular : plural;
+}
+
 interface ResultsTableProps {
   results: StudyResult[];
   query: string;
@@ -63,11 +70,11 @@ export function ResultsTable({
       <div className="mb-4 space-y-3">
         <div className="flex items-center justify-between flex-wrap gap-2">
           <div className="text-sm text-muted-foreground">
-            Showing <strong>{filteredResults.length}</strong> {filteredResults.length === 1 ? 'result' : 'results'} from{' '}
+            Showing <strong>{filteredResults.length}</strong> {pluralize(filteredResults.length, 'result', 'results')} from{' '}
             <strong>{totalPapersSearched}</strong> papers searched
             {excludedCount > 0 && !showExcludedStudies && (
               <span className="ml-2 text-amber-600 dark:text-amber-400">
-                ({excludedCount} low-value {excludedCount === 1 ? 'study' : 'studies'} hidden)
+                ({excludedCount} low-value {pluralize(excludedCount, 'study', 'studies')} hidden)
               </span>
             )}
             {(openalexCount !== undefined || semanticScholarCount !== undefined) && (
@@ -182,7 +189,7 @@ export function ResultsTable({
             size="sm"
             className="mt-4"
           >
-            Show {excludedCount} excluded {excludedCount === 1 ? 'study' : 'studies'}
+            Show {excludedCount} excluded {pluralize(excludedCount, 'study', 'studies')}
           </Button>
         </div>
       )}

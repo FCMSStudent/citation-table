@@ -1,6 +1,11 @@
 import type { StudyResult } from '@/types/research';
 
 /**
+ * Minimum number of keywords that must match to indicate both exposure and outcome are present
+ */
+const MIN_KEYWORD_MATCHES = 2;
+
+/**
  * Extract keywords from a research query
  * Simple heuristic: split by common medical research separators
  */
@@ -45,13 +50,13 @@ export function calculateRelevanceScore(study: StudyResult, query: string): numb
   }
   
   // Rule 2: +2 if query keywords appear in outcomes
-  // For simplicity, check if at least 2 keywords match (representing exposure and outcome)
-  if (!hasNoOutcomes && keywords.length >= 2) {
+  // Check if at least MIN_KEYWORD_MATCHES keywords match (representing exposure and outcome)
+  if (!hasNoOutcomes && keywords.length >= MIN_KEYWORD_MATCHES) {
     const matchedKeywords = keywords.filter(keyword => 
       outcomesText.includes(keyword)
     );
     
-    if (matchedKeywords.length >= 2) {
+    if (matchedKeywords.length >= MIN_KEYWORD_MATCHES) {
       score += 2;
     }
   }
