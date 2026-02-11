@@ -111,7 +111,7 @@ describe('Relevance Scoring', () => {
     it('should return true for studies with no outcomes', () => {
       const study = { ...baseStudy, outcomes: [] };
       
-      expect(isLowValueStudy(study)).toBe(true);
+      expect(isLowValueStudy(study, -2)).toBe(true);
     });
 
     it('should return true for studies with "No outcomes reported"', () => {
@@ -126,13 +126,13 @@ describe('Relevance Scoring', () => {
         ]
       };
       
-      expect(isLowValueStudy(study)).toBe(true);
+      expect(isLowValueStudy(study, -2)).toBe(true);
     });
 
     it('should return false for studies with valid outcomes', () => {
       const study = { ...baseStudy };
       
-      expect(isLowValueStudy(study)).toBe(false);
+      expect(isLowValueStudy(study, 1)).toBe(false);
     });
   });
 
