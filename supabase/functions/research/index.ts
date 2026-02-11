@@ -206,14 +206,17 @@ async function searchSemanticScholar(query: string): Promise<UnifiedPaper[]> {
   const fields = "paperId,title,abstract,year,authors,venue,citationCount,publicationTypes,externalIds";
   const url = `https://api.semanticscholar.org/graph/v1/paper/search?query=${encodedQuery}&fields=${fields}&limit=25`;
   
-  console.log(`[SemanticScholar] Searching: ${query}`);
+  const apiKey = Deno.env.get("SEMANTIC_SCHOLAR_API_KEY");
+  console.log(`[SemanticScholar] Searching: ${query}${apiKey ? ' (with API key)' : ' (public tier)'}`);
   
   try {
-    const response = await fetch(url, {
-      headers: {
-        "Accept": "application/json",
-      },
-    });
+    const headers: Record<string, string> = {
+      "Accept": "application/json",
+    };
+    if (apiKey) {
+      headers["x-api-key"] = apiKey;
+    }
+    const response = await fetch(url, { headers });
     
     if (!response.ok) {
       console.error(`[SemanticScholar] API error: ${response.status}`);
