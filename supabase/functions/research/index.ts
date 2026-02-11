@@ -200,6 +200,19 @@ async function searchOpenAlex(query: string): Promise<UnifiedPaper[]> {
   }
 }
 
+// Rate limiter for Semantic Scholar (1 req/sec with API key)
+let lastS2RequestTime = 0;
+async function s2RateLimit() {
+  const now = Date.now();
+  const elapsed = now - lastS2RequestTime;
+  if (elapsed < 1000) {
+    const wait = 1000 - elapsed;
+    console.log(`[SemanticScholar] Rate limiting: waiting ${wait}ms`);
+    await new Promise(resolve => setTimeout(resolve, wait));
+  }
+  lastS2RequestTime = Date.now();
+}
+
 // Query Semantic Scholar API
 async function searchSemanticScholar(query: string): Promise<UnifiedPaper[]> {
   const encodedQuery = encodeURIComponent(query);
@@ -210,6 +223,7 @@ async function searchSemanticScholar(query: string): Promise<UnifiedPaper[]> {
   console.log(`[SemanticScholar] Searching: ${query}${apiKey ? ' (with API key)' : ' (public tier)'}`);
   
   try {
+    await s2RateLimit();
     const headers: Record<string, string> = {
       "Accept": "application/json",
     };
