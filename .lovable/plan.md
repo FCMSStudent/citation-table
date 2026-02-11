@@ -1,27 +1,33 @@
 
 
-# Fix: "Failed to send a request to the Edge Function"
+# Fix: Edge Function Request Failing
 
-## Root Cause
+## Problem
 
-The app has two environment files with **conflicting** values:
+The app is sending requests to the **wrong backend** (`mowfwnpebdfzcbxdrtcb` instead of `amzlrrrhjsqjndbrdume`). This happens because `useResearch.ts` imports from a custom `src/lib/supabase.ts` file instead of the auto-generated client, causing credential mismatches.
 
-| File | URL | Key |
-|------|-----|-----|
-| `.env` (correct) | `https://amzlrrrhjsqjndbrdume.supabase.co` | `eyJhbGci...` |
-| `.env.local` (stale) | `https://mowfwnpebdfzcbxdrtcb.supabase.co` | `sb_publishable_7l6j...` |
+## Fix (2 changes)
 
-Vite loads `.env.local` with **higher priority** than `.env`, so the app connects to the wrong backend -- one that does not have the `research` function deployed. That is why the request fails.
+### 1. Update `useResearch.ts`
+- Replace the import from `@/lib/supabase` with the standard `@/integrations/supabase/client`
+- Use the `supabase` client and `supabaseConfigError` exports from the auto-generated client
+- Fall back to direct fetch using `VITE_SUPABASE_URL` from `import.meta.env` when the client is null
 
-## Fix
+### 2. Delete `src/lib/supabase.ts`
+- This redundant custom client is the source of the wrong-URL issue
+- All Supabase access should go through the auto-generated client
 
-**Delete the `.env.local` file.** That is the only change needed.
+## Technical Details
 
-The auto-generated `.env` already has the correct values for this project's Lovable Cloud backend, where the edge function is deployed.
+In `useResearch.ts`, the key change:
 
-## What happens after the fix
+```typescript
+// Before (broken)
+import { supabaseClient, isSupabaseConfigured, SUPABASE_URL } from '@/lib/supabase';
 
-- The app will use the correct backend URL
-- The `research` edge function will be reachable
-- Search queries will work as expected
+// After (fixed)
+import { supabase } from '@/integrations/supabase/client';
+```
+
+The edge function itself is fine and deployed correctly -- the only issue is the frontend pointing to the wrong URL.
 
