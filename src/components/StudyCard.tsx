@@ -88,7 +88,7 @@ export const StudyCard = memo(({ study, query, relevanceScore, isLowValue = fals
             <div className="mb-2 flex flex-wrap items-center gap-2 text-sm text-muted-foreground">
               <span>{study.year}</span>
               {study.sample_size !== null && <span>• N = {study.sample_size.toLocaleString()}</span>}
-              {study.citationCount !== undefined && study.citationCount !== null && (
+              {study.citationCount != null && (
                 <span>• 📊 {study.citationCount.toLocaleString()} citations</span>
               )}
               {isLowValue && (

@@ -389,7 +389,7 @@ async function enrichWithCrossref(papers: UnifiedPaper[]): Promise<UnifiedPaper[
       if (crossrefData) {
         paper.doi = crossrefData.DOI || paper.doi;
         paper.year = crossrefData.issued?.['date-parts']?.[0]?.[0] || paper.year;
-        paper.citationCount = crossrefData['is-referenced-by-count'] || paper.citationCount;
+        paper.citationCount = crossrefData['is-referenced-by-count'] ?? paper.citationCount;
         
         // Add journal/publisher metadata
         if (crossrefData['container-title']?.[0]) {
