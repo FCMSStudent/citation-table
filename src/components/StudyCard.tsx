@@ -99,18 +99,16 @@ export const StudyCard = memo(({ study, query, relevanceScore, isLowValue = fals
               <span className="rounded border px-2 py-0.5 text-xs font-medium">{study.review_type === 'Meta-analysis' ? 'Meta-analysis' : study.study_design === 'RCT' ? 'RCT' : study.study_design === 'review' || study.review_type === 'Systematic review' ? 'Review' : 'Unknown'}</span>
               <span className={cn('inline-flex items-center gap-1 rounded border px-2 py-0.5 text-xs font-semibold', getScoreBadgeClass(relevanceScore))}>
                 Score: {relevanceScore > 0 ? '+' : ''}{relevanceScore}
-                <TooltipProvider>
-                  <Tooltip>
-                    <TooltipTrigger asChild>
-                      <button type="button" className="inline-flex" aria-label="How relevance score is computed">
-                        <Info className="h-3.5 w-3.5" />
-                      </button>
-                    </TooltipTrigger>
-                    <TooltipContent>
-                      Score based on keyword match + study design weighting. No semantic inference.
-                    </TooltipContent>
-                  </Tooltip>
-                </TooltipProvider>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <button type="button" className="inline-flex focus-ring rounded-full" aria-label="How relevance score is computed">
+                      <Info className="h-3.5 w-3.5" aria-hidden="true" />
+                    </button>
+                  </TooltipTrigger>
+                  <TooltipContent>
+                    Score based on keyword match + study design weighting. No semantic inference.
+                  </TooltipContent>
+                </Tooltip>
               </span>
             </div>
 
@@ -166,9 +164,14 @@ export const StudyCard = memo(({ study, query, relevanceScore, isLowValue = fals
           size="sm"
           onClick={() => setIsExpanded(!isExpanded)}
           className="w-full justify-between hover:bg-secondary/50"
+          aria-expanded={isExpanded}
         >
           <span className="text-xs font-medium">{isExpanded ? 'Hide details' : 'Show details'}</span>
-          {isExpanded ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
+          {isExpanded ? (
+            <ChevronUp className="h-4 w-4" aria-hidden="true" />
+          ) : (
+            <ChevronDown className="h-4 w-4" aria-hidden="true" />
+          )}
         </Button>
 
         {isExpanded && (
@@ -204,10 +207,10 @@ export const StudyCard = memo(({ study, query, relevanceScore, isLowValue = fals
                   href={sanitizeUrl(`https://doi.org/${study.citation.doi}`)}
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="inline-flex items-center gap-1 text-sm text-primary hover:underline"
+                  className="inline-flex items-center gap-1 text-sm text-primary hover:underline focus-ring rounded"
                 >
                   View DOI
-                  <ExternalLink className="h-3 w-3" />
+                  <ExternalLink className="h-3 w-3" aria-hidden="true" />
                 </a>
               )}
 
@@ -216,10 +219,10 @@ export const StudyCard = memo(({ study, query, relevanceScore, isLowValue = fals
                   href={sanitizeUrl(study.citation.openalex_id)}
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="inline-flex items-center gap-1 text-sm text-primary hover:underline"
+                  className="inline-flex items-center gap-1 text-sm text-primary hover:underline focus-ring rounded"
                 >
                   View on OpenAlex
-                  <ExternalLink className="h-3 w-3" />
+                  <ExternalLink className="h-3 w-3" aria-hidden="true" />
                 </a>
               )}
 
@@ -228,10 +231,10 @@ export const StudyCard = memo(({ study, query, relevanceScore, isLowValue = fals
                   href={sanitizeUrl(`https://www.semanticscholar.org/paper/${study.study_id}`)}
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="inline-flex items-center gap-1 text-sm text-primary hover:underline"
+                  className="inline-flex items-center gap-1 text-sm text-primary hover:underline focus-ring rounded"
                 >
                   View on Semantic Scholar
-                  <ExternalLink className="h-3 w-3" />
+                  <ExternalLink className="h-3 w-3" aria-hidden="true" />
                 </a>
               )}
 
@@ -240,10 +243,10 @@ export const StudyCard = memo(({ study, query, relevanceScore, isLowValue = fals
                   href={sanitizeUrl(`https://arxiv.org/abs/${study.study_id}`)}
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="inline-flex items-center gap-1 text-sm text-primary hover:underline"
+                  className="inline-flex items-center gap-1 text-sm text-primary hover:underline focus-ring rounded"
                 >
                   View on arXiv
-                  <ExternalLink className="h-3 w-3" />
+                  <ExternalLink className="h-3 w-3" aria-hidden="true" />
                 </a>
               )}
             </div>
