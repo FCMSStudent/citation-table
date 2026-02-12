@@ -31,7 +31,7 @@ interface StudyResult {
   abstract_excerpt: string;
   preprint_status: "Preprint" | "Peer-reviewed";
   review_type: "None" | "Systematic review" | "Meta-analysis";
-  source: "openalex" | "semantic_scholar";
+  source: "openalex" | "semantic_scholar" | "arxiv";
   citationCount?: number;
 }
 
@@ -76,7 +76,7 @@ interface UnifiedPaper {
   doi: string | null;
   pubmed_id: string | null;
   openalex_id: string | null;
-  source: "openalex" | "semantic_scholar";
+  source: "openalex" | "semantic_scholar" | "arxiv";
   citationCount?: number;
   publicationTypes?: string[];
 }
@@ -264,14 +264,110 @@ async function searchSemanticScholar(query: string): Promise<UnifiedPaper[]> {
   }
 }
 
+interface ArxivEntry {
+  id: string;           // arXiv ID (e.g., "http://arxiv.org/abs/2301.12345v1")
+  title: string;
+  published: string;    // ISO date string
+  summary: string;      // abstract
+  authors: Array<{ name: string }>;
+  doi?: string;         // optional DOI
+  primary_category?: string;
+}
+
+// Query arXiv API
+async function searchArxiv(query: string): Promise<UnifiedPaper[]> {
+  const encodedQuery = encodeURIComponent(query);
+  const url = `https://export.arxiv.org/api/query?search_query=all:${encodedQuery}&max_results=25`;
+  
+  console.log(`[ArXiv] Searching: ${query}`);
+  
+  try {
+    const response = await fetch(url);
+    if (!response.ok) {
+      console.error(`[ArXiv] API error: ${response.status}`);
+      return [];
+    }
+    
+    const xmlText = await response.text();
+    const parser = new DOMParser();
+    const xml = parser.parseFromString(xmlText, "text/xml");
+    const entries = xml.querySelectorAll("entry");
+    
+    const papers: UnifiedPaper[] = [];
+    for (const entry of entries) {
+      // Extract fields from XML
+      const idElement = entry.querySelector("id");
+      const titleElement = entry.querySelector("title");
+      const publishedElement = entry.querySelector("published");
+      const summaryElement = entry.querySelector("summary");
+      
+      if (!idElement || !titleElement || !publishedElement || !summaryElement) {
+        continue; // Skip entries with missing required fields
+      }
+      
+      const fullId = idElement.textContent?.trim() || "";
+      // Extract arXiv ID from URL: "http(s)://(export.)arxiv.org/abs/2301.12345v1" -> "2301.12345"
+      // First remove the URL prefix (handles both arxiv.org and export.arxiv.org)
+      // Then remove version suffix (v1, v2, etc.)
+      const arxivId = fullId.replace(/^https?:\/\/(export\.)?arxiv\.org\/abs\//, "").replace(/v\d+$/, "");
+      
+      const title = titleElement.textContent?.trim().replace(/\s+/g, " ") || "Untitled";
+      const published = publishedElement.textContent?.trim() || "";
+      const year = published ? parseInt(published.substring(0, 4)) : new Date().getFullYear();
+      const abstract = summaryElement.textContent?.trim().replace(/\s+/g, " ") || "";
+      
+      // Extract authors
+      const authorElements = entry.querySelectorAll("author > name");
+      const authors: string[] = [];
+      for (const authorEl of authorElements) {
+        const authorName = authorEl.textContent?.trim();
+        if (authorName) {
+          authors.push(authorName);
+        }
+      }
+      
+      // Extract DOI if present (arXiv uses namespaced elements, try multiple selectors)
+      let doi: string | null = null;
+      // Try different namespace selector approaches
+      const doiElement = entry.querySelector("doi") || 
+                        entry.querySelector("arxiv\\:doi") || 
+                        entry.querySelector('[*|doi]');
+      if (doiElement) {
+        doi = doiElement.textContent?.trim() || null;
+      }
+      
+      papers.push({
+        id: arxivId,
+        title,
+        year,
+        abstract,
+        authors: authors.length > 0 ? authors : ["Unknown"],
+        venue: "arXiv",
+        doi,
+        pubmed_id: null,
+        openalex_id: null,
+        source: "arxiv" as const,
+        citationCount: undefined,
+        publicationTypes: ["Preprint"],
+      });
+    }
+    
+    console.log(`[ArXiv] Found ${papers.length} papers`);
+    return papers;
+  } catch (error) {
+    console.error(`[ArXiv] Error:`, error);
+    return [];
+  }
+}
+
 // Deduplicate and merge papers from both sources (Semantic Scholar preferred)
-function deduplicateAndMerge(s2Papers: UnifiedPaper[], openAlexPapers: UnifiedPaper[]): UnifiedPaper[] {
+function deduplicateAndMerge(s2Papers: UnifiedPaper[], openAlexPapers: UnifiedPaper[], arxivPapers: UnifiedPaper[]): UnifiedPaper[] {
   const doiMap = new Map<string, UnifiedPaper>();
   const titleMap = new Map<string, UnifiedPaper>();
   const uniquePapers = new Set<UnifiedPaper>();
   
   // Process Semantic Scholar first so it takes priority
-  const allPapers = [...s2Papers, ...openAlexPapers];
+  const allPapers = [...s2Papers, ...openAlexPapers, ...arxivPapers];
   
   for (const paper of allPapers) {
     const normalizedTitle = paper.title.toLowerCase().trim();
@@ -366,7 +462,7 @@ OUTPUT SCHEMA - return valid JSON array matching this exact structure:
   "abstract_excerpt": "representative excerpt from abstract",
   "preprint_status": "Preprint" | "Peer-reviewed",
   "review_type": "None" | "Systematic review" | "Meta-analysis",
-  "source": "openalex" | "semantic_scholar",
+  "source": "openalex" | "semantic_scholar" | "arxiv",
   "citationCount": number | null
 }]
 
@@ -494,9 +590,10 @@ serve(async (req) => {
     // Step 2: Search Semantic Scholar first (primary), then OpenAlex (secondary)
     const s2Papers = await searchSemanticScholar(searchQuery);
     const openAlexPapers = await searchOpenAlex(searchQuery);
+    const arxivPapers = await searchArxiv(searchQuery);
 
     // Step 3: Deduplicate and merge (Semantic Scholar results prioritized)
-    const allPapers = deduplicateAndMerge(s2Papers, openAlexPapers);
+    const allPapers = deduplicateAndMerge(s2Papers, openAlexPapers, arxivPapers);
     
     if (allPapers.length === 0) {
       return new Response(
@@ -507,6 +604,7 @@ serve(async (req) => {
           total_papers_searched: 0,
           openalex_count: 0,
           semantic_scholar_count: 0,
+          arxiv_count: 0,
           message: "No eligible studies matching the query were identified in the searched sources." 
         }),
         { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } }
@@ -526,6 +624,7 @@ serve(async (req) => {
           total_papers_searched: allPapers.length,
           openalex_count: openAlexPapers.length,
           semantic_scholar_count: s2Papers.length,
+          arxiv_count: arxivPapers.length,
           message: "No eligible studies matching the query were identified in the searched sources." 
         }),
         { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } }
@@ -553,6 +652,7 @@ serve(async (req) => {
         total_papers_searched: allPapers.length,
         openalex_count: openAlexPapers.length,
         semantic_scholar_count: s2Papers.length,
+        arxiv_count: arxivPapers.length,
       }),
       { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } }
     );

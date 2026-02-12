@@ -11,6 +11,7 @@ interface UseResearchReturn {
   totalPapersSearched: number;
   openalexCount: number | undefined;
   semanticScholarCount: number | undefined;
+  arxivCount: number | undefined;
   search: (question: string) => Promise<void>;
   clearResults: () => void;
 }
@@ -24,6 +25,7 @@ export function useResearch(): UseResearchReturn {
   const [totalPapersSearched, setTotalPapersSearched] = useState(0);
   const [openalexCount, setOpenalexCount] = useState<number | undefined>(undefined);
   const [semanticScholarCount, setSemanticScholarCount] = useState<number | undefined>(undefined);
+  const [arxivCount, setArxivCount] = useState<number | undefined>(undefined);
 
   const search = useCallback(async (question: string) => {
     if (!question.trim()) {
@@ -78,6 +80,7 @@ export function useResearch(): UseResearchReturn {
       setNormalizedQuery(data?.normalized_query);
       setOpenalexCount(data?.openalex_count);
       setSemanticScholarCount(data?.semantic_scholar_count);
+      setArxivCount(data?.arxiv_count);
       
       if (data?.message) {
         setError(data.message);
@@ -98,6 +101,7 @@ export function useResearch(): UseResearchReturn {
     setTotalPapersSearched(0);
     setOpenalexCount(undefined);
     setSemanticScholarCount(undefined);
+    setArxivCount(undefined);
   }, []);
 
   return {
@@ -109,6 +113,7 @@ export function useResearch(): UseResearchReturn {
     totalPapersSearched,
     openalexCount,
     semanticScholarCount,
+    arxivCount,
     search,
     clearResults,
   };

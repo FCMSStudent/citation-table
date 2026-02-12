@@ -234,6 +234,18 @@ export const StudyCard = memo(({ study, query, relevanceScore, isLowValue = fals
                   <ExternalLink className="h-3 w-3" />
                 </a>
               )}
+
+              {study.source === 'arxiv' && study.study_id && (
+                <a
+                  href={sanitizeUrl(`https://arxiv.org/abs/${study.study_id}`)}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-flex items-center gap-1 text-sm text-primary hover:underline"
+                >
+                  View on arXiv
+                  <ExternalLink className="h-3 w-3" />
+                </a>
+              )}
             </div>
           </div>
         )}
