@@ -264,14 +264,14 @@ async function searchSemanticScholar(query: string): Promise<UnifiedPaper[]> {
   }
 }
 
-// Deduplicate and merge papers from both sources
-function deduplicateAndMerge(openAlexPapers: UnifiedPaper[], s2Papers: UnifiedPaper[]): UnifiedPaper[] {
+// Deduplicate and merge papers from both sources (Semantic Scholar preferred)
+function deduplicateAndMerge(s2Papers: UnifiedPaper[], openAlexPapers: UnifiedPaper[]): UnifiedPaper[] {
   const doiMap = new Map<string, UnifiedPaper>();
   const titleMap = new Map<string, UnifiedPaper>();
   const uniquePapers = new Set<UnifiedPaper>();
   
-  // Process all papers
-  const allPapers = [...openAlexPapers, ...s2Papers];
+  // Process Semantic Scholar first so it takes priority
+  const allPapers = [...s2Papers, ...openAlexPapers];
   
   for (const paper of allPapers) {
     const normalizedTitle = paper.title.toLowerCase().trim();
@@ -486,14 +486,12 @@ serve(async (req) => {
       console.log(`[Research] Query normalized: "${question}" -> "${normalized}"`);
     }
 
-    // Step 2: Search both APIs in parallel
-    const [openAlexPapers, s2Papers] = await Promise.all([
-      searchOpenAlex(searchQuery),
-      searchSemanticScholar(searchQuery),
-    ]);
+    // Step 2: Search Semantic Scholar first (primary), then OpenAlex (secondary)
+    const s2Papers = await searchSemanticScholar(searchQuery);
+    const openAlexPapers = await searchOpenAlex(searchQuery);
 
-    // Step 3: Deduplicate and merge
-    const allPapers = deduplicateAndMerge(openAlexPapers, s2Papers);
+    // Step 3: Deduplicate and merge (Semantic Scholar results prioritized)
+    const allPapers = deduplicateAndMerge(s2Papers, openAlexPapers);
     
     if (allPapers.length === 0) {
       return new Response(
