@@ -306,9 +306,10 @@ async function searchArxiv(query: string): Promise<UnifiedPaper[]> {
       }
       
       const fullId = idElement.textContent?.trim() || "";
-      // Extract arXiv ID from URL: "http(s)://arxiv.org/abs/2301.12345v1" -> "2301.12345"
-      // First remove the URL prefix, then remove version suffix (v1, v2, etc.)
-      const arxivId = fullId.replace(/^https?:\/\/arxiv\.org\/abs\//, "").replace(/v\d+$/, "");
+      // Extract arXiv ID from URL: "http(s)://(export.)arxiv.org/abs/2301.12345v1" -> "2301.12345"
+      // First remove the URL prefix (handles both arxiv.org and export.arxiv.org)
+      // Then remove version suffix (v1, v2, etc.)
+      const arxivId = fullId.replace(/^https?:\/\/(export\.)?arxiv\.org\/abs\//, "").replace(/v\d+$/, "");
       
       const title = titleElement.textContent?.trim().replace(/\s+/g, " ") || "Untitled";
       const published = publishedElement.textContent?.trim() || "";
