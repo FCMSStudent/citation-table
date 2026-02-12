@@ -9,19 +9,19 @@ import { useResearch } from '@/hooks/useResearch';
 import { BookOpen } from 'lucide-react';
 
 const Index = () => {
-  const { 
-    results, 
-    isLoading, 
-    error, 
-    query, 
+  const {
+    results,
+    isLoading,
+    error,
+    query,
     normalizedQuery,
     totalPapersSearched,
     openalexCount,
     semanticScholarCount,
     arxivCount,
-    search 
+    search
   } = useResearch();
-  
+
   const hasResults = results.length > 0;
   const showEmptyState = !isLoading && !hasResults && !error;
 
@@ -29,8 +29,8 @@ const Index = () => {
     <div className="min-h-screen bg-background">
       <a
         href="#main-content"
-        className="sr-only focus:not-sr-only focus:absolute focus:top-4 focus:left-4 focus:z-[100] focus:px-4 focus:py-2 focus:bg-primary focus:text-primary-foreground focus:rounded-md focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 transition-all"
-      >
+        className="sr-only focus:not-sr-only focus:absolute focus:top-4 focus:left-4 focus:z-[100] focus:px-4 focus:py-2 focus:bg-primary focus:text-primary-foreground focus:rounded-md focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 transition-all">
+
         Skip to main content
       </a>
 
@@ -57,50 +57,50 @@ const Index = () => {
         </section>
 
         {/* Medical disclaimer - show when results are present */}
-        {hasResults && (
-          <section className="mb-6">
+        {hasResults &&
+        <section className="mb-6">
             <MedicalDisclaimer />
           </section>
-        )}
+        }
 
         {/* Query normalization notice */}
-        {normalizedQuery && query && (
-          <section className="mb-6">
-            <QueryNormalizationNotice 
-              originalQuery={query} 
-              normalizedQuery={normalizedQuery} 
-            />
+        {normalizedQuery && query &&
+        <section className="mb-6">
+            <QueryNormalizationNotice
+            originalQuery={query}
+            normalizedQuery={normalizedQuery} />
+
           </section>
-        )}
+        }
 
         {/* Error message */}
-        {error && !hasResults && (
-          <section className="mb-8 max-w-4xl mx-auto">
+        {error && !hasResults &&
+        <section className="mb-8 max-w-4xl mx-auto">
             <ErrorMessage message={error} />
           </section>
-        )}
+        }
 
         {/* Loading state */}
-        {isLoading && (
-          <section className="mb-8">
+        {isLoading &&
+        <section className="mb-8">
             <LoadingSkeleton />
           </section>
-        )}
+        }
 
         {/* Results table */}
-        {hasResults && (
-          <section className="mb-8">
-            <ResultsTable 
-              results={results} 
-              query={query}
-              normalizedQuery={normalizedQuery}
-              totalPapersSearched={totalPapersSearched}
-              openalexCount={openalexCount}
-              semanticScholarCount={semanticScholarCount}
-              arxivCount={arxivCount}
-            />
+        {hasResults &&
+        <section className="mb-8">
+            <ResultsTable
+            results={results}
+            query={query}
+            normalizedQuery={normalizedQuery}
+            totalPapersSearched={totalPapersSearched}
+            openalexCount={openalexCount}
+            semanticScholarCount={semanticScholarCount}
+            arxivCount={arxivCount} />
+
           </section>
-        )}
+        }
 
         {/* Empty state */}
         {showEmptyState && <EmptyState />}
@@ -109,21 +109,21 @@ const Index = () => {
       {/* Footer */}
       <footer className="border-t border-border py-6 mt-auto">
         <div className="container max-w-7xl mx-auto px-4 space-y-3">
-          <p className="text-center text-sm text-muted-foreground">
+          <p className="text-muted-foreground text-left text-xs">
             Powered by OpenAlex + Semantic Scholar + arXiv • All data extracted from paper abstracts • 
             <span className="font-medium"> No inference beyond explicit text</span>
           </p>
           <div className="text-center text-xs text-muted-foreground border-t border-border pt-3">
-            <p className="font-medium mb-1">Explicit Non-Goals:</p>
-            <p>
+            <p className="font-medium mb-1 text-justify">Explicit Non-Goals:</p>
+            <p className="text-center">
               This system does NOT: perform meta-analyses, rank/compare/recommend interventions, 
               assess study quality or bias, generate clinical guidance, or replace expert judgment.
             </p>
           </div>
         </div>
       </footer>
-    </div>
-  );
+    </div>);
+
 };
 
 export default Index;
