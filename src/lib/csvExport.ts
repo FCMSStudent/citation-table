@@ -1,41 +1,65 @@
+// lib/csvExport.ts
 import type { StudyResult } from '@/types/research';
 
-function escapeCsv(value: string | null | undefined): string {
-  if (!value) return '';
-  const str = String(value);
-  if (str.includes(',') || str.includes('"') || str.includes('\n')) {
-    return `"${str.replace(/"/g, '""')}"`;
-  }
-  return str;
+export function downloadCSV(studies: StudyResult[], filename: string) {
+  const headers = [
+    'Title',
+    'Authors',
+    'Year',
+    'DOI',
+    'Study Design',
+    'Sample Size',
+    'Population',
+    'Review Type',
+    'Preprint Status',
+    'Outcomes',
+    'Key Results',
+    'OpenAlex ID',
+  ];
+
+  const rows = studies.map((study) => {
+    const authors = extractAuthors(study.citation.formatted);
+    const outcomes = study.outcomes?.map((o) => o.outcome_measured).join('; ') || '';
+    const results = study.outcomes?.map((o) => o.key_result || '').filter(Boolean).join('; ') || '';
+
+    return [
+      escapeCSV(study.title),
+      escapeCSV(authors),
+      study.year || '',
+      study.doi || '',
+      study.study_design || '',
+      study.sample_size || '',
+      escapeCSV(study.population || ''),
+      study.review_type || '',
+      study.preprint_status || '',
+      escapeCSV(outcomes),
+      escapeCSV(results),
+      study.openalex_id || '',
+    ];
+  });
+
+  const csv = [headers, ...rows].map((row) => row.join(',')).join('\n');
+
+  const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+  const link = document.createElement('a');
+  link.href = URL.createObjectURL(blob);
+  link.download = filename;
+  link.click();
 }
 
-export function downloadCSV(studies: StudyResult[], filename: string = 'research.csv'): void {
-  const headers = ['Title', 'Year', 'Study Design', 'Review Type', 'Sample Size', 'Population', 'Outcomes', 'Key Results', 'DOI', 'PubMed ID', 'Source', 'Preprint Status'];
+function escapeCSV(value: string): string {
+  if (value.includes(',') || value.includes('"') || value.includes('\n')) {
+    return `"${value.replace(/"/g, '""')}"`;
+  }
+  return value;
+}
 
-  const rows = studies.map(study => [
-    escapeCsv(study.title),
-    String(study.year),
-    escapeCsv(study.study_design),
-    escapeCsv(study.review_type),
-    study.sample_size != null ? String(study.sample_size) : '',
-    escapeCsv(study.population),
-    escapeCsv(study.outcomes.map(o => o.outcome_measured).join('; ')),
-    escapeCsv(study.outcomes.map(o => o.key_result || '').filter(Boolean).join('; ')),
-    escapeCsv(study.citation.doi),
-    escapeCsv(study.citation.pubmed_id),
-    escapeCsv(study.source),
-    escapeCsv(study.preprint_status),
-  ].join(','));
-
-  const csv = [headers.join(','), ...rows].join('\n');
-  const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
-  const url = URL.createObjectURL(blob);
-
-  const link = document.createElement('a');
-  link.href = url;
-  link.download = filename;
-  document.body.appendChild(link);
-  link.click();
-  document.body.removeChild(link);
-  URL.revokeObjectURL(url);
+function extractAuthors(citation: string | null | undefined): string {
+  if (!citation) return 'Unknown';
+  // Extract everything before year (in parentheses)
+  const match = citation.match(/^(.+?)\s*\(/);
+  if (match) {
+    return match[1].trim();
+  }
+  return citation;
 }
