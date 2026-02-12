@@ -26,7 +26,7 @@ export function downloadCSV(studies: StudyResult[], filename: string) {
       escapeCSV(study.title),
       escapeCSV(authors),
       study.year || '',
-      study.doi || '',
+      study.citation.doi || '',
       study.study_design || '',
       study.sample_size || '',
       escapeCSV(study.population || ''),
@@ -34,7 +34,7 @@ export function downloadCSV(studies: StudyResult[], filename: string) {
       study.preprint_status || '',
       escapeCSV(outcomes),
       escapeCSV(results),
-      study.openalex_id || '',
+      study.citation.openalex_id || '',
     ];
   });
 

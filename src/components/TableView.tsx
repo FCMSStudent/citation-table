@@ -247,10 +247,10 @@ export function TableView({ studies, query, showScoreBreakdown = false }: TableV
                   )}
                   <td className="p-3">
                     <div className="flex gap-1">
-                      {study.openalex_id && (
+                      {study.citation.openalex_id && (
                         <Button variant="ghost" size="sm" asChild>
-                          
-                            href={`https://openalex.org/${study.openalex_id}`}
+                          <a
+                            href={`https://openalex.org/${study.citation.openalex_id}`}
                             target="_blank"
                             rel="noopener noreferrer"
                             title="View in OpenAlex"
@@ -259,10 +259,10 @@ export function TableView({ studies, query, showScoreBreakdown = false }: TableV
                           </a>
                         </Button>
                       )}
-                      {study.doi && (
+                      {study.citation.doi && (
                         <Button variant="ghost" size="sm" asChild>
-                          
-                            href={`https://doi.org/${study.doi}`}
+                          <a
+                            href={`https://doi.org/${study.citation.doi}`}
                             target="_blank"
                             rel="noopener noreferrer"
                             title="View DOI"
