@@ -115,7 +115,7 @@ const Index = () => {
           </p>
           <div className="text-center text-xs text-muted-foreground border-t border-border pt-3">
             <p className="font-medium mb-1 text-justify">Explicit Non-Goals:</p>
-            <p className="text-center">
+            <p className="text-left">
               This system does NOT: perform meta-analyses, rank/compare/recommend interventions, 
               assess study quality or bias, generate clinical guidance, or replace expert judgment.
             </p>
