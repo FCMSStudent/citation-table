@@ -306,7 +306,8 @@ async function searchArxiv(query: string): Promise<UnifiedPaper[]> {
       }
       
       const fullId = idElement.textContent?.trim() || "";
-      // Extract arXiv ID from URL (e.g., "http://arxiv.org/abs/2301.12345v1" or "https://arxiv.org/abs/2301.12345v1" -> "2301.12345")
+      // Extract arXiv ID from URL: "http(s)://arxiv.org/abs/2301.12345v1" -> "2301.12345"
+      // First remove the URL prefix, then remove version suffix (v1, v2, etc.)
       const arxivId = fullId.replace(/^https?:\/\/arxiv\.org\/abs\//, "").replace(/v\d+$/, "");
       
       const title = titleElement.textContent?.trim().replace(/\s+/g, " ") || "Untitled";
@@ -324,9 +325,12 @@ async function searchArxiv(query: string): Promise<UnifiedPaper[]> {
         }
       }
       
-      // Extract DOI if present (arXiv uses arxiv:doi namespace)
+      // Extract DOI if present (arXiv uses namespaced elements, try multiple selectors)
       let doi: string | null = null;
-      const doiElement = entry.querySelector("arxiv\\:doi");
+      // Try different namespace selector approaches
+      const doiElement = entry.querySelector("doi") || 
+                        entry.querySelector("arxiv\\:doi") || 
+                        entry.querySelector('[*|doi]');
       if (doiElement) {
         doi = doiElement.textContent?.trim() || null;
       }
