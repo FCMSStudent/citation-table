@@ -149,6 +149,37 @@ function normalizeQuery(query: string): { normalized: string; wasNormalized: boo
   return { normalized: normalized.trim(), wasNormalized };
 }
 
+// Extract keywords from a query for APIs that work better with short keyword strings
+function extractSearchKeywords(query: string): string {
+  const STOP_WORDS = new Set([
+    "what", "are", "is", "the", "a", "an", "of", "for", "with", "to", "in", "on",
+    "and", "or", "how", "does", "do", "can", "could", "would", "should", "will",
+    "that", "this", "these", "those", "it", "its", "be", "been", "being", "was",
+    "were", "has", "have", "had", "not", "no", "but", "by", "from", "at", "as",
+    "into", "through", "between", "about", "their", "there", "than",
+    "reported", "outcomes", "associated", "effects", "effect", "impact",
+    "relationship", "role", "influence", "evidence", "studies", "study",
+  ]);
+  
+  const keywords = query
+    .toLowerCase()
+    .replace(/[^a-z0-9\s]/g, " ")
+    .split(/\s+/)
+    .filter(w => w.length > 2 && !STOP_WORDS.has(w));
+  
+  // Deduplicate while preserving order
+  const seen = new Set<string>();
+  const unique = keywords.filter(w => {
+    if (seen.has(w)) return false;
+    seen.add(w);
+    return true;
+  });
+  
+  const result = unique.slice(0, 6).join(" ");
+  console.log(`[Keywords] "${query}" -> "${result}"`);
+  return result;
+}
+
 // Query OpenAlex API
 async function searchOpenAlex(query: string): Promise<UnifiedPaper[]> {
   const encodedQuery = encodeURIComponent(query);
@@ -216,7 +247,13 @@ async function s2RateLimit() {
 
 // Query Semantic Scholar API
 async function searchSemanticScholar(query: string): Promise<UnifiedPaper[]> {
-  const encodedQuery = encodeURIComponent(query);
+  // Use keyword extraction for better results with S2's search endpoint
+  const keywords = extractSearchKeywords(query);
+  if (!keywords) {
+    console.warn("[SemanticScholar] No keywords extracted, skipping search");
+    return [];
+  }
+  const encodedQuery = encodeURIComponent(keywords);
   const fields = "paperId,title,abstract,year,authors,venue,citationCount,publicationTypes,externalIds";
   const url = `https://api.semanticscholar.org/graph/v1/paper/search?query=${encodedQuery}&fields=${fields}&limit=25`;
   
@@ -277,10 +314,16 @@ interface ArxivEntry {
 
 // Query arXiv API
 async function searchArxiv(query: string): Promise<UnifiedPaper[]> {
-  const encodedQuery = encodeURIComponent(query);
+  // Use keyword extraction for arXiv too
+  const keywords = extractSearchKeywords(query);
+  if (!keywords) {
+    console.warn("[ArXiv] No keywords extracted, skipping search");
+    return [];
+  }
+  const encodedQuery = encodeURIComponent(keywords);
   const url = `https://export.arxiv.org/api/query?search_query=all:${encodedQuery}&max_results=25`;
   
-  console.log(`[ArXiv] Searching: ${query}`);
+  console.log(`[ArXiv] Searching: ${keywords}`);
   
   try {
     const response = await fetch(url);
@@ -290,51 +333,43 @@ async function searchArxiv(query: string): Promise<UnifiedPaper[]> {
     }
     
     const xmlText = await response.text();
-    const parser = new DOMParser();
-    const xml = parser.parseFromString(xmlText, "text/xml");
-    const entries = xml.querySelectorAll("entry");
     
+    // Regex-based XML parsing (DOMParser is not available in Deno)
+    const entryRegex = /<entry>([\s\S]*?)<\/entry>/g;
     const papers: UnifiedPaper[] = [];
-    for (const entry of entries) {
-      // Extract fields from XML
-      const idElement = entry.querySelector("id");
-      const titleElement = entry.querySelector("title");
-      const publishedElement = entry.querySelector("published");
-      const summaryElement = entry.querySelector("summary");
+    let match;
+    
+    while ((match = entryRegex.exec(xmlText)) !== null) {
+      const entry = match[1];
       
-      if (!idElement || !titleElement || !publishedElement || !summaryElement) {
-        continue; // Skip entries with missing required fields
-      }
+      const getTag = (tag: string): string => {
+        const m = entry.match(new RegExp(`<${tag}[^>]*>([\\s\\S]*?)<\\/${tag}>`));
+        return m ? m[1].trim().replace(/\s+/g, " ") : "";
+      };
       
-      const fullId = idElement.textContent?.trim() || "";
-      // Extract arXiv ID from URL: "http(s)://(export.)arxiv.org/abs/2301.12345v1" -> "2301.12345"
-      // First remove the URL prefix (handles both arxiv.org and export.arxiv.org)
-      // Then remove version suffix (v1, v2, etc.)
+      const fullId = getTag("id");
+      const title = getTag("title");
+      const published = getTag("published");
+      const abstract = getTag("summary");
+      
+      if (!fullId || !title || !abstract || abstract.length < 50) continue;
+      
       const arxivId = fullId.replace(/^https?:\/\/(export\.)?arxiv\.org\/abs\//, "").replace(/v\d+$/, "");
-      
-      const title = titleElement.textContent?.trim().replace(/\s+/g, " ") || "Untitled";
-      const published = publishedElement.textContent?.trim() || "";
       const year = published ? parseInt(published.substring(0, 4)) : new Date().getFullYear();
-      const abstract = summaryElement.textContent?.trim().replace(/\s+/g, " ") || "";
       
       // Extract authors
-      const authorElements = entry.querySelectorAll("author > name");
+      const authorRegex = /<author>\s*<name>([^<]+)<\/name>/g;
       const authors: string[] = [];
-      for (const authorEl of authorElements) {
-        const authorName = authorEl.textContent?.trim();
-        if (authorName) {
-          authors.push(authorName);
-        }
+      let authorMatch;
+      while ((authorMatch = authorRegex.exec(entry)) !== null) {
+        authors.push(authorMatch[1].trim());
       }
       
-      // Extract DOI if present (arXiv uses namespaced elements, try multiple selectors)
+      // Extract DOI if present
       let doi: string | null = null;
-      // Try different namespace selector approaches
-      const doiElement = entry.querySelector("doi") || 
-                        entry.querySelector("arxiv\\:doi") || 
-                        entry.querySelector('[*|doi]');
-      if (doiElement) {
-        doi = doiElement.textContent?.trim() || null;
+      const doiMatch = entry.match(/<arxiv:doi[^>]*>([^<]+)<\/arxiv:doi>/);
+      if (doiMatch) {
+        doi = doiMatch[1].trim();
       }
       
       papers.push({
