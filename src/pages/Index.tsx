@@ -35,7 +35,7 @@ const Index = () => {
       </a>
 
       {/* Header */}
-      <header className="border-b border-border bg-card/50 backdrop-blur-sm sticky top-0 z-10">
+      <header className="border-b border-border backdrop-blur-sm sticky top-0 z-10 bg-white/0">
         <div className="container max-w-7xl mx-auto px-4 py-4">
           <div className="flex items-center gap-3">
             <div className="p-2 rounded-lg bg-primary/10">
@@ -107,21 +107,21 @@ const Index = () => {
       </main>
 
       {/* Footer */}
-      <footer className="border-t border-border py-6 mt-auto">
-        <div className="container max-w-7xl mx-auto px-4 space-y-3">
-          <p className="text-muted-foreground text-left text-xs">
-            Powered by OpenAlex + Semantic Scholar + arXiv • All data extracted from paper abstracts • 
-            <span className="font-medium"> No inference beyond explicit text</span>
-          </p>
-          <div className="text-center text-xs text-muted-foreground border-t border-border pt-3">
-            <p className="font-medium mb-1 text-justify">Explicit Non-Goals:</p>
-            <p className="text-left">
-              This system does NOT: perform meta-analyses, rank/compare/recommend interventions, 
-              assess study quality or bias, generate clinical guidance, or replace expert judgment.
-            </p>
-          </div>
-        </div>
-      </footer>
+      
+
+
+
+
+
+
+
+
+
+
+
+
+
+
     </div>);
 
 };
