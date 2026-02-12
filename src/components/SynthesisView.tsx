@@ -19,7 +19,7 @@ const CAUSAL_MAP: Record<string, string> = {
   'resulted in': 'showed',
   'results in': 'showed',
   'due to': 'associated with',
-  'effect of': 'association with',
+  'effect of': 'association with'
 };
 
 const CAUSAL_REGEX = /\b(cause[ds]?|causing|led to|leads to|resulted in|results in|due to|effect of)\b/gi;
@@ -65,13 +65,13 @@ export function SynthesisView({ studies, outcomeAggregation, query }: SynthesisV
           theme: formatTheme(designCategory, popType),
           description: getThemeDescription(designCategory, popType),
           studies: [],
-          keyFindings: [],
+          keyFindings: []
         });
       }
 
       groups.get(key)!.studies.push({
         study,
-        relevanceScore: (study as any).relevanceScore || 0,
+        relevanceScore: (study as any).relevanceScore || 0
       });
     });
 
@@ -89,9 +89,9 @@ export function SynthesisView({ studies, outcomeAggregation, query }: SynthesisV
       group.keyFindings = Array.from(findings).slice(0, 4);
     });
 
-    return Array.from(groups.entries())
-      .map(([key, group], idx) => ({ ...group, id: `group-${idx}` }))
-      .sort((a, b) => b.studies.length - a.studies.length);
+    return Array.from(groups.entries()).
+    map(([key, group], idx) => ({ ...group, id: `group-${idx}` })).
+    sort((a, b) => b.studies.length - a.studies.length);
   }, [studies]);
 
   const toggleGroup = (groupId: string) => {
@@ -109,12 +109,12 @@ export function SynthesisView({ studies, outcomeAggregation, query }: SynthesisV
   return (
     <div className="space-y-6">
       {/* Outcome-based synthesis */}
-      {outcomeAggregation.length > 0 && (
-        <div className="rounded-lg border bg-card p-6">
+      {outcomeAggregation.length > 0 &&
+      <div className="rounded-lg border bg-card p-6">
           <h2 className="mb-4 text-lg font-semibold">Key Findings by Outcome</h2>
           <div className="space-y-6">
-            {outcomeAggregation.slice(0, 10).map(({ outcome, studyCount, studies: outcomeStudies }) => (
-              <div key={outcome} className="border-l-2 border-blue-500 pl-4">
+            {outcomeAggregation.slice(0, 10).map(({ outcome, studyCount, studies: outcomeStudies }) =>
+          <div key={outcome} className="border-l-2 border-blue-500 pl-4">
                 <h3 className="mb-2 font-medium capitalize">
                   {outcome}
                   <span className="ml-2 text-sm font-normal text-muted-foreground">
@@ -123,25 +123,25 @@ export function SynthesisView({ studies, outcomeAggregation, query }: SynthesisV
                 </h3>
                 <div className="space-y-2 text-sm">
                   {outcomeStudies.slice(0, 3).map(({ study, result }) => {
-                    const citation = formatCitation(study);
-                    const sanitized = sanitizeResult(result);
-                    return (
-                      <div key={study.study_id} className="text-gray-700 dark:text-gray-300">
+                const citation = formatCitation(study);
+                const sanitized = sanitizeResult(result);
+                return (
+                  <div key={study.study_id} className="text-gray-700 dark:text-gray-300">
                         <span className="font-medium">{citation}:</span> {sanitized}
-                      </div>
-                    );
-                  })}
-                  {outcomeStudies.length > 3 && (
-                    <button className="text-xs text-blue-600 hover:underline dark:text-blue-400">
+                      </div>);
+
+              })}
+                  {outcomeStudies.length > 3 &&
+              <button className="text-xs text-blue-600 hover:underline dark:text-blue-400">
                       +{outcomeStudies.length - 3} more {outcomeStudies.length - 3 === 1 ? 'study' : 'studies'}
                     </button>
-                  )}
+              }
                 </div>
               </div>
-            ))}
+          )}
           </div>
         </div>
-      )}
+      }
 
       {/* Study design-based synthesis */}
       <div className="space-y-4">
@@ -152,13 +152,13 @@ export function SynthesisView({ studies, outcomeAggregation, query }: SynthesisV
             <div key={group.id} className="rounded-lg border bg-card">
               <button
                 onClick={() => toggleGroup(group.id)}
-                className="flex w-full items-start gap-3 p-4 text-left transition-colors hover:bg-muted/50"
-              >
-                {isExpanded ? (
-                  <ChevronDown className="mt-1 h-5 w-5 flex-shrink-0 text-muted-foreground" />
-                ) : (
-                  <ChevronRight className="mt-1 h-5 w-5 flex-shrink-0 text-muted-foreground" />
-                )}
+                className="flex w-full items-start gap-3 p-4 text-left transition-colors hover:bg-muted/50">
+
+                {isExpanded ?
+                <ChevronDown className="mt-1 h-5 w-5 flex-shrink-0 text-muted-foreground" /> :
+
+                <ChevronRight className="mt-1 h-5 w-5 flex-shrink-0 text-muted-foreground" />
+                }
                 <div className="flex-1">
                   <h3 className="mb-1 font-semibold">
                     {group.theme}
@@ -167,26 +167,26 @@ export function SynthesisView({ studies, outcomeAggregation, query }: SynthesisV
                     </span>
                   </h3>
                   <p className="text-sm text-muted-foreground">{group.description}</p>
-                  {group.keyFindings.length > 0 && (
-                    <div className="mt-2 flex flex-wrap gap-2">
-                      {group.keyFindings.map((finding) => (
-                        <span
-                          key={finding}
-                          className="rounded-full bg-muted px-2 py-0.5 text-xs font-medium"
-                        >
+                  {group.keyFindings.length > 0 &&
+                  <div className="mt-2 flex flex-wrap gap-2">
+                      {group.keyFindings.map((finding) =>
+                    <span
+                      key={finding}
+                      className="rounded-full bg-muted px-2 py-0.5 text-xs font-medium">
+
                           {finding}
                         </span>
-                      ))}
+                    )}
                     </div>
-                  )}
+                  }
                 </div>
               </button>
 
-              {isExpanded && (
-                <div className="border-t bg-muted/20 p-4">
+              {isExpanded &&
+              <div className="border-t bg-muted/20 p-4">
                   <div className="space-y-4">
-                    {group.studies.map(({ study, relevanceScore }) => (
-                      <div key={study.study_id} className="rounded-lg border bg-card p-4">
+                    {group.studies.map(({ study, relevanceScore }) =>
+                  <div key={study.study_id} className="rounded-lg border bg-card p-4">
                         <div className="mb-2 flex items-start justify-between gap-4">
                           <div className="flex-1">
                             <h4 className="font-medium leading-tight">{study.title}</h4>
@@ -195,25 +195,25 @@ export function SynthesisView({ studies, outcomeAggregation, query }: SynthesisV
                               {study.sample_size && ` • n=${study.sample_size}`}
                             </p>
                           </div>
-                          {study.citation.openalex_id && (
-                            <Button variant="ghost" size="sm" asChild>
+                          {study.citation.openalex_id &&
+                      <Button variant="ghost" size="sm" asChild>
                               <a
-                                href={`https://openalex.org/${study.citation.openalex_id}`}
-                                target="_blank"
-                                rel="noopener noreferrer"
-                              >
+                          href={`https://openalex.org/${study.citation.openalex_id}`}
+                          target="_blank"
+                          rel="noopener noreferrer">
+
                                 <ExternalLink className="h-4 w-4" />
                               </a>
                             </Button>
-                          )}
+                      }
                         </div>
 
-                        {study.outcomes && study.outcomes.length > 0 && (
-                          <div className="mt-3 space-y-2">
-                            {study.outcomes
-                              .filter((o) => o.key_result)
-                              .map((outcome, idx) => (
-                                <div key={idx} className="text-sm">
+                        {study.outcomes && study.outcomes.length > 0 &&
+                    <div className="mt-3 space-y-2">
+                            {study.outcomes.
+                      filter((o) => o.key_result).
+                      map((outcome, idx) =>
+                      <div key={idx} className="text-sm">
                                   <span className="font-medium text-gray-900 dark:text-gray-100">
                                     {outcome.outcome_measured}:
                                   </span>{' '}
@@ -221,34 +221,34 @@ export function SynthesisView({ studies, outcomeAggregation, query }: SynthesisV
                                     {sanitizeResult(outcome.key_result || '')}
                                   </span>
                                 </div>
-                              ))}
+                      )}
                           </div>
-                        )}
+                    }
                       </div>
-                    ))}
+                  )}
                   </div>
                 </div>
-              )}
-            </div>
-          );
+              }
+            </div>);
+
         })}
       </div>
 
       {/* Methodological quality note */}
-      {thematicGroups.length > 0 && (
-        <div className="rounded-lg border border-amber-200 bg-amber-50 p-4 text-sm dark:border-amber-800 dark:bg-amber-950/30">
-          <h3 className="mb-2 font-semibold text-amber-900 dark:text-amber-100">
-            Evidence Quality Notes
-          </h3>
-          <ul className="space-y-1 text-amber-900 dark:text-amber-100">
-            {getQualityNotes(studies).map((note, idx) => (
-              <li key={idx}>• {note}</li>
-            ))}
-          </ul>
-        </div>
-      )}
-    </div>
-  );
+      {thematicGroups.length > 0
+
+
+
+
+
+
+
+
+
+
+      }
+    </div>);
+
 }
 
 // Helper functions
@@ -281,7 +281,7 @@ function formatTheme(design: string, popType: string): string {
     'cohort': 'Cohort Studies',
     'cross-sectional': 'Cross-Sectional Studies',
     'case-control': 'Case-Control Studies',
-    'observational': 'Observational Studies',
+    'observational': 'Observational Studies'
   };
 
   const popLabels: Record<string, string> = {
@@ -289,7 +289,7 @@ function formatTheme(design: string, popType: string): string {
     'elderly': 'in Elderly Populations',
     'adult': 'in Adult Populations',
     'clinical': 'in Clinical Populations',
-    'general': '',
+    'general': ''
   };
 
   return `${designLabels[design] || 'Studies'} ${popLabels[popType] || ''}`.trim();
@@ -303,7 +303,7 @@ function getThemeDescription(design: string, popType: string): string {
     'cohort': 'Longitudinal observation of groups over time',
     'cross-sectional': 'Snapshot observation at a single time point',
     'case-control': 'Retrospective comparison of cases and controls',
-    'observational': 'Studies without experimental manipulation',
+    'observational': 'Studies without experimental manipulation'
   };
 
   return descriptions[design] || 'Studies examining the research question';
@@ -324,10 +324,10 @@ function extractFirstAuthor(citation: string | null | undefined): string {
 }
 
 function normalizeOutcome(outcome: string): string {
-  return outcome
-    .toLowerCase()
-    .replace(OUTCOME_NORM_REGEX, '')
-    .trim();
+  return outcome.
+  toLowerCase().
+  replace(OUTCOME_NORM_REGEX, '').
+  trim();
 }
 
 function sanitizeResult(result: string): string {
@@ -336,14 +336,14 @@ function sanitizeResult(result: string): string {
 
 function getQualityNotes(studies: StudyResult[]): string[] {
   const notes: string[] = [];
-  
-  const preprintCount = studies.filter(s => s.preprint_status === 'Preprint').length;
-  const rctCount = studies.filter(s => 
-    s.study_design?.toLowerCase().includes('randomized') || 
-    s.study_design?.toLowerCase().includes('rct')
+
+  const preprintCount = studies.filter((s) => s.preprint_status === 'Preprint').length;
+  const rctCount = studies.filter((s) =>
+  s.study_design?.toLowerCase().includes('randomized') ||
+  s.study_design?.toLowerCase().includes('rct')
   ).length;
-  const metaCount = studies.filter(s => 
-    s.study_design?.toLowerCase().includes('meta-analysis')
+  const metaCount = studies.filter((s) =>
+  s.study_design?.toLowerCase().includes('meta-analysis')
   ).length;
 
   if (preprintCount === studies.length) {
