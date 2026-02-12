@@ -25,7 +25,7 @@ export interface StudyResult {
   abstract_excerpt: string;
   preprint_status: "Preprint" | "Peer-reviewed";
   review_type: "None" | "Systematic review" | "Meta-analysis";
-  source: "openalex" | "semantic_scholar"; // Track data source
+  source: "openalex" | "semantic_scholar" | "arxiv"; // Track data source
   citationCount?: number; // Available from Semantic Scholar
 }
 
@@ -36,6 +36,7 @@ export interface ResearchResponse {
   total_papers_searched: number;
   openalex_count?: number; // Breakdown by source
   semantic_scholar_count?: number;
+  arxiv_count?: number;
   message?: string;
   error?: string;
 }
