@@ -1,7 +1,7 @@
 // components/SynthesisView.tsx
 import { useMemo, useState } from 'react';
 import { ChevronDown, ChevronRight, ExternalLink } from 'lucide-react';
-import type { StudyResult } from '@/types/research';
+import type { StudyResult } from "@/types/research";
 import { Button } from './ui/button';
 import { cn } from '@/lib/utils';
 
@@ -176,10 +176,10 @@ export function SynthesisView({ studies, outcomeAggregation, query }: SynthesisV
                               {study.sample_size && ` • n=${study.sample_size}`}
                             </p>
                           </div>
-                          {study.openalex_id && (
+                          {study.citation.openalex_id && (
                             <Button variant="ghost" size="sm" asChild>
-                              
-                                href={`https://openalex.org/${study.openalex_id}`}
+                              <a
+                                href={`https://openalex.org/${study.citation.openalex_id}`}
                                 target="_blank"
                                 rel="noopener noreferrer"
                               >
