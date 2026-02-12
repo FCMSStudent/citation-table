@@ -1,16 +1,9 @@
+// components/TableView.tsx
+import { useMemo, useState } from 'react';
+import { ArrowDown, ArrowUp, ArrowUpDown, ExternalLink, CheckSquare, Square } from 'lucide-react';
 import type { StudyResult } from '@/types/research';
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from './ui/table';
-import { StudyBadge } from './StudyBadge';
-import { ReviewTypeBadge } from './ReviewTypeBadge';
-import { SourceBadge } from './SourceBadge';
-import { PreprintBadge } from './PreprintBadge';
+import { Button } from './ui/button';
+import { cn } from '@/lib/utils';
 
 interface TableViewProps {
   studies: StudyResult[];
@@ -18,66 +11,304 @@ interface TableViewProps {
   showScoreBreakdown?: boolean;
 }
 
-export function TableView({ studies, query, showScoreBreakdown }: TableViewProps) {
-  if (studies.length === 0) {
-    return (
-      <div className="py-8 text-center text-muted-foreground">
-        No studies to display.
-      </div>
-    );
-  }
+type SortField = 'title' | 'year' | 'design' | 'sample_size' | 'relevance';
+type SortDirection = 'asc' | 'desc';
+
+export function TableView({ studies, query, showScoreBreakdown = false }: TableViewProps) {
+  const [sortField, setSortField] = useState<SortField>('relevance');
+  const [sortDirection, setSortDirection] = useState<SortDirection>('desc');
+  const [selectedStudies, setSelectedStudies] = useState<Set<string>>(new Set());
+
+  const sortedStudies = useMemo(() => {
+    const sorted = [...studies].sort((a, b) => {
+      let aVal: any;
+      let bVal: any;
+
+      switch (sortField) {
+        case 'title':
+          aVal = a.title.toLowerCase();
+          bVal = b.title.toLowerCase();
+          break;
+        case 'year':
+          aVal = a.year || 0;
+          bVal = b.year || 0;
+          break;
+        case 'design':
+          aVal = a.study_design || '';
+          bVal = b.study_design || '';
+          break;
+        case 'sample_size':
+          aVal = parseSampleSize(a.sample_size);
+          bVal = parseSampleSize(b.sample_size);
+          break;
+        case 'relevance':
+          aVal = (a as any).relevanceScore || 0;
+          bVal = (b as any).relevanceScore || 0;
+          break;
+        default:
+          return 0;
+      }
+
+      if (aVal < bVal) return sortDirection === 'asc' ? -1 : 1;
+      if (aVal > bVal) return sortDirection === 'asc' ? 1 : -1;
+      return 0;
+    });
+
+    return sorted;
+  }, [studies, sortField, sortDirection]);
+
+  const handleSort = (field: SortField) => {
+    if (sortField === field) {
+      setSortDirection(sortDirection === 'asc' ? 'desc' : 'asc');
+    } else {
+      setSortField(field);
+      setSortDirection('desc');
+    }
+  };
+
+  const toggleStudySelection = (studyId: string) => {
+    setSelectedStudies((prev) => {
+      const next = new Set(prev);
+      if (next.has(studyId)) {
+        next.delete(studyId);
+      } else {
+        next.add(studyId);
+      }
+      return next;
+    });
+  };
+
+  const toggleSelectAll = () => {
+    if (selectedStudies.size === studies.length) {
+      setSelectedStudies(new Set());
+    } else {
+      setSelectedStudies(new Set(studies.map((s) => s.study_id)));
+    }
+  };
+
+  const SortButton = ({ field, label }: { field: SortField; label: string }) => (
+    <button
+      onClick={() => handleSort(field)}
+      className="flex items-center gap-1 font-semibold text-gray-700 hover:text-gray-900 dark:text-gray-300 dark:hover:text-gray-100"
+    >
+      {label}
+      {sortField === field ? (
+        sortDirection === 'asc' ? (
+          <ArrowUp className="h-4 w-4" />
+        ) : (
+          <ArrowDown className="h-4 w-4" />
+        )
+      ) : (
+        <ArrowUpDown className="h-4 w-4 opacity-30" />
+      )}
+    </button>
+  );
 
   return (
-    <div className="rounded-lg border">
-      <Table>
-        <TableHeader>
-          <TableRow>
-            <TableHead>Title</TableHead>
-            <TableHead className="w-16">Year</TableHead>
-            <TableHead className="w-24">Design</TableHead>
-            <TableHead className="w-20">N</TableHead>
-            <TableHead>Key Results</TableHead>
-            <TableHead className="w-24">Source</TableHead>
-            {showScoreBreakdown && <TableHead className="w-16">Score</TableHead>}
-          </TableRow>
-        </TableHeader>
-        <TableBody>
-          {studies.map((study) => (
-            <TableRow key={study.study_id}>
-              <TableCell className="max-w-xs">
-                <div className="space-y-1">
-                  <p className="text-sm font-medium leading-tight">{study.title}</p>
-                  <div className="flex flex-wrap gap-1">
-                    <PreprintBadge status={study.preprint_status} />
-                    <ReviewTypeBadge reviewType={study.review_type} />
-                  </div>
-                </div>
-              </TableCell>
-              <TableCell className="text-sm">{study.year}</TableCell>
-              <TableCell>
-                <StudyBadge design={study.study_design} />
-              </TableCell>
-              <TableCell className="text-sm">
-                {study.sample_size != null ? study.sample_size.toLocaleString() : '—'}
-              </TableCell>
-              <TableCell className="max-w-sm text-sm text-muted-foreground">
-                {study.outcomes
-                  .filter((o) => o.key_result)
-                  .map((o) => o.key_result)
-                  .join('; ') || '—'}
-              </TableCell>
-              <TableCell>
-                <SourceBadge source={study.source} />
-              </TableCell>
+    <div className="space-y-4">
+      {selectedStudies.size > 0 && (
+        <div className="flex items-center justify-between rounded-lg border bg-blue-50 p-3 dark:bg-blue-950/30">
+          <span className="text-sm font-medium">
+            {selectedStudies.size} {selectedStudies.size === 1 ? 'study' : 'studies'} selected
+          </span>
+          <div className="flex gap-2">
+            <Button variant="outline" size="sm">
+              Compare
+            </Button>
+            <Button variant="outline" size="sm">
+              Export Selected
+            </Button>
+            <Button variant="ghost" size="sm" onClick={() => setSelectedStudies(new Set())}>
+              Clear
+            </Button>
+          </div>
+        </div>
+      )}
+
+      <div className="overflow-x-auto rounded-lg border">
+        <table className="w-full border-collapse">
+          <thead className="bg-muted/50">
+            <tr>
+              <th className="border-b p-3 text-left">
+                <button
+                  onClick={toggleSelectAll}
+                  className="flex items-center gap-2 text-gray-700 hover:text-gray-900 dark:text-gray-300 dark:hover:text-gray-100"
+                >
+                  {selectedStudies.size === studies.length && studies.length > 0 ? (
+                    <CheckSquare className="h-4 w-4" />
+                  ) : (
+                    <Square className="h-4 w-4" />
+                  )}
+                </button>
+              </th>
+              <th className="border-b p-3 text-left">
+                <SortButton field="title" label="Study" />
+              </th>
+              <th className="border-b p-3 text-left">
+                <SortButton field="year" label="Year" />
+              </th>
+              <th className="border-b p-3 text-left">
+                <SortButton field="design" label="Design" />
+              </th>
+              <th className="border-b p-3 text-left">
+                <SortButton field="sample_size" label="N" />
+              </th>
+              <th className="border-b p-3 text-left">Key Findings</th>
               {showScoreBreakdown && (
-                <TableCell className="text-sm font-mono">
-                  {(study as any).relevanceScore?.toFixed(1) ?? '—'}
-                </TableCell>
+                <th className="border-b p-3 text-left">
+                  <SortButton field="relevance" label="Score" />
+                </th>
               )}
-            </TableRow>
-          ))}
-        </TableBody>
-      </Table>
+              <th className="border-b p-3 text-left">Links</th>
+            </tr>
+          </thead>
+          <tbody>
+            {sortedStudies.map((study) => {
+              const isSelected = selectedStudies.has(study.study_id);
+              const relevanceScore = (study as any).relevanceScore || 0;
+
+              return (
+                <tr
+                  key={study.study_id}
+                  className={cn(
+                    'border-b transition-colors hover:bg-muted/30',
+                    isSelected && 'bg-blue-50 dark:bg-blue-950/20',
+                  )}
+                >
+                  <td className="p-3">
+                    <button
+                      onClick={() => toggleStudySelection(study.study_id)}
+                      className="text-gray-700 hover:text-gray-900 dark:text-gray-300 dark:hover:text-gray-100"
+                    >
+                      {isSelected ? (
+                        <CheckSquare className="h-4 w-4 text-blue-600 dark:text-blue-400" />
+                      ) : (
+                        <Square className="h-4 w-4" />
+                      )}
+                    </button>
+                  </td>
+                  <td className="p-3">
+                    <div>
+                      <div className="font-medium leading-tight">{study.title}</div>
+                      <div className="mt-1 text-xs text-muted-foreground">
+                        {extractFirstAuthor(study.citation.formatted)}
+                        {study.preprint_status === 'Preprint' && (
+                          <span className="ml-2 rounded bg-amber-100 px-1.5 py-0.5 text-xs font-medium text-amber-800 dark:bg-amber-900 dark:text-amber-200">
+                            Preprint
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                  </td>
+                  <td className="p-3 text-sm">{study.year || '—'}</td>
+                  <td className="p-3 text-sm">
+                    <span className="rounded-full bg-muted px-2 py-1 text-xs font-medium">
+                      {study.study_design || 'Unknown'}
+                    </span>
+                  </td>
+                  <td className="p-3 text-sm">{study.sample_size || '—'}</td>
+                  <td className="max-w-md p-3 text-sm">
+                    {study.outcomes && study.outcomes.length > 0 ? (
+                      <div className="space-y-1">
+                        {study.outcomes
+                          .filter((o) => o.key_result)
+                          .slice(0, 2)
+                          .map((outcome, idx) => (
+                            <div key={idx} className="text-gray-700 dark:text-gray-300">
+                              <span className="font-medium">{outcome.outcome_measured}:</span>{' '}
+                              {truncate(outcome.key_result || '', 80)}
+                            </div>
+                          ))}
+                        {study.outcomes.filter((o) => o.key_result).length > 2 && (
+                          <div className="text-xs text-muted-foreground">
+                            +{study.outcomes.filter((o) => o.key_result).length - 2} more
+                          </div>
+                        )}
+                      </div>
+                    ) : (
+                      <span className="text-muted-foreground">No outcomes reported</span>
+                    )}
+                  </td>
+                  {showScoreBreakdown && (
+                    <td className="p-3 text-sm">
+                      <span
+                        className={cn(
+                          'rounded-full px-2 py-1 text-xs font-medium',
+                          relevanceScore >= 2
+                            ? 'bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200'
+                            : relevanceScore >= 0
+                              ? 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900 dark:text-yellow-200'
+                              : 'bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-200',
+                        )}
+                      >
+                        {relevanceScore.toFixed(1)}
+                      </span>
+                    </td>
+                  )}
+                  <td className="p-3">
+                    <div className="flex gap-1">
+                      {study.openalex_id && (
+                        <Button variant="ghost" size="sm" asChild>
+                          
+                            href={`https://openalex.org/${study.openalex_id}`}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            title="View in OpenAlex"
+                          >
+                            <ExternalLink className="h-4 w-4" />
+                          </a>
+                        </Button>
+                      )}
+                      {study.doi && (
+                        <Button variant="ghost" size="sm" asChild>
+                          
+                            href={`https://doi.org/${study.doi}`}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            title="View DOI"
+                          >
+                            DOI
+                          </a>
+                        </Button>
+                      )}
+                    </div>
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+
+      {sortedStudies.length === 0 && (
+        <div className="py-12 text-center text-muted-foreground">
+          No studies to display
+        </div>
+      )}
     </div>
   );
+}
+
+// Helper functions
+function extractFirstAuthor(citation: string | null | undefined): string {
+  if (!citation) return 'Unknown';
+  const match = citation.match(/^([^,(]+)/);
+  if (match) {
+    return match[1].replace(/\set al\.?$/i, '').trim();
+  }
+  return 'Unknown';
+}
+
+function parseSampleSize(size: number | string | null | undefined): number {
+  if (typeof size === 'number') return size;
+  if (typeof size === 'string') {
+    const parsed = parseInt(size.replace(/[^\d]/g, ''));
+    return isNaN(parsed) ? 0 : parsed;
+  }
+  return 0;
+}
+
+function truncate(text: string, maxLength: number): string {
+  if (text.length <= maxLength) return text;
+  return text.slice(0, maxLength) + '...';
 }
