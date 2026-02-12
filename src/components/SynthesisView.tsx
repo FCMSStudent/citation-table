@@ -5,6 +5,25 @@ import type { StudyResult } from "@/types/research";
 import { Button } from './ui/button';
 import { cn } from '@/lib/utils';
 
+const OUTCOME_NORM_REGEX = /\b(symptoms?|levels?|scores?|measures?|rates?|performance)\b/g;
+const AUTHOR_EXTRACT_REGEX = /^([^,(]+)/;
+const ET_AL_REGEX = /\set al\.?$/i;
+
+const CAUSAL_MAP: Record<string, string> = {
+  'cause': 'was associated with',
+  'causes': 'was associated with',
+  'caused': 'was associated with',
+  'causing': 'was associated with',
+  'led to': 'was associated with',
+  'leads to': 'was associated with',
+  'resulted in': 'showed',
+  'results in': 'showed',
+  'due to': 'associated with',
+  'effect of': 'association with',
+};
+
+const CAUSAL_REGEX = /\b(cause[ds]?|causing|led to|leads to|resulted in|results in|due to|effect of)\b/gi;
+
 interface SynthesisViewProps {
   studies: StudyResult[];
   outcomeAggregation: Array<{
@@ -297,9 +316,9 @@ function formatCitation(study: StudyResult): string {
 
 function extractFirstAuthor(citation: string | null | undefined): string {
   if (!citation) return 'Unknown';
-  const match = citation.match(/^([^,(]+)/);
+  const match = citation.match(AUTHOR_EXTRACT_REGEX);
   if (match) {
-    return match[1].replace(/\set al\.?$/i, '').trim();
+    return match[1].replace(ET_AL_REGEX, '').trim();
   }
   return 'Unknown';
 }
@@ -307,17 +326,12 @@ function extractFirstAuthor(citation: string | null | undefined): string {
 function normalizeOutcome(outcome: string): string {
   return outcome
     .toLowerCase()
-    .replace(/\b(symptoms?|levels?|scores?|measures?|rates?|performance)\b/g, '')
+    .replace(OUTCOME_NORM_REGEX, '')
     .trim();
 }
 
 function sanitizeResult(result: string): string {
-  return result
-    .replace(/\b(cause[ds]?|causing)\b/gi, 'was associated with')
-    .replace(/\b(led to|leads to)\b/gi, 'was associated with')
-    .replace(/\b(resulted in|results in)\b/gi, 'showed')
-    .replace(/\b(due to)\b/gi, 'associated with')
-    .replace(/\beffect of\b/gi, 'association with');
+  return result.replace(CAUSAL_REGEX, (match) => CAUSAL_MAP[match.toLowerCase()] || match);
 }
 
 function getQualityNotes(studies: StudyResult[]): string[] {

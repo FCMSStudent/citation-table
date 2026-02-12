@@ -12,6 +12,8 @@ import { isLowValueStudy, sortByRelevance } from '@/utils/relevanceScore';
 import { FilterBar, type SortOption, type StudyDesignFilter } from './FilterBar';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from './ui/tabs';
 
+const OUTCOME_NORM_REGEX = /\b(symptoms?|levels?|scores?)\b/g;
+
 type ViewMode = 'synthesis' | 'table' | 'cards';
 
 interface ResultsTableProps {
@@ -108,7 +110,7 @@ export function ResultsTable({
       study.outcomes?.forEach(outcome => {
         if (outcome.key_result) {
           const normalized = outcome.outcome_measured.toLowerCase()
-            .replace(/\b(symptoms?|levels?|scores?)\b/g, '')
+            .replace(OUTCOME_NORM_REGEX, '')
             .trim();
           
           if (!outcomeMap.has(normalized)) {

@@ -9,6 +9,7 @@ A React + Vite research assistant that provides citation-grounded evidence extra
 - **Citation Grounding**: Every result is tied to specific papers with DOI/PubMed/OpenAlex IDs
 - **Query Normalization**: Automatically converts evaluative language to neutral medical terms
 - **Export Options**: Download results as RIS citations or narrative summaries
+- **Paper Download Service**: Python microservice for downloading full-text papers by DOI/PMID/title
 - **Optional Supabase Integration**: Auth, search history, and saved queries (when configured)
 - **Paper Download Service**: Optional Python FastAPI microservice to download full-text PDFs using SciDownl
 
@@ -84,7 +85,7 @@ See [server/README.md](server/README.md) for full documentation.
 
 ## Quick Start
 
-### Local Development Setup
+### Frontend - Local Development Setup
 
 1. **Clone and install dependencies**
    ```sh
@@ -115,6 +116,54 @@ See [server/README.md](server/README.md) for full documentation.
    ```
    
    The app will run at http://localhost:8080
+
+### Paper Download Service - Local Development
+
+The optional Python microservice allows downloading full-text papers by DOI, PMID, or title.
+
+1. **Install Python dependencies**
+   ```sh
+   cd server
+   pip install -r requirements.txt
+   ```
+
+2. **Run the service**
+   ```sh
+   uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
+   ```
+   
+   The service will run at http://localhost:8000
+   - API documentation: http://localhost:8000/docs
+   - Health check: http://localhost:8000/health
+
+3. **Example API call from frontend**
+   ```typescript
+   // Request a paper download by DOI
+   const response = await fetch('http://localhost:8000/api/download', {
+     method: 'POST',
+     headers: { 'Content-Type': 'application/json' },
+     body: JSON.stringify({
+       keyword: '10.1145/3375633',
+       paper_type: 'doi'
+     })
+   });
+   
+   const { task_id } = await response.json();
+   
+   // Poll for status
+   const statusResponse = await fetch(`http://localhost:8000/api/status/${task_id}`);
+   const status = await statusResponse.json();
+   // status.status can be: 'pending', 'processing', 'completed', or 'failed'
+   ```
+
+4. **Or use Docker**
+   ```sh
+   cd server
+   docker build -t paper-download-service .
+   docker run -d -p 8000:8000 --name paper-service paper-download-service
+   ```
+
+See [server/README.md](server/README.md) for complete API documentation.
 
 ### What Works Without Supabase Publishable Key?
 
@@ -164,8 +213,12 @@ The `/research` edge function needs to be deployed to Supabase:
   - `/src/components/` - UI components
   - `/src/lib/supabase.ts` - Optional Supabase configuration
 
-- **Backend** (Supabase Edge Functions)
+- **Backend Services**
   - `/supabase/functions/research/` - Research API that calls OpenAlex + Semantic Scholar
+  - `/server/` - Python microservice for downloading papers (FastAPI + SciDownl)
+    - `/server/app/main.py` - FastAPI application with download endpoints
+    - `/server/storage/` - Downloaded PDF storage (git-ignored)
+    - `/server/Dockerfile` - Container configuration
 
 - **Paper Download Service** (Optional Python FastAPI)
   - `/server/` - FastAPI microservice for downloading papers via SciDownl
