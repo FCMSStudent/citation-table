@@ -328,7 +328,7 @@ async function enrichWithCrossref(papers: UnifiedPaper[]): Promise<UnifiedPaper[
         try {
           const response = await fetch(`https://api.crossref.org/works/${encodedDoi}`, {
             headers: {
-              'User-Agent': 'CitationTable/1.0 (mailto:support@example.com)'
+              'User-Agent': 'CitationTable/1.0 (https://github.com/FCMSStudent/citation-table)'
             },
             signal: controller.signal
           });
@@ -362,7 +362,7 @@ async function enrichWithCrossref(papers: UnifiedPaper[]): Promise<UnifiedPaper[
             `https://api.crossref.org/works?query.bibliographic=${encodedTitle}&rows=1`,
             {
               headers: {
-                'User-Agent': 'CitationTable/1.0 (mailto:support@example.com)'
+                'User-Agent': 'CitationTable/1.0 (https://github.com/FCMSStudent/citation-table)'
               },
               signal: controller.signal
             }
