@@ -79,6 +79,7 @@ interface UnifiedPaper {
   source: "openalex" | "semantic_scholar";
   citationCount?: number;
   publicationTypes?: string[];
+  journal?: string;
 }
 
 // Reconstruct abstract from OpenAlex inverted index
@@ -310,6 +311,107 @@ function deduplicateAndMerge(s2Papers: UnifiedPaper[], openAlexPapers: UnifiedPa
   return Array.from(uniquePapers);
 }
 
+// Enrich papers with Crossref metadata
+async function enrichWithCrossref(papers: UnifiedPaper[]): Promise<UnifiedPaper[]> {
+  const enrichedPapers = [...papers];
+  
+  for (const paper of enrichedPapers) {
+    try {
+      let crossrefData = null;
+      
+      // Try fetching by DOI first
+      if (paper.doi) {
+        const encodedDoi = encodeURIComponent(paper.doi);
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 5000); // 5 second timeout
+        
+        try {
+          const response = await fetch(`https://api.crossref.org/works/${encodedDoi}`, {
+            headers: {
+              'User-Agent': 'CitationTable/1.0 (mailto:support@example.com)'
+            },
+            signal: controller.signal
+          });
+          clearTimeout(timeoutId);
+          
+          if (response.ok) {
+            const data = await response.json();
+            crossrefData = data.message;
+          } else if (response.status === 404) {
+            console.log(`[Crossref] DOI not found: ${paper.doi}`);
+          } else if (response.status === 429) {
+            console.warn(`[Crossref] Rate limit hit for DOI: ${paper.doi}`);
+          }
+        } catch (error) {
+          clearTimeout(timeoutId);
+          if (error.name === 'AbortError') {
+            console.warn(`[Crossref] Request timeout for DOI: ${paper.doi}`);
+          } else {
+            throw error;
+          }
+        }
+      } 
+      // Fallback: search by title if no DOI
+      else if (paper.title) {
+        const encodedTitle = encodeURIComponent(paper.title);
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 5000);
+        
+        try {
+          const response = await fetch(
+            `https://api.crossref.org/works?query.bibliographic=${encodedTitle}&rows=1`,
+            {
+              headers: {
+                'User-Agent': 'CitationTable/1.0 (mailto:support@example.com)'
+              },
+              signal: controller.signal
+            }
+          );
+          clearTimeout(timeoutId);
+          
+          if (response.ok) {
+            const data = await response.json();
+            if (data.message.items && data.message.items.length > 0) {
+              crossrefData = data.message.items[0];
+            }
+          }
+        } catch (error) {
+          clearTimeout(timeoutId);
+          if (error.name === 'AbortError') {
+            console.warn(`[Crossref] Request timeout for title search: ${paper.title}`);
+          } else {
+            throw error;
+          }
+        }
+      }
+      
+      // Merge Crossref data into paper
+      if (crossrefData) {
+        paper.doi = crossrefData.DOI || paper.doi;
+        paper.year = crossrefData.issued?.['date-parts']?.[0]?.[0] || paper.year;
+        paper.citationCount = crossrefData['is-referenced-by-count'] || paper.citationCount;
+        
+        // Add journal/publisher metadata
+        if (crossrefData['container-title']?.[0]) {
+          paper.journal = crossrefData['container-title'][0];
+        }
+        
+        console.log(`[Crossref] Enriched "${paper.title}" with citation count: ${crossrefData['is-referenced-by-count']}`);
+      }
+      
+      // Rate limiting: small delay between requests
+      await new Promise(resolve => setTimeout(resolve, 100));
+      
+    } catch (error) {
+      console.error(`[Crossref] Enrichment failed for paper "${paper.title}":`, error);
+      // Continue without enrichment
+    }
+  }
+  
+  console.log(`[Crossref] Enrichment complete for ${enrichedPapers.length} papers`);
+  return enrichedPapers;
+}
+
 // Extract data using LLM with strict prompting per meta prompt
 async function extractStudyData(
   papers: UnifiedPaper[],
@@ -513,8 +615,11 @@ serve(async (req) => {
       );
     }
 
+    // Step 3.5: Enrich with Crossref data
+    const enrichedPapers = await enrichWithCrossref(allPapers);
+
     // Filter papers with sufficient abstracts
-    const papersWithAbstracts = allPapers.filter(p => p.abstract.length > 50);
+    const papersWithAbstracts = enrichedPapers.filter(p => p.abstract.length > 50);
     console.log(`[Research] ${papersWithAbstracts.length} papers with valid abstracts`);
 
     if (papersWithAbstracts.length === 0) {
