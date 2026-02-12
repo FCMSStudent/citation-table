@@ -277,7 +277,7 @@ interface ArxivEntry {
 // Query arXiv API
 async function searchArxiv(query: string): Promise<UnifiedPaper[]> {
   const encodedQuery = encodeURIComponent(query);
-  const url = `http://export.arxiv.org/api/query?search_query=all:${encodedQuery}&max_results=25`;
+  const url = `https://export.arxiv.org/api/query?search_query=all:${encodedQuery}&max_results=25`;
   
   console.log(`[ArXiv] Searching: ${query}`);
   

@@ -237,7 +237,7 @@ export const StudyCard = memo(({ study, query, relevanceScore, isLowValue = fals
 
               {study.source === 'arxiv' && study.study_id && (
                 <a
-                  href={sanitizeUrl(`https://arxiv.org/abs/${study.study_id.replace('http://arxiv.org/abs/', '')}`)}
+                  href={sanitizeUrl(`https://arxiv.org/abs/${study.study_id}`)}
                   target="_blank"
                   rel="noopener noreferrer"
                   className="inline-flex items-center gap-1 text-sm text-primary hover:underline"
