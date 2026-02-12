@@ -102,7 +102,7 @@ export function ResultsTable({
     const outcomeMap = new Map<string, Array<{
       study: StudyResult;
       result: string;
-    }>();
+    }>>();
 
     mainStudies.forEach(study => {
       study.outcomes?.forEach(outcome => {
