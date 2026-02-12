@@ -300,15 +300,14 @@ async function searchArxiv(query: string): Promise<UnifiedPaper[]> {
       const titleElement = entry.querySelector("title");
       const publishedElement = entry.querySelector("published");
       const summaryElement = entry.querySelector("summary");
-      const doiElement = entry.querySelector("doi");
       
       if (!idElement || !titleElement || !publishedElement || !summaryElement) {
         continue; // Skip entries with missing required fields
       }
       
       const fullId = idElement.textContent?.trim() || "";
-      // Extract arXiv ID from URL (e.g., "http://arxiv.org/abs/2301.12345v1" -> "2301.12345")
-      const arxivId = fullId.replace(/^http:\/\/arxiv\.org\/abs\//, "").replace(/v\d+$/, "");
+      // Extract arXiv ID from URL (e.g., "http://arxiv.org/abs/2301.12345v1" or "https://arxiv.org/abs/2301.12345v1" -> "2301.12345")
+      const arxivId = fullId.replace(/^https?:\/\/arxiv\.org\/abs\//, "").replace(/v\d+$/, "");
       
       const title = titleElement.textContent?.trim().replace(/\s+/g, " ") || "Untitled";
       const published = publishedElement.textContent?.trim() || "";
@@ -325,8 +324,12 @@ async function searchArxiv(query: string): Promise<UnifiedPaper[]> {
         }
       }
       
-      // Extract DOI if present
-      const doi = doiElement?.textContent?.trim() || null;
+      // Extract DOI if present (arXiv uses arxiv:doi namespace)
+      let doi: string | null = null;
+      const doiElement = entry.querySelector("arxiv\\:doi");
+      if (doiElement) {
+        doi = doiElement.textContent?.trim() || null;
+      }
       
       papers.push({
         id: arxivId,
