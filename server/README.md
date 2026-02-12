@@ -48,6 +48,27 @@ A lightweight Python FastAPI microservice for downloading research papers using 
    docker rm paper-service
    ```
 
+### Docker Compose (Recommended)
+
+The easiest way to run the service with persistent storage:
+
+```bash
+cd server
+docker-compose up -d
+```
+
+Stop the service:
+
+```bash
+docker-compose down
+```
+
+This will:
+- Build the image if it doesn't exist
+- Mount the `storage/` directory for persistent PDF storage
+- Restart automatically if the container crashes
+- Include health checks
+
 ## API Endpoints
 
 ### POST /api/download
