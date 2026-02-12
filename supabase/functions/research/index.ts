@@ -314,7 +314,7 @@ function deduplicateAndMerge(s2Papers: UnifiedPaper[], openAlexPapers: UnifiedPa
 async function extractStudyData(
   papers: UnifiedPaper[],
   question: string,
-  apiKey: string
+  geminiApiKey: string
 ): Promise<StudyResult[]> {
   const papersContext = papers.map((p, i) => ({
     index: i,
@@ -383,39 +383,44 @@ Extract structured data from each paper's abstract following the strict rules. R
 - No inference - null for missing data
 - Verbatim extraction for populations and numerical results`;
 
-  console.log(`[LLM] Sending ${papers.length} papers for extraction`);
+  console.log(`[LLM] Sending ${papers.length} papers for extraction via Google Gemini`);
 
-  const response = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
+  const geminiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${geminiApiKey}`;
+
+  const response = await fetch(geminiUrl, {
     method: "POST",
     headers: {
-      "Authorization": `Bearer ${apiKey}`,
       "Content-Type": "application/json",
     },
     body: JSON.stringify({
-      model: "google/gemini-2.5-flash",
-      messages: [
-        { role: "system", content: systemPrompt },
-        { role: "user", content: userPrompt },
+      contents: [
+        {
+          role: "user",
+          parts: [{ text: `${systemPrompt}\n\n${userPrompt}` }],
+        },
       ],
-      temperature: 0.1, // Low temperature for consistency
+      generationConfig: {
+        temperature: 0.1,
+        responseMimeType: "application/json",
+      },
     }),
   });
 
   if (!response.ok) {
     const errorText = await response.text();
-    console.error(`[LLM] Error: ${response.status}`, errorText);
+    console.error(`[LLM] Gemini error: ${response.status}`, errorText);
     
     if (response.status === 429) {
       throw new Error("Rate limit exceeded. Please try again in a moment.");
     }
-    if (response.status === 402) {
-      throw new Error("API credits exhausted. Please add credits to continue.");
+    if (response.status === 403) {
+      throw new Error("Invalid Google Gemini API key. Please check your key.");
     }
     throw new Error(`LLM extraction failed: ${response.status}`);
   }
 
   const data = await response.json();
-  const content = data.choices?.[0]?.message?.content || "";
+  const content = data.candidates?.[0]?.content?.parts?.[0]?.text || "";
   
   console.log(`[LLM] Raw response length: ${content.length}`);
 
@@ -467,11 +472,11 @@ serve(async (req) => {
       );
     }
 
-    const LOVABLE_API_KEY = Deno.env.get("LOVABLE_API_KEY");
-    if (!LOVABLE_API_KEY) {
-      console.error("LOVABLE_API_KEY not configured");
+    const GOOGLE_GEMINI_API_KEY = Deno.env.get("GOOGLE_GEMINI_API_KEY");
+    if (!GOOGLE_GEMINI_API_KEY) {
+      console.error("GOOGLE_GEMINI_API_KEY not configured");
       return new Response(
-        JSON.stringify({ error: "AI service not configured" }),
+        JSON.stringify({ error: "AI service not configured. Please add your Google Gemini API key." }),
         { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
     }
@@ -535,7 +540,7 @@ serve(async (req) => {
     const results = await extractStudyData(
       topPapers,
       question,
-      LOVABLE_API_KEY
+      GOOGLE_GEMINI_API_KEY
     );
 
     console.log(`[Research] Returning ${results.length} structured results`);
