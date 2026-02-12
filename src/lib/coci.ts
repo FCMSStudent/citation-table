@@ -36,6 +36,7 @@ export async function fetchCociForDoi(doi: string): Promise<CociResponse> {
   }
 
   // Optional: include API key if available (for rate limiting, analytics, etc.)
+  // Check multiple possible env var names for compatibility with different configurations
   const apiKey = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY || 
                  import.meta.env.VITE_SUPABASE_PUBLISHABLE_DEFAULT_KEY ||
                  import.meta.env.VITE_SUPABASE_ANON_KEY;

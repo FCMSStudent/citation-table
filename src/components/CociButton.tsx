@@ -85,8 +85,8 @@ export function CociButton({ doi }: CociButtonProps) {
             COCI Citations ({citations.length})
           </h3>
           <ul className="space-y-2 text-sm">
-            {citations.map((citation, index) => (
-              <li key={index} className="border-l-2 border-primary/30 pl-3">
+            {citations.map((citation) => (
+              <li key={`${citation.citing}-${citation.cited}`} className="border-l-2 border-primary/30 pl-3">{" "}
                 <div className="font-mono text-xs">
                   <span className="text-muted-foreground">Citing:</span>{" "}
                   <span className="font-medium">{citation.citing}</span>
