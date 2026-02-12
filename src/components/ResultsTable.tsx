@@ -1,16 +1,18 @@
 import { useMemo, useState } from 'react';
-import { Code, Download, Eye, EyeOff, FileText } from 'lucide-react';
+import { Code, Download, Eye, EyeOff, FileText, Table2, List } from 'lucide-react';
 import type { StudyResult } from '@/types/research';
 import { StudyCard } from './StudyCard';
+import { SynthesisView } from './SynthesisView'; // NEW
+import { TableView } from './TableView'; // NEW
 import { Button } from './ui/button';
 import { downloadRISFile } from '@/lib/risExport';
+import { downloadCSV } from '@/lib/csvExport'; // NEW
 import { generateNarrativeSummary } from '@/lib/narrativeSummary';
 import { isLowValueStudy, sortByRelevance } from '@/utils/relevanceScore';
 import { FilterBar, type SortOption, type StudyDesignFilter } from './FilterBar';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from './ui/tabs';
 
-function pluralize(count: number, singular: string, plural: string): string {
-  return count === 1 ? singular : plural;
-}
+type ViewMode = 'synthesis' | 'table' | 'cards';
 
 interface ResultsTableProps {
   results: StudyResult[];
@@ -21,8 +23,6 @@ interface ResultsTableProps {
   semanticScholarCount?: number;
 }
 
-type ScoredStudy = StudyResult & { relevanceScore: number };
-
 export function ResultsTable({
   results,
   query,
@@ -31,9 +31,12 @@ export function ResultsTable({
   openalexCount,
   semanticScholarCount,
 }: ResultsTableProps) {
+  // View state
+  const [viewMode, setViewMode] = useState<ViewMode>('synthesis');
   const [showExcludedStudies, setShowExcludedStudies] = useState(false);
-  const [showNarrative, setShowNarrative] = useState(false);
   const [showJSON, setShowJSON] = useState(false);
+  
+  // Filter state
   const [sortBy, setSortBy] = useState<SortOption>('relevance');
   const [studyDesign, setStudyDesign] = useState<StudyDesignFilter>('all');
   const [explicitOnly, setExplicitOnly] = useState(false);
@@ -41,6 +44,7 @@ export function ResultsTable({
 
   const activeQuery = normalizedQuery || query;
 
+  // Scored and filtered results
   const scoredResults = useMemo(() => sortByRelevance(results, activeQuery), [results, activeQuery]);
 
   const explicitMatches = useMemo(
@@ -49,7 +53,6 @@ export function ResultsTable({
         const outcomesText = study.outcomes
           ?.map((outcome) => `${outcome.outcome_measured} ${outcome.key_result || ''}`.toLowerCase())
           .join(' ') || '';
-
         return study.outcomes.length > 0 && !outcomesText.includes('no outcomes reported');
       }),
     [scoredResults],
@@ -89,24 +92,54 @@ export function ResultsTable({
     [withFilters],
   );
 
+  // Narrative summary
+  const narrativeSummary = useMemo(() => {
+    return generateNarrativeSummary(mainStudies, activeQuery);
+  }, [mainStudies, activeQuery]);
+
+  // Outcome aggregation
+  const outcomeAggregation = useMemo(() => {
+    const outcomeMap = new Map<string, Array<{
+      study: StudyResult;
+      result: string;
+    }>();
+
+    mainStudies.forEach(study => {
+      study.outcomes?.forEach(outcome => {
+        if (outcome.key_result) {
+          const normalized = outcome.outcome_measured.toLowerCase()
+            .replace(/\b(symptoms?|levels?|scores?)\b/g, '')
+            .trim();
+          
+          if (!outcomeMap.has(normalized)) {
+            outcomeMap.set(normalized, []);
+          }
+          
+          outcomeMap.get(normalized)!.push({
+            study,
+            result: outcome.key_result
+          });
+        }
+      });
+    });
+
+    return Array.from(outcomeMap.entries())
+      .map(([outcome, studies]) => ({
+        outcome,
+        studyCount: studies.length,
+        studies
+      }))
+      .sort((a, b) => b.studyCount - a.studyCount);
+  }, [mainStudies]);
+
+  // Export handlers
   const handleExportRIS = () => {
-    downloadRISFile(results, `research-${Date.now()}.ris`);
+    downloadRISFile(mainStudies, `research-${Date.now()}.ris`);
   };
 
-  const narrativeSummary = useMemo(() => {
-    return generateNarrativeSummary(results, activeQuery);
-  }, [results, activeQuery]);
-
-  const outcomeSummary = useMemo(() => {
-    const highRelevance = explicitMatches.filter((study) => study.relevanceScore >= 2).length;
-    const lowRelevance = explicitMatches.filter((study) => study.relevanceScore <= 0).length;
-
-    return {
-      found: explicitMatches.length,
-      highRelevance,
-      lowRelevance,
-    };
-  }, [explicitMatches]);
+  const handleExportCSV = () => {
+    downloadCSV(mainStudies, `research-${Date.now()}.csv`);
+  };
 
   if (results.length === 0) {
     return null;
@@ -114,26 +147,43 @@ export function ResultsTable({
 
   return (
     <div className="w-full animate-fade-in">
-      <div className="mb-4 space-y-3">
+      {/* Header with stats */}
+      <div className="mb-6 space-y-4">
         <div className="flex flex-wrap items-center justify-between gap-2 text-sm text-muted-foreground">
           <div>
-            Showing <strong>{mainStudies.length}</strong> {pluralize(mainStudies.length, 'result', 'results')} from{' '}
-            <strong>{totalPapersSearched}</strong> papers searched
+            Found <strong>{mainStudies.length}</strong> relevant {mainStudies.length === 1 ? 'study' : 'studies'} from{' '}
+            <strong>{totalPapersSearched}</strong> papers
             {(openalexCount !== undefined || semanticScholarCount !== undefined) && (
-              <span className="ml-2">({openalexCount || 0} OpenAlex, {semanticScholarCount || 0} Semantic Scholar)</span>
+              <span className="ml-2 text-xs">
+                ({openalexCount || 0} OpenAlex, {semanticScholarCount || 0} Semantic Scholar)
+              </span>
             )}
           </div>
-          <div>
-            Query: <em>"{activeQuery}"</em>
-          </div>
         </div>
 
-        <div className="rounded-lg border bg-muted/30 p-3 text-sm">
-          <strong>Cognitive performance outcomes found in {outcomeSummary.found} studies.</strong>
-          <span className="ml-3">High relevance: {outcomeSummary.highRelevance}</span>
-          <span className="ml-3">Low relevance: {outcomeSummary.lowRelevance}</span>
+        {/* Synthesis Summary - PROMINENT PLACEMENT */}
+        <div className="rounded-lg border-l-4 border-l-blue-500 bg-gradient-to-r from-blue-50 to-transparent p-4 dark:from-blue-950/30">
+          <h3 className="mb-2 font-semibold text-blue-900 dark:text-blue-100">Research Synthesis</h3>
+          <p className="text-sm leading-relaxed text-gray-700 dark:text-gray-300">
+            {narrativeSummary}
+          </p>
+          
+          {/* Key outcomes summary */}
+          {outcomeAggregation.length > 0 && (
+            <div className="mt-3 flex flex-wrap gap-2">
+              {outcomeAggregation.slice(0, 5).map(({ outcome, studyCount }) => (
+                <span
+                  key={outcome}
+                  className="inline-flex items-center rounded-full bg-blue-100 px-3 py-1 text-xs font-medium text-blue-800 dark:bg-blue-900 dark:text-blue-200"
+                >
+                  {outcome} <span className="ml-1 text-blue-600 dark:text-blue-400">({studyCount})</span>
+                </span>
+              ))}
+            </div>
+          )}
         </div>
 
+        {/* Filters */}
         <FilterBar
           sortBy={sortBy}
           onSortByChange={setSortBy}
@@ -143,102 +193,127 @@ export function ResultsTable({
           onExplicitOnlyChange={setExplicitOnly}
         />
 
-        <div className="flex flex-wrap items-center gap-2">
-          {excludedStudies.length > 0 && (
-            <Button
-              onClick={() => setShowExcludedStudies(!showExcludedStudies)}
-              variant={showExcludedStudies ? 'default' : 'outline'}
-              size="sm"
-              className="gap-2"
-            >
-              {showExcludedStudies ? (
-                <>
-                  <EyeOff className="h-4 w-4" />
-                  Hide excluded studies
-                </>
-              ) : (
-                <>
-                  <Eye className="h-4 w-4" />
-                  Show excluded studies ({excludedStudies.length})
-                </>
-              )}
+        {/* View mode and actions */}
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <Tabs value={viewMode} onValueChange={(v) => setViewMode(v as ViewMode)}>
+            <TabsList>
+              <TabsTrigger value="synthesis" className="gap-2">
+                <FileText className="h-4 w-4" />
+                Synthesis
+              </TabsTrigger>
+              <TabsTrigger value="table" className="gap-2">
+                <Table2 className="h-4 w-4" />
+                Table
+              </TabsTrigger>
+              <TabsTrigger value="cards" className="gap-2">
+                <List className="h-4 w-4" />
+                Cards
+              </TabsTrigger>
+            </TabsList>
+          </Tabs>
+
+          <div className="flex flex-wrap items-center gap-2">
+            {excludedStudies.length > 0 && (
+              <Button
+                onClick={() => setShowExcludedStudies(!showExcludedStudies)}
+                variant="outline"
+                size="sm"
+                className="gap-2"
+              >
+                {showExcludedStudies ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                {showExcludedStudies ? 'Hide' : 'Show'} excluded ({excludedStudies.length})
+              </Button>
+            )}
+
+            <Button onClick={handleExportCSV} variant="outline" size="sm" className="gap-2">
+              <Download className="h-4 w-4" />
+              Export CSV
             </Button>
-          )}
 
-          {import.meta.env.DEV && (
-            <Button
-              onClick={() => setShowScoreBreakdown((prev) => !prev)}
-              variant="outline"
-              size="sm"
-            >
-              {showScoreBreakdown ? 'Hide' : 'Show'} score breakdown
+            <Button onClick={handleExportRIS} variant="outline" size="sm" className="gap-2">
+              <Download className="h-4 w-4" />
+              Export RIS
             </Button>
-          )}
 
-          <Button onClick={handleExportRIS} variant="outline" size="sm" className="gap-2">
-            <Download className="h-4 w-4" />
-            Export Citations (RIS)
-          </Button>
-
-          <Button onClick={() => setShowNarrative(!showNarrative)} variant="outline" size="sm" className="gap-2">
-            <FileText className="h-4 w-4" />
-            {showNarrative ? 'Hide' : 'Show'} Narrative Summary
-          </Button>
-
-          <Button onClick={() => setShowJSON(!showJSON)} variant="outline" size="sm" className="gap-2">
-            <Code className="h-4 w-4" />
-            {showJSON ? 'Hide' : 'View'} JSON
-          </Button>
+            {import.meta.env.DEV && (
+              <>
+                <Button onClick={() => setShowJSON(!showJSON)} variant="outline" size="sm" className="gap-2">
+                  <Code className="h-4 w-4" />
+                  JSON
+                </Button>
+                <Button onClick={() => setShowScoreBreakdown(!showScoreBreakdown)} variant="outline" size="sm">
+                  Scores
+                </Button>
+              </>
+            )}
+          </div>
         </div>
 
-        {showNarrative && (
-          <div className="rounded-lg border border-blue-200 bg-blue-50 p-4 dark:border-blue-800 dark:bg-blue-950">
-            <h3 className="mb-2 text-sm font-semibold text-blue-900 dark:text-blue-100">Narrative Summary</h3>
-            <p className="text-sm leading-relaxed text-blue-900 dark:text-blue-100">{narrativeSummary}</p>
-          </div>
-        )}
-
         {showJSON && (
-          <div className="rounded-lg border border-gray-200 bg-gray-50 p-4 dark:border-gray-800 dark:bg-gray-950">
-            <h3 className="mb-2 text-sm font-semibold text-gray-900 dark:text-gray-100">Structured JSON Output</h3>
-            <pre className="overflow-x-auto rounded border border-gray-200 bg-white p-2 text-xs dark:border-gray-700 dark:bg-gray-900">
-              {JSON.stringify(results, null, 2)}
+          <div className="rounded-lg border bg-muted/30 p-4">
+            <pre className="overflow-x-auto text-xs">
+              {JSON.stringify(mainStudies, null, 2)}
             </pre>
           </div>
         )}
       </div>
 
-      <div className="space-y-4">
-        {mainStudies.map((study) => (
-          <StudyCard
-            key={study.study_id}
-            study={study}
-            query={activeQuery}
-            relevanceScore={study.relevanceScore}
-            showScoreBreakdown={showScoreBreakdown}
-          />
-        ))}
-      </div>
+      {/* Content based on view mode */}
+      {viewMode === 'synthesis' && (
+        <SynthesisView
+          studies={mainStudies}
+          outcomeAggregation={outcomeAggregation}
+          query={activeQuery}
+        />
+      )}
 
-      {showExcludedStudies && excludedStudies.length > 0 && (
-        <div className="mt-6 space-y-4">
-          <h3 className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">Excluded Studies</h3>
-          {excludedStudies.map((study) => (
+      {viewMode === 'table' && (
+        <TableView
+          studies={mainStudies}
+          query={activeQuery}
+          showScoreBreakdown={showScoreBreakdown}
+        />
+      )}
+
+      {viewMode === 'cards' && (
+        <div className="space-y-4">
+          {mainStudies.map((study) => (
             <StudyCard
-              key={`excluded-${study.study_id}`}
+              key={study.study_id}
               study={study}
               query={activeQuery}
               relevanceScore={study.relevanceScore}
-              isLowValue
               showScoreBreakdown={showScoreBreakdown}
             />
           ))}
         </div>
       )}
 
-      {mainStudies.length === 0 && results.length > 0 && (
-        <div className="py-8 text-center text-muted-foreground">
+      {/* Excluded studies */}
+      {showExcludedStudies && excludedStudies.length > 0 && (
+        <div className="mt-8 space-y-4 border-t pt-8">
+          <h3 className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">
+            Excluded Studies ({excludedStudies.length})
+          </h3>
+          <div className="space-y-3">
+            {excludedStudies.map((study) => (
+              <StudyCard
+                key={`excluded-${study.study_id}`}
+                study={study}
+                query={activeQuery}
+                relevanceScore={study.relevanceScore}
+                isLowValue
+                showScoreBreakdown={showScoreBreakdown}
+              />
+            ))}
+          </div>
+        </div>
+      )}
+
+      {mainStudies.length === 0 && (
+        <div className="py-12 text-center text-muted-foreground">
           <p>No studies match your current filters.</p>
+          <p className="mt-2 text-sm">Try adjusting your filters or search query.</p>
         </div>
       )}
     </div>
