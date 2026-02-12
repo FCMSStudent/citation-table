@@ -198,12 +198,33 @@ When you have the URL configured but not the publishable key:
 
 ### Supabase Edge Function Setup
 
-The `/research` edge function needs to be deployed to Supabase:
+The project includes two edge functions that need to be deployed to Supabase:
+
+#### Research Function
+
+The `/research` edge function provides the main literature search functionality:
 
 1. Install Supabase CLI: https://supabase.com/docs/guides/cli
 2. Link your project: `supabase link --project-ref your-project-ref`
-3. Deploy functions: `supabase functions deploy research`
+3. Deploy the research function: `supabase functions deploy research`
 4. Set the `LOVABLE_API_KEY` secret in your Supabase project
+
+#### COCI Citations Function (Optional)
+
+The `/coci` edge function integrates with OpenCitations COCI API for citation data:
+
+1. Deploy the coci function: `supabase functions deploy coci`
+2. No additional secrets required - this function is publicly accessible
+3. Test the endpoint:
+   ```bash
+   curl "${VITE_SUPABASE_URL}/functions/v1/coci?doi=10.1000/xyz123"
+   ```
+
+The COCI function:
+- Accepts GET requests with `?doi=...` parameter or DOI in the path
+- Returns normalized citation records from OpenCitations
+- Provides a lightweight integration separate from the main research function
+- Can be used via the `CociButton` component or `fetchCociForDoi()` helper in `src/lib/coci.ts`
 
 ## Project Structure
 
