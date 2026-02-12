@@ -109,8 +109,8 @@ GET /api/status/{task_id}
   "task_id": "550e8400-e29b-41d4-a716-446655440000",
   "status": "completed",
   "result": {
-    "filepath": "/app/storage/10.1038_nature12373_1707711234_a1b2c3d4.pdf",
-    "filename": "10.1038_nature12373_1707711234_a1b2c3d4.pdf",
+    "filepath": "/app/storage/10.1038_nature12373_1707711234.pdf",
+    "filename": "10.1038_nature12373_1707711234.pdf",
     "original_keyword": "10.1038/nature12373",
     "paper_type": "doi"
   },
@@ -212,7 +212,7 @@ For production use, replace the in-memory storage with a persistent task queue:
 
 Downloaded PDFs are stored in the `server/storage/` directory with unique filenames:
 ```
-{sanitized_keyword}_{timestamp}_{hash}.pdf
+{sanitized_keyword}_{timestamp}.pdf
 ```
 
 The storage directory is:
