@@ -93,8 +93,50 @@ The `/research` edge function needs to be deployed to Supabase:
   - `/src/components/` - UI components
   - `/src/lib/supabase.ts` - Optional Supabase configuration
 
-- **Backend** (Supabase Edge Functions)
+- **Backend Services**
   - `/supabase/functions/research/` - Research API that calls OpenAlex + Semantic Scholar
+  - `/server/` - FastAPI microservice for downloading academic papers via SciHub (see [server/README.md](server/README.md))
+
+## Backend: Paper Download Service
+
+A lightweight Python FastAPI microservice that downloads academic papers using SciDownl (Sci-Hub interface). This service allows the frontend to request paper downloads and poll for completion status.
+
+### Quick Start
+
+```bash
+# Setup and run locally
+cd server
+python3 -m venv .venv && source .venv/bin/activate
+pip install -r requirements.txt
+uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
+```
+
+The service will be available at http://localhost:8000 with interactive API docs at http://localhost:8000/docs
+
+### Frontend Integration Example
+
+```typescript
+// Initiate a paper download
+const response = await fetch('http://localhost:8000/api/download', {
+  method: 'POST',
+  headers: { 'Content-Type': 'application/json' },
+  body: JSON.stringify({ 
+    keyword: '10.1038/nature12373',  // DOI, PMID, or URL
+    paper_type: 'doi' 
+  })
+});
+const { task_id } = await response.json();
+
+// Poll for status
+const statusResponse = await fetch(`http://localhost:8000/api/status/${task_id}`);
+const status = await statusResponse.json();
+// status.status: "pending" | "running" | "success" | "failed"
+// On success: status.result contains { filepath, filename }
+```
+
+For detailed setup instructions, API documentation, Docker deployment, and legal considerations, see [server/README.md](server/README.md).
+
+**⚠️ Legal Notice:** This service interfaces with Sci-Hub via SciDownl. Ensure compliance with local laws and institutional policies before use.
 
 ## Project info
 

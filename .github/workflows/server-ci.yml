@@ -1,0 +1,49 @@
+name: Server CI
+
+on:
+  push:
+    branches:
+      - main
+      - develop
+    paths:
+      - 'server/**'
+  pull_request:
+    paths:
+      - 'server/**'
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+      
+      - name: Set up Python 3.10
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.10'
+      
+      - name: Install dependencies
+        run: |
+          cd server
+          pip install --upgrade pip
+          pip install -r requirements.txt
+      
+      - name: Smoke test - Import FastAPI
+        run: |
+          python -c "import fastapi; print(f'FastAPI version: {fastapi.__version__}')"
+      
+      - name: Smoke test - Import SciDownl
+        run: |
+          python -c "import scidownl.api.scihub; print('SciDownl imported successfully')"
+      
+      - name: Smoke test - Import main app
+        run: |
+          cd server
+          python -c "from app.main import app; print('FastAPI app loaded successfully')"
+      
+      - name: Smoke test - Import scihub service
+        run: |
+          cd server
+          python -c "from app.services.scihub_service import download_paper; print('SciHub service loaded successfully')"
