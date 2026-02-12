@@ -11,6 +11,77 @@ A React + Vite research assistant that provides citation-grounded evidence extra
 - **Export Options**: Download results as RIS citations or narrative summaries
 - **Paper Download Service**: Python microservice for downloading full-text papers by DOI/PMID/title
 - **Optional Supabase Integration**: Auth, search history, and saved queries (when configured)
+- **Paper Download Service**: Optional Python FastAPI microservice to download full-text PDFs using SciDownl
+
+## Backend Service (Optional)
+
+This repository includes an optional Python FastAPI microservice for downloading academic papers. The service uses [SciDownl](https://github.com/Tishacy/SciDownl) to fetch PDFs from Sci-Hub.
+
+### ⚠️ Legal Warning
+
+**IMPORTANT:** This service downloads papers from Sci-Hub, which may violate copyright laws in your jurisdiction. This is provided for educational purposes only. Always check legal alternatives first (institutional access, open access repositories, etc.). Use at your own risk.
+
+### Quick Start (Backend Service)
+
+1. **Navigate to server directory**:
+   ```sh
+   cd server
+   ```
+
+2. **Install Python dependencies**:
+   ```sh
+   pip install -r requirements.txt
+   ```
+
+3. **Run the service**:
+   ```sh
+   uvicorn app.main:app --reload --port 8000
+   ```
+
+The API will be available at http://localhost:8000 with interactive docs at http://localhost:8000/docs
+
+### API Usage from Frontend
+
+Here's how to integrate the download service into your frontend:
+
+```javascript
+// Submit a download request
+async function downloadPaper(doi) {
+  const response = await fetch('http://localhost:8000/api/download', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      keyword: doi,
+      paper_type: 'doi'
+    })
+  });
+  const data = await response.json();
+  return data.task_id;
+}
+
+// Check download status
+async function checkStatus(taskId) {
+  const response = await fetch(`http://localhost:8000/api/status/${taskId}`);
+  return await response.json();
+}
+
+// Usage
+const taskId = await downloadPaper('10.1038/nature12373');
+// Poll checkStatus(taskId) until status is 'completed' or 'failed'
+```
+
+**Endpoints:**
+- `POST /api/download` - Submit download request (returns task_id)
+- `GET /api/status/{task_id}` - Check task status
+
+**Docker deployment:**
+```sh
+cd server
+docker build -t paper-download-service .
+docker run -p 8000:8000 -v $(pwd)/storage:/app/storage paper-download-service
+```
+
+See [server/README.md](server/README.md) for full documentation.
 
 ## Quick Start
 
@@ -148,6 +219,12 @@ The `/research` edge function needs to be deployed to Supabase:
     - `/server/app/main.py` - FastAPI application with download endpoints
     - `/server/storage/` - Downloaded PDF storage (git-ignored)
     - `/server/Dockerfile` - Container configuration
+
+- **Paper Download Service** (Optional Python FastAPI)
+  - `/server/` - FastAPI microservice for downloading papers via SciDownl
+  - `/server/app/main.py` - API endpoints
+  - `/server/app/services/scihub_service.py` - SciDownl wrapper
+  - See [server/README.md](server/README.md) for details
 
 ## Project info
 
