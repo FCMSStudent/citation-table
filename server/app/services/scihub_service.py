@@ -14,7 +14,6 @@ import shutil
 import logging
 from pathlib import Path
 from typing import Dict
-import hashlib
 import time
 
 logger = logging.getLogger(__name__)
@@ -73,8 +72,8 @@ def download_paper(keyword: str, paper_type: str = "doi") -> Dict[str, str]:
             # Sanitize the keyword for use in filename
             safe_keyword = keyword.replace("/", "_").replace(":", "_").replace(" ", "_")
             timestamp = int(time.time())
-            hash_suffix = hashlib.md5(keyword.encode()).hexdigest()[:8]
-            unique_filename = f"{safe_keyword}_{timestamp}_{hash_suffix}.pdf"
+            # Use timestamp and original name for uniqueness (no hash needed for non-security purpose)
+            unique_filename = f"{safe_keyword}_{timestamp}.pdf"
             
             # Destination path in storage
             dest_path = STORAGE_DIR / unique_filename

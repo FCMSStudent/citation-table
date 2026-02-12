@@ -2,12 +2,10 @@ name: Server CI
 
 on:
   push:
-    branches: [ main, feature/add-scidownl-integration ]
     paths:
       - 'server/**'
       - '.github/workflows/server-ci.yml'
   pull_request:
-    branches: [ main ]
     paths:
       - 'server/**'
       - '.github/workflows/server-ci.yml'

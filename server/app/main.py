@@ -46,7 +46,9 @@ TASKS: Dict[str, dict] = {}
 
 # Thread pool for background tasks
 # For heavy use, switch to Celery/Redis for better scalability
-executor = ThreadPoolExecutor(max_workers=4)
+import os
+MAX_WORKERS = int(os.getenv('MAX_WORKERS', '4'))
+executor = ThreadPoolExecutor(max_workers=MAX_WORKERS)
 
 
 class DownloadRequest(BaseModel):
