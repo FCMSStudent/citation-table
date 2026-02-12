@@ -23,6 +23,7 @@ interface ResultsTableProps {
   totalPapersSearched: number;
   openalexCount?: number;
   semanticScholarCount?: number;
+  arxivCount?: number;
 }
 
 export function ResultsTable({
@@ -32,6 +33,7 @@ export function ResultsTable({
   totalPapersSearched,
   openalexCount,
   semanticScholarCount,
+  arxivCount,
 }: ResultsTableProps) {
   // View state
   const [viewMode, setViewMode] = useState<ViewMode>('synthesis');
@@ -155,9 +157,9 @@ export function ResultsTable({
           <div>
             Found <strong>{mainStudies.length}</strong> relevant {mainStudies.length === 1 ? 'study' : 'studies'} from{' '}
             <strong>{totalPapersSearched}</strong> papers
-            {(openalexCount !== undefined || semanticScholarCount !== undefined) && (
+            {(openalexCount !== undefined || semanticScholarCount !== undefined || arxivCount !== undefined) && (
               <span className="ml-2 text-xs">
-                ({openalexCount || 0} OpenAlex, {semanticScholarCount || 0} Semantic Scholar)
+                ({openalexCount || 0} OpenAlex, {semanticScholarCount || 0} Semantic Scholar, {arxivCount || 0} arXiv)
               </span>
             )}
           </div>

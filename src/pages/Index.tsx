@@ -18,6 +18,7 @@ const Index = () => {
     totalPapersSearched,
     openalexCount,
     semanticScholarCount,
+    arxivCount,
     search 
   } = useResearch();
   
@@ -96,6 +97,7 @@ const Index = () => {
               totalPapersSearched={totalPapersSearched}
               openalexCount={openalexCount}
               semanticScholarCount={semanticScholarCount}
+              arxivCount={arxivCount}
             />
           </section>
         )}
@@ -108,7 +110,7 @@ const Index = () => {
       <footer className="border-t border-border py-6 mt-auto">
         <div className="container max-w-7xl mx-auto px-4 space-y-3">
           <p className="text-center text-sm text-muted-foreground">
-            Powered by OpenAlex + Semantic Scholar • All data extracted from paper abstracts • 
+            Powered by OpenAlex + Semantic Scholar + arXiv • All data extracted from paper abstracts • 
             <span className="font-medium"> No inference beyond explicit text</span>
           </p>
           <div className="text-center text-xs text-muted-foreground border-t border-border pt-3">

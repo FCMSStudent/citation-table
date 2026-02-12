@@ -4,8 +4,7 @@ A React + Vite research assistant that provides citation-grounded evidence extra
 
 ## Features
 
-- **Smart Literature Search**: Searches OpenAlex (25 papers) + Semantic Scholar (25 papers) in parallel
-- **Crossref Enrichment**: Enriches papers with citation counts, verified DOIs, and journal metadata from Crossref API
+- **Smart Literature Search**: Searches OpenAlex (25 papers) + Semantic Scholar (25 papers) + arXiv (25 papers) in parallel
 - **AI-Powered Extraction**: Uses Google Gemini to extract structured study data from abstracts
 - **Citation Grounding**: Every result is tied to specific papers with DOI/PubMed/OpenAlex IDs
 - **Query Normalization**: Automatically converts evaluative language to neutral medical terms
