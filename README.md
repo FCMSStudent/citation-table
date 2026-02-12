@@ -83,6 +83,40 @@ docker run -p 8000:8000 -v $(pwd)/storage:/app/storage paper-download-service
 
 See [server/README.md](server/README.md) for full documentation.
 
+## Crossref API Integration
+
+The application enriches paper metadata using the [Crossref REST API](https://api.crossref.org) to provide additional citation data and DOI verification.
+
+### What Crossref Provides
+
+- **Citation Counts**: Number of times a paper has been cited (from `is-referenced-by-count`)
+- **DOI Verification**: Validates and normalizes DOIs
+- **Journal Metadata**: Retrieves journal/publisher information
+- **Publication Years**: Enriches missing or incorrect publication dates
+
+### How It Works
+
+1. After fetching papers from OpenAlex and Semantic Scholar, the system queries Crossref
+2. For papers with DOIs, queries `https://api.crossref.org/works/{DOI}`
+3. For papers without DOIs, performs title-based search using `query.bibliographic`
+4. Enriches citation counts, DOIs, years, and journal metadata
+5. Rate limited to 100ms between requests (10 requests/second max)
+6. Request timeout of 5 seconds per paper
+
+### API Etiquette
+
+The integration follows [Crossref's API etiquette guidelines](https://github.com/CrossRef/rest-api-doc#etiquette):
+- Includes polite User-Agent header with project GitHub URL
+- Implements rate limiting to avoid API abuse
+- Handles errors gracefully (404, 429, timeouts) without breaking the search flow
+- No API key required (Crossref is open access)
+
+### UI Display
+
+- **Citation Counts**: Displayed in study cards (📊 X citations) and source badges
+- **DOI Links**: Clickable, sanitized links to `https://doi.org/{DOI}`
+- **Error Handling**: Enrichment failures don't prevent results from being displayed
+
 ## Quick Start
 
 ### Frontend - Local Development Setup
