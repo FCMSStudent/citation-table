@@ -1,12 +1,13 @@
 // components/TableView.tsx
 import { useMemo, useState } from 'react';
-import { ArrowDown, ArrowUp, ArrowUpDown, ExternalLink, CheckSquare, Square } from 'lucide-react';
+import { ArrowDown, ArrowUp, ArrowUpDown, ExternalLink } from 'lucide-react';
 import type { StudyResult } from '@/types/research';
 import { Button } from './ui/button';
+import { Checkbox } from './ui/checkbox';
 import { cn } from '@/lib/utils';
 
 interface TableViewProps {
-  studies: StudyResult[];
+  studies: (StudyResult & { relevanceScore?: number })[];
   query: string;
   showScoreBreakdown?: boolean;
 }
@@ -21,8 +22,8 @@ export function TableView({ studies, query, showScoreBreakdown = false }: TableV
 
   const sortedStudies = useMemo(() => {
     const sorted = [...studies].sort((a, b) => {
-      let aVal: any;
-      let bVal: any;
+      let aVal: string | number;
+      let bVal: string | number;
 
       switch (sortField) {
         case 'title':
@@ -42,8 +43,8 @@ export function TableView({ studies, query, showScoreBreakdown = false }: TableV
           bVal = parseSampleSize(b.sample_size);
           break;
         case 'relevance':
-          aVal = (a as any).relevanceScore || 0;
-          bVal = (b as any).relevanceScore || 0;
+          aVal = a.relevanceScore || 0;
+          bVal = b.relevanceScore || 0;
           break;
         default:
           return 0;
@@ -86,23 +87,34 @@ export function TableView({ studies, query, showScoreBreakdown = false }: TableV
     }
   };
 
-  const SortButton = ({ field, label }: { field: SortField; label: string }) => (
-    <button
-      onClick={() => handleSort(field)}
-      className="flex items-center gap-1 font-semibold text-gray-700 hover:text-gray-900 dark:text-gray-300 dark:hover:text-gray-100"
-    >
-      {label}
-      {sortField === field ? (
-        sortDirection === 'asc' ? (
-          <ArrowUp className="h-4 w-4" />
+  const SortButton = ({ field, label }: { field: SortField; label: string }) => {
+    const isSorted = sortField === field;
+    const currentOrder = isSorted ? (sortDirection === 'asc' ? 'ascending' : 'descending') : null;
+    const nextOrder = isSorted && sortDirection === 'desc' ? 'ascending' : 'descending';
+
+    const ariaLabel = isSorted
+      ? `Sorted by ${label} (${currentOrder}). Click to sort ${nextOrder}.`
+      : `Sort by ${label}. Click to sort descending.`;
+
+    return (
+      <button
+        onClick={() => handleSort(field)}
+        className="flex items-center gap-1 font-semibold text-gray-700 hover:text-gray-900 dark:text-gray-300 dark:hover:text-gray-100 focus-ring rounded px-1"
+        aria-label={ariaLabel}
+      >
+        {label}
+        {isSorted ? (
+          sortDirection === 'asc' ? (
+            <ArrowUp className="h-4 w-4" />
+          ) : (
+            <ArrowDown className="h-4 w-4" />
+          )
         ) : (
-          <ArrowDown className="h-4 w-4" />
-        )
-      ) : (
-        <ArrowUpDown className="h-4 w-4 opacity-30" />
-      )}
-    </button>
-  );
+          <ArrowUpDown className="h-4 w-4 opacity-30" />
+        )}
+      </button>
+    );
+  };
 
   return (
     <div className="space-y-4">
@@ -112,13 +124,13 @@ export function TableView({ studies, query, showScoreBreakdown = false }: TableV
             {selectedStudies.size} {selectedStudies.size === 1 ? 'study' : 'studies'} selected
           </span>
           <div className="flex gap-2">
-            <Button variant="outline" size="sm">
+            <Button variant="outline" size="sm" className="focus-ring">
               Compare
             </Button>
-            <Button variant="outline" size="sm">
+            <Button variant="outline" size="sm" className="focus-ring">
               Export Selected
             </Button>
-            <Button variant="ghost" size="sm" onClick={() => setSelectedStudies(new Set())}>
+            <Button variant="ghost" size="sm" onClick={() => setSelectedStudies(new Set())} className="focus-ring">
               Clear
             </Button>
           </div>
@@ -130,32 +142,27 @@ export function TableView({ studies, query, showScoreBreakdown = false }: TableV
           <thead className="bg-muted/50">
             <tr>
               <th className="border-b p-3 text-left">
-                <button
-                  onClick={toggleSelectAll}
-                  className="flex items-center gap-2 text-gray-700 hover:text-gray-900 dark:text-gray-300 dark:hover:text-gray-100"
-                >
-                  {selectedStudies.size === studies.length && studies.length > 0 ? (
-                    <CheckSquare className="h-4 w-4" />
-                  ) : (
-                    <Square className="h-4 w-4" />
-                  )}
-                </button>
+                <Checkbox
+                  checked={selectedStudies.size === studies.length && studies.length > 0}
+                  onCheckedChange={toggleSelectAll}
+                  aria-label="Select all studies"
+                />
               </th>
-              <th className="border-b p-3 text-left">
+              <th className="border-b p-3 text-left" aria-sort={sortField === 'title' ? (sortDirection === 'asc' ? 'ascending' : 'descending') : 'none'}>
                 <SortButton field="title" label="Study" />
               </th>
-              <th className="border-b p-3 text-left">
+              <th className="border-b p-3 text-left" aria-sort={sortField === 'year' ? (sortDirection === 'asc' ? 'ascending' : 'descending') : 'none'}>
                 <SortButton field="year" label="Year" />
               </th>
-              <th className="border-b p-3 text-left">
+              <th className="border-b p-3 text-left" aria-sort={sortField === 'design' ? (sortDirection === 'asc' ? 'ascending' : 'descending') : 'none'}>
                 <SortButton field="design" label="Design" />
               </th>
-              <th className="border-b p-3 text-left">
+              <th className="border-b p-3 text-left" aria-sort={sortField === 'sample_size' ? (sortDirection === 'asc' ? 'ascending' : 'descending') : 'none'}>
                 <SortButton field="sample_size" label="N" />
               </th>
               <th className="border-b p-3 text-left">Key Findings</th>
               {showScoreBreakdown && (
-                <th className="border-b p-3 text-left">
+                <th className="border-b p-3 text-left" aria-sort={sortField === 'relevance' ? (sortDirection === 'asc' ? 'ascending' : 'descending') : 'none'}>
                   <SortButton field="relevance" label="Score" />
                 </th>
               )}
@@ -165,7 +172,7 @@ export function TableView({ studies, query, showScoreBreakdown = false }: TableV
           <tbody>
             {sortedStudies.map((study) => {
               const isSelected = selectedStudies.has(study.study_id);
-              const relevanceScore = (study as any).relevanceScore || 0;
+              const relevanceScore = study.relevanceScore || 0;
 
               return (
                 <tr
@@ -176,16 +183,11 @@ export function TableView({ studies, query, showScoreBreakdown = false }: TableV
                   )}
                 >
                   <td className="p-3">
-                    <button
-                      onClick={() => toggleStudySelection(study.study_id)}
-                      className="text-gray-700 hover:text-gray-900 dark:text-gray-300 dark:hover:text-gray-100"
-                    >
-                      {isSelected ? (
-                        <CheckSquare className="h-4 w-4 text-blue-600 dark:text-blue-400" />
-                      ) : (
-                        <Square className="h-4 w-4" />
-                      )}
-                    </button>
+                    <Checkbox
+                      checked={isSelected}
+                      onCheckedChange={() => toggleStudySelection(study.study_id)}
+                      aria-label={`Select study: ${study.title}`}
+                    />
                   </td>
                   <td className="p-3">
                     <div>
@@ -248,24 +250,26 @@ export function TableView({ studies, query, showScoreBreakdown = false }: TableV
                   <td className="p-3">
                     <div className="flex gap-1">
                       {study.citation.openalex_id && (
-                        <Button variant="ghost" size="sm" asChild>
+                        <Button variant="ghost" size="sm" asChild className="focus-ring">
                           <a
                             href={`https://openalex.org/${study.citation.openalex_id}`}
                             target="_blank"
                             rel="noopener noreferrer"
                             title="View in OpenAlex"
+                            aria-label={`View study "${study.title}" in OpenAlex`}
                           >
                             <ExternalLink className="h-4 w-4" />
                           </a>
                         </Button>
                       )}
                       {study.citation.doi && (
-                        <Button variant="ghost" size="sm" asChild>
+                        <Button variant="ghost" size="sm" asChild className="focus-ring">
                           <a
                             href={`https://doi.org/${study.citation.doi}`}
                             target="_blank"
                             rel="noopener noreferrer"
                             title="View DOI"
+                            aria-label={`View DOI for study "${study.title}"`}
                           >
                             DOI
                           </a>
