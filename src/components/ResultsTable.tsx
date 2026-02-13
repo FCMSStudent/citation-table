@@ -8,7 +8,7 @@ import { Button } from './ui/button';
 import { downloadRISFile } from '@/lib/risExport';
 import { downloadCSV } from '@/lib/csvExport'; // NEW
 import { generateNarrativeSummary } from '@/lib/narrativeSummary';
-import { isLowValueStudy, sortByRelevance } from '@/utils/relevanceScore';
+import { sortByRelevance, isLowValueStudy, getOutcomeText } from '@/utils/relevanceScore';
 import { FilterBar, type SortOption, type StudyDesignFilter } from './FilterBar';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from './ui/tabs';
 
@@ -48,53 +48,46 @@ export function ResultsTable({
 
   const activeQuery = normalizedQuery || query;
 
-  // Scored and filtered results
+  // Scored results - already sorted by relevanceScore descending
   const scoredResults = useMemo(() => sortByRelevance(results, activeQuery), [results, activeQuery]);
 
-  const explicitMatches = useMemo(
-    () =>
-      scoredResults.filter((study) => {
-        const outcomesText = study.outcomes
-          ?.map((outcome) => `${outcome.outcome_measured} ${outcome.key_result || ''}`.toLowerCase())
-          .join(' ') || '';
-        return study.outcomes.length > 0 && !outcomesText.includes('no outcomes reported');
-      }),
-    [scoredResults],
-  );
+  // Combined filtering and splitting into main/excluded studies in a single pass (O(N))
+  const { mainStudies, excludedStudies } = useMemo(() => {
+    const main: typeof scoredResults = [];
+    const excluded: typeof scoredResults = [];
 
-  const withFilters = useMemo(() => {
-    let filtered = [...scoredResults];
+    // Optimization: Only re-sort if explicitly requested by year
+    const base = sortBy === 'year'
+      ? [...scoredResults].sort((a, b) => b.year - a.year)
+      : scoredResults;
 
-    if (explicitOnly) {
-      filtered = filtered.filter((study) => explicitMatches.some((match) => match.study_id === study.study_id));
-    }
+    base.forEach((study) => {
+      // 1. Study Design Filter
+      if (studyDesign !== 'all') {
+        const matchesDesign =
+          (studyDesign === 'meta' && study.review_type === 'Meta-analysis') ||
+          (studyDesign === 'review' && (study.study_design === 'review' || study.review_type === 'Systematic review')) ||
+          (studyDesign === 'unknown' && study.study_design === 'unknown');
+        if (!matchesDesign) return;
+      }
 
-    if (studyDesign !== 'all') {
-      filtered = filtered.filter((study) => {
-        if (studyDesign === 'meta') return study.review_type === 'Meta-analysis';
-        if (studyDesign === 'review') return study.study_design === 'review' || study.review_type === 'Systematic review';
-        return study.study_design === 'unknown';
-      });
-    }
+      // 2. Explicit Only Filter
+      // getOutcomeText is memoized to avoid redundant processing
+      const outcomesText = getOutcomeText(study);
+      const isExplicitMatch = (study.outcomes?.length || 0) > 0 && !outcomesText.includes('no outcomes reported');
 
-    if (sortBy === 'year') {
-      filtered.sort((a, b) => b.year - a.year);
-    } else {
-      filtered.sort((a, b) => b.relevanceScore - a.relevanceScore);
-    }
+      if (explicitOnly && !isExplicitMatch) return;
 
-    return filtered;
-  }, [explicitMatches, explicitOnly, scoredResults, sortBy, studyDesign]);
+      // 3. Low Value Split (Uses centralized utility for consistency)
+      if (isLowValueStudy(study, study.relevanceScore)) {
+        excluded.push(study);
+      } else {
+        main.push(study);
+      }
+    });
 
-  const mainStudies = useMemo(
-    () => withFilters.filter((study) => !isLowValueStudy(study, study.relevanceScore)),
-    [withFilters],
-  );
-
-  const excludedStudies = useMemo(
-    () => withFilters.filter((study) => isLowValueStudy(study, study.relevanceScore)),
-    [withFilters],
-  );
+    return { mainStudies: main, excludedStudies: excluded };
+  }, [scoredResults, sortBy, studyDesign, explicitOnly]);
 
   // Narrative summary
   const narrativeSummary = useMemo(() => {

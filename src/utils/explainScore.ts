@@ -1,17 +1,12 @@
 import type { StudyResult } from '@/types/research';
 import { extractKeywords } from './highlightTerms';
+import { getOutcomeText } from './relevanceScore';
 
 export interface ScoreBreakdown {
   keywordMatch: number;
   designWeight: number;
   penalty: number;
   total: number;
-}
-
-function getOutcomeText(study: StudyResult): string {
-  return study.outcomes
-    ?.map((outcome) => `${outcome.outcome_measured} ${outcome.key_result || ''}`.toLowerCase())
-    .join(' ') || '';
 }
 
 export function getScoreBreakdown(study: StudyResult, query: string): ScoreBreakdown {
