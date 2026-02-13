@@ -88,7 +88,7 @@ describe("Narrative Summary", () => {
       outcomes: [
         {
           outcome_measured: "Secondary outcome",
-          key_result: null,
+          key_result: "No significant change noted in primary endpoints",
           citation_snippet: "No significant change noted"
         }
       ],

@@ -7,3 +7,8 @@
 **Vulnerability:** Potential XSS via malicious URI schemes (`javascript:`, `data:`) in research identifiers (DOIs, OpenAlex IDs) fetched from external sources.
 **Learning:** While some links are prefixed with trusted domains, raw identifiers used directly in `href` attributes (like `openalex_id`) pose a direct XSS risk. Protocol-based sanitization is necessary to ensure that external data cannot execute arbitrary JavaScript.
 **Prevention:** Use a dedicated `sanitizeUrl` utility for all `href` and `src` attributes containing external data. Complement this with frontend input character limits to prevent resource abuse and provide a consistent security posture with the backend.
+
+## 2025-05-30 - [Edge Function Hardening & Input Validation]
+**Vulnerability:** Potential resource abuse and URL manipulation in Edge Functions due to lack of input validation and direct string concatenation in API calls.
+**Learning:** Even simple proxy-like Edge Functions (e.g., COCI) require strict input validation. Lack of `encodeURIComponent` on user-supplied path segments allows for path traversal or URL manipulation attacks against external APIs.
+**Prevention:** Implement input length limits (e.g., 500 chars), validate expected patterns (e.g., DOI prefix), and always use `encodeURIComponent` for dynamic URL segments. Ensure catch blocks return generic error messages to avoid information leakage.
