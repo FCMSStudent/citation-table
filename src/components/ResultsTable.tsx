@@ -56,7 +56,12 @@ export function ResultsTable({
 
   const activeQuery = normalizedQuery || query;
 
-  const scoredResults = useMemo(() => sortByRelevance(results, activeQuery), [results, activeQuery]);
+  const filteredByAbstract = useMemo(() =>
+    results.filter(s => s.abstract_excerpt && s.abstract_excerpt.trim().length >= 50),
+    [results]
+  );
+
+  const scoredResults = useMemo(() => sortByRelevance(filteredByAbstract, activeQuery), [filteredByAbstract, activeQuery]);
 
   const { mainStudies, excludedStudies } = useMemo(() => {
     const main: typeof scoredResults = [];

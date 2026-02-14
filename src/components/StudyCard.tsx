@@ -1,6 +1,6 @@
 import { useMemo, useState, memo } from 'react';
 import type { ReactNode } from 'react';
-import { ChevronDown, ChevronUp, ExternalLink, Info, Download, Loader2 } from 'lucide-react';
+import { ChevronDown, ChevronUp, ExternalLink, Info, Download, Loader2, FileText } from 'lucide-react';
 import { CociButton } from './CociButton';
 import type { StudyResult, StudyPdf } from '@/types/research';
 import { Card, CardContent, CardHeader } from './ui/card';
@@ -123,10 +123,36 @@ export const StudyCard = memo(({ study, query, relevanceScore, isLowValue = fals
               </div>
             )}
 
-            <div className="flex flex-wrap gap-1.5">
+            <div className="flex flex-wrap items-center gap-1.5">
               <PreprintBadge status={study.preprint_status} />
               <ReviewTypeBadge reviewType={study.review_type} />
               <SourceBadge source={study.source} citationCount={study.citationCount} />
+              {pdfData?.status === 'downloaded' && pdfData.public_url && (
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <a
+                      href={sanitizeUrl(pdfData.public_url)}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="inline-flex items-center rounded p-0.5 text-emerald-600 hover:text-emerald-700 dark:text-emerald-400 dark:hover:text-emerald-300 focus-ring"
+                      aria-label="Download PDF"
+                    >
+                      <FileText className="h-4 w-4" />
+                    </a>
+                  </TooltipTrigger>
+                  <TooltipContent>Download PDF</TooltipContent>
+                </Tooltip>
+              )}
+              {pdfData?.status === 'pending' && (
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <span className="inline-flex items-center p-0.5 text-muted-foreground">
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                    </span>
+                  </TooltipTrigger>
+                  <TooltipContent>PDF downloading…</TooltipContent>
+                </Tooltip>
+              )}
             </div>
           </div>
         </div>
