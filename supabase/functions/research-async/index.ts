@@ -554,7 +554,11 @@ Extract structured data from each paper's abstract following the strict rules. R
     const allowedDesigns = new Set(["RCT", "cohort", "cross-sectional", "review"]);
     const filtered = results.filter((s: any) => allowedDesigns.has(s.study_design));
     console.log(`[LLM] Filtered: ${results.length} -> ${filtered.length} (removed ${results.length - filtered.length} unknown/ineligible)`);
-    return filtered;
+    const withAbstract = filtered.filter((s: any) =>
+      s.abstract_excerpt && s.abstract_excerpt.trim().length >= 50
+    );
+    console.log(`[LLM] Abstract filter: ${filtered.length} -> ${withAbstract.length}`);
+    return withAbstract;
   } catch (parseError) {
     console.error(`[LLM] JSON parse error:`, parseError);
     throw new Error("Failed to parse LLM response as JSON");
