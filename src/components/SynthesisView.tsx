@@ -1,9 +1,10 @@
 // components/SynthesisView.tsx
 import { useMemo, useState } from 'react';
-import { ChevronDown, ChevronRight, ExternalLink, Download, Loader2, FileText, AlertTriangle } from 'lucide-react';
+import { ChevronDown, ChevronRight, ExternalLink, Download, Loader2, FileText, AlertTriangle, ArrowUp, ArrowDown, Minus, Quote } from 'lucide-react';
 import type { StudyResult } from "@/types/research";
 import { Button } from './ui/button';
 import { cn } from '@/lib/utils';
+import { getEffectDirection, type EffectDirection } from '@/utils/effectDirection';
 
 const OUTCOME_NORM_REGEX = /\b(symptoms?|levels?|scores?|measures?|rates?|performance)\b/g;
 const AUTHOR_EXTRACT_REGEX = /^([^,(]+)/;
@@ -48,8 +49,68 @@ interface ThematicGroup {
   keyFindings: string[];
 }
 
+function EffectDirectionIcon({ direction }: { direction: EffectDirection }) {
+  switch (direction) {
+    case 'positive':
+      return <span title="Positive effect"><ArrowUp className="inline h-3.5 w-3.5 text-emerald-600 dark:text-emerald-400" /></span>;
+    case 'negative':
+      return <span title="Negative/adverse effect"><ArrowDown className="inline h-3.5 w-3.5 text-red-600 dark:text-red-400" /></span>;
+    case 'mixed':
+      return <span title="Mixed results"><Minus className="inline h-3.5 w-3.5 text-amber-600 dark:text-amber-400" /></span>;
+    case 'neutral':
+    default:
+      return <span title="No significant effect"><Minus className="inline h-3.5 w-3.5 text-muted-foreground" /></span>;
+  }
+}
+
+function CitationSnippet({ snippet, snippetKey, expandedSnippets, toggleSnippet }: {
+  snippet: string;
+  snippetKey: string;
+  expandedSnippets: Set<string>;
+  toggleSnippet: (key: string) => void;
+}) {
+  if (!snippet) return null;
+  const isExpanded = expandedSnippets.has(snippetKey);
+  return (
+    <div>
+      <button
+        onClick={() => toggleSnippet(snippetKey)}
+        className="mt-1 inline-flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-colors"
+      >
+        <Quote className="h-3 w-3" />
+        {isExpanded ? 'Hide source' : 'Source'}
+      </button>
+      {isExpanded && (
+        <blockquote className="mt-1 border-l-2 border-muted pl-3 text-xs italic text-muted-foreground">
+          {snippet}
+        </blockquote>
+      )}
+    </div>
+  );
+}
+
 export function SynthesisView({ studies, outcomeAggregation, query, pdfsByDoi = {} }: SynthesisViewProps) {
   const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set(['group-0']));
+  const [expandedOutcomes, setExpandedOutcomes] = useState<Set<string>>(new Set());
+  const [expandedSnippets, setExpandedSnippets] = useState<Set<string>>(new Set());
+
+  const toggleOutcome = (outcomeKey: string) => {
+    setExpandedOutcomes((prev) => {
+      const next = new Set(prev);
+      if (next.has(outcomeKey)) next.delete(outcomeKey);
+      else next.add(outcomeKey);
+      return next;
+    });
+  };
+
+  const toggleSnippet = (snippetKey: string) => {
+    setExpandedSnippets((prev) => {
+      const next = new Set(prev);
+      if (next.has(snippetKey)) next.delete(snippetKey);
+      else next.add(snippetKey);
+      return next;
+    });
+  };
 
   // Group studies thematically
   const thematicGroups = useMemo(() => {
@@ -114,32 +175,66 @@ export function SynthesisView({ studies, outcomeAggregation, query, pdfsByDoi = 
       <div className="rounded-lg border bg-card p-6">
           <h2 className="mb-4 text-lg font-semibold">Key Findings by Outcome</h2>
           <div className="space-y-6">
-            {outcomeAggregation.slice(0, 10).map(({ outcome, studyCount, studies: outcomeStudies }) =>
-          <div key={outcome} className="border-l-2 border-blue-500 pl-4">
-                <h3 className="mb-2 font-medium capitalize">
-                  {outcome}
-                  <span className="ml-2 text-sm font-normal text-muted-foreground">
-                    ({studyCount} {studyCount === 1 ? 'study' : 'studies'})
-                  </span>
-                </h3>
-                <div className="space-y-2 text-sm">
-                  {outcomeStudies.slice(0, 3).map(({ study, result }) => {
-                const citation = formatCitation(study);
-                const sanitized = sanitizeResult(result);
-                return (
-                  <div key={study.study_id} className="text-gray-700 dark:text-gray-300">
-                        <span className="font-medium">{citation}:</span> {sanitized}
-                      </div>);
+            {outcomeAggregation.slice(0, 10).map(({ outcome, studyCount, studies: outcomeStudies }) => {
+              const isOutcomeExpanded = expandedOutcomes.has(outcome);
+              const visibleStudies = isOutcomeExpanded ? outcomeStudies : outcomeStudies.slice(0, 3);
+              const hiddenCount = outcomeStudies.length - 3;
 
-              })}
-                  {outcomeStudies.length > 3 &&
-              <button className="text-xs text-blue-600 hover:underline dark:text-blue-400">
-                      +{outcomeStudies.length - 3} more {outcomeStudies.length - 3 === 1 ? 'study' : 'studies'}
-                    </button>
-              }
+              return (
+                <div key={outcome} className="border-l-2 border-blue-500 pl-4">
+                  <h3 className="mb-2 font-medium capitalize">
+                    {outcome}
+                    <span className="ml-2 text-sm font-normal text-muted-foreground">
+                      ({studyCount} {studyCount === 1 ? 'study' : 'studies'})
+                    </span>
+                  </h3>
+                  <div className="space-y-2 text-sm">
+                    {visibleStudies.map(({ study, result }, idx) => {
+                      const citation = formatCitation(study);
+                      const sanitized = sanitizeResult(result);
+                      const direction = getEffectDirection(result);
+                      // Find matching outcome for citation snippet
+                      const matchingOutcome = study.outcomes?.find(
+                        (o) => o.key_result === result || o.outcome_measured.toLowerCase() === outcome.toLowerCase()
+                      );
+                      const snippetKey = `outcome-${outcome}-${study.study_id}-${idx}`;
+
+                      return (
+                        <div key={study.study_id}>
+                          <div className="flex items-start gap-1.5 text-gray-700 dark:text-gray-300">
+                            <EffectDirectionIcon direction={direction} />
+                            <div>
+                              <span className="font-medium">{citation}:</span> {sanitized}
+                            </div>
+                          </div>
+                          {matchingOutcome?.citation_snippet && (
+                            <div className="ml-5">
+                              <CitationSnippet
+                                snippet={matchingOutcome.citation_snippet}
+                                snippetKey={snippetKey}
+                                expandedSnippets={expandedSnippets}
+                                toggleSnippet={toggleSnippet}
+                              />
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
+                    {hiddenCount > 0 && (
+                      <button
+                        onClick={() => toggleOutcome(outcome)}
+                        className="text-xs text-blue-600 hover:underline dark:text-blue-400"
+                      >
+                        {isOutcomeExpanded
+                          ? 'Show fewer'
+                          : `+${hiddenCount} more ${hiddenCount === 1 ? 'study' : 'studies'}`
+                        }
+                      </button>
+                    )}
+                  </div>
                 </div>
-              </div>
-          )}
+              );
+            })}
           </div>
         </div>
       }
@@ -232,16 +327,35 @@ export function SynthesisView({ studies, outcomeAggregation, query, pdfsByDoi = 
                     <div className="mt-3 space-y-2">
                             {study.outcomes.
                       filter((o) => o.key_result).
-                      map((outcome, idx) =>
-                      <div key={idx} className="text-sm">
-                                  <span className="font-medium text-gray-900 dark:text-gray-100">
-                                    {outcome.outcome_measured}:
-                                  </span>{' '}
-                                  <span className="text-gray-700 dark:text-gray-300">
-                                    {sanitizeResult(outcome.key_result || '')}
-                                  </span>
-                                </div>
-                      )}
+                      map((outcome, idx) => {
+                        const direction = getEffectDirection(outcome.key_result);
+                        const snippetKey = `design-${study.study_id}-${idx}`;
+                        return (
+                          <div key={idx} className="text-sm">
+                            <div className="flex items-start gap-1.5">
+                              <EffectDirectionIcon direction={direction} />
+                              <div>
+                                <span className="font-medium text-gray-900 dark:text-gray-100">
+                                  {outcome.outcome_measured}:
+                                </span>{' '}
+                                <span className="text-gray-700 dark:text-gray-300">
+                                  {sanitizeResult(outcome.key_result || '')}
+                                </span>
+                              </div>
+                            </div>
+                            {outcome.citation_snippet && (
+                              <div className="ml-5">
+                                <CitationSnippet
+                                  snippet={outcome.citation_snippet}
+                                  snippetKey={snippetKey}
+                                  expandedSnippets={expandedSnippets}
+                                  toggleSnippet={toggleSnippet}
+                                />
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })}
                           </div>
                     }
                       </div>
