@@ -31,7 +31,7 @@ const badgeConfig: Record<
     ),
     label: "Positive",
     badgeClass:
-      "bg-emerald-100 text-emerald-800 dark:bg-emerald-900/50 dark:text-emerald-300",
+      "bg-gradient-to-r from-emerald-100 to-emerald-50 text-emerald-800 dark:from-emerald-900/50 dark:to-emerald-800/50 dark:text-emerald-300 transition-all duration-300 hover:shadow-md hover:scale-105",
   },
   negative: {
     badgeIcon: <TrendingDown className="h-3.5 w-3.5" />,
@@ -40,7 +40,7 @@ const badgeConfig: Record<
     ),
     label: "Negative",
     badgeClass:
-      "bg-red-100 text-red-800 dark:bg-red-900/50 dark:text-red-300",
+      "bg-gradient-to-r from-red-100 to-red-50 text-red-800 dark:from-red-900/50 dark:to-red-800/50 dark:text-red-300 transition-all duration-300 hover:shadow-md hover:scale-105",
   },
   neutral: {
     badgeIcon: <Minus className="h-3.5 w-3.5" />,
@@ -48,7 +48,7 @@ const badgeConfig: Record<
       <Minus className="inline h-3.5 w-3.5 text-muted-foreground" />
     ),
     label: "Neutral",
-    badgeClass: "bg-muted text-muted-foreground",
+    badgeClass: "bg-gradient-to-r from-muted to-muted/80 text-muted-foreground transition-all duration-300 hover:shadow-md hover:scale-105",
   },
   mixed: {
     badgeIcon: <ArrowLeftRight className="h-3.5 w-3.5" />,
@@ -57,7 +57,7 @@ const badgeConfig: Record<
     ),
     label: "Mixed",
     badgeClass:
-      "bg-amber-100 text-amber-800 dark:bg-amber-900/50 dark:text-amber-300",
+      "bg-gradient-to-r from-amber-100 to-amber-50 text-amber-800 dark:from-amber-900/50 dark:to-amber-800/50 dark:text-amber-300 transition-all duration-300 hover:shadow-md hover:scale-105",
   },
 };
 

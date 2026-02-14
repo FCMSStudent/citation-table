@@ -15,12 +15,12 @@ interface ScoreBadgeProps {
 
 function getScoreBadgeClass(score: number): string {
   if (score >= 2) {
-    return "bg-emerald-100 text-emerald-900 border-emerald-300 dark:bg-emerald-950 dark:text-emerald-200";
+    return "bg-gradient-to-r from-emerald-100 to-emerald-50 text-emerald-900 border-emerald-300 dark:from-emerald-950 dark:to-emerald-900 dark:text-emerald-200 transition-all duration-300 hover:shadow-md hover:scale-105";
   }
   if (score <= 0) {
-    return "bg-amber-100 text-amber-900 border-amber-300 dark:bg-amber-950 dark:text-amber-200";
+    return "bg-gradient-to-r from-amber-100 to-amber-50 text-amber-900 border-amber-300 dark:from-amber-950 dark:to-amber-900 dark:text-amber-200 transition-all duration-300 hover:shadow-md hover:scale-105";
   }
-  return "bg-blue-100 text-blue-900 border-blue-300 dark:bg-blue-950 dark:text-blue-200";
+  return "bg-gradient-to-r from-blue-100 to-blue-50 text-blue-900 border-blue-300 dark:from-blue-950 dark:to-blue-900 dark:text-blue-200 transition-all duration-300 hover:shadow-md hover:scale-105";
 }
 
 export function ScoreBadge({

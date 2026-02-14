@@ -55,10 +55,11 @@ export const StudyCard = memo(({ study, query, relevanceScore, isLowValue = fals
 
   return (
     <Card
+      variant="hover"
       className={cn(
-        'transition-shadow hover:shadow-md',
+        'transition-all duration-300 hover:shadow-xl',
         getDesignStyle(study),
-        relevanceScore >= 2 && 'bg-primary/5',
+        relevanceScore >= 2 && 'bg-primary/5 hover:bg-primary/10',
         isLowValue && 'opacity-60',
       )}
     >
