@@ -24,8 +24,15 @@ const CAUSAL_MAP: Record<string, string> = {
 
 const CAUSAL_REGEX = /\b(cause[ds]?|causing|led to|leads to|resulted in|results in|due to|effect of)\b/gi;
 
+// Performance Optimization: Caches for expensive or frequent operations (Bolt Optimization)
+const designCache = new WeakMap<StudyResult, string>();
+const popCache = new WeakMap<StudyResult, string>();
+const citationCache = new WeakMap<StudyResult, string>();
+const normOutcomeCache = new Map<string, string>();
+const sanitizeResultCache = new Map<string, string>();
+
 interface SynthesisViewProps {
-  studies: StudyResult[];
+  studies: (StudyResult & { relevanceScore?: number })[];
   outcomeAggregation: Array<{
     outcome: string;
     studyCount: number;
@@ -50,48 +57,46 @@ interface ThematicGroup {
 export function SynthesisView({ studies, outcomeAggregation, query }: SynthesisViewProps) {
   const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set(['group-0']));
 
-  // Group studies thematically
+  // Group studies thematically and extract findings in a single pass (Bolt Optimization)
   const thematicGroups = useMemo(() => {
-    const groups = new Map<string, ThematicGroup>();
+    const groups = new Map<string, ThematicGroup & { findingsSet: Set<string> }>();
 
     studies.forEach((study) => {
-      const design = study.study_design || 'observational';
-      const designCategory = categorizeDesign(design);
-      const popType = extractPopulationType(study.population);
+      const designCategory = categorizeDesign(study);
+      const popType = extractPopulationType(study);
       const key = `${designCategory}-${popType}`;
 
-      if (!groups.has(key)) {
-        groups.set(key, {
+      let group = groups.get(key);
+      if (!group) {
+        group = {
           theme: formatTheme(designCategory, popType),
           description: getThemeDescription(designCategory, popType),
           studies: [],
-          keyFindings: []
-        });
+          keyFindings: [],
+          findingsSet: new Set<string>()
+        };
+        groups.set(key, group);
       }
 
-      groups.get(key)!.studies.push({
+      group.studies.push({
         study,
-        relevanceScore: (study as any).relevanceScore || 0
+        relevanceScore: study.relevanceScore || 0
+      });
+
+      // Extract key findings for each group in the same pass
+      study.outcomes?.forEach((outcome) => {
+        if (outcome.key_result) {
+          group!.findingsSet.add(normalizeOutcome(outcome.outcome_measured));
+        }
       });
     });
 
-    // Extract key findings for each group
-    groups.forEach((group) => {
-      const findings = new Set<string>();
-      group.studies.forEach(({ study }) => {
-        study.outcomes?.forEach((outcome) => {
-          if (outcome.key_result) {
-            const normalized = normalizeOutcome(outcome.outcome_measured);
-            findings.add(normalized);
-          }
-        });
-      });
-      group.keyFindings = Array.from(findings).slice(0, 4);
-    });
-
-    return Array.from(groups.entries()).
-    map(([key, group], idx) => ({ ...group, id: `group-${idx}` })).
-    sort((a, b) => b.studies.length - a.studies.length);
+    return Array.from(groups.values())
+      .map((group, idx) => {
+        group.keyFindings = Array.from(group.findingsSet).slice(0, 4);
+        return { ...group, id: `group-${idx}` };
+      })
+      .sort((a, b) => b.studies.length - a.studies.length);
   }, [studies]);
 
   const toggleGroup = (groupId: string) => {
@@ -191,7 +196,7 @@ export function SynthesisView({ studies, outcomeAggregation, query }: SynthesisV
                           <div className="flex-1">
                             <h4 className="font-medium leading-tight">{study.title}</h4>
                             <p className="mt-1 text-sm text-muted-foreground">
-                              {formatCitation(study)} • {study.study_design || 'Study'}
+                              {formatCitation(study)} • {categorizeDesign(study)}
                               {study.sample_size && ` • n=${study.sample_size}`}
                             </p>
                           </div>
@@ -251,26 +256,46 @@ export function SynthesisView({ studies, outcomeAggregation, query }: SynthesisV
 
 }
 
-// Helper functions
-function categorizeDesign(design: string): string {
+// Helper functions with WeakMap memoization (Bolt Optimization)
+function categorizeDesign(study: StudyResult): string {
+  const cached = designCache.get(study);
+  if (cached !== undefined) return cached;
+
+  const design = study.study_design || 'observational';
   const lower = design.toLowerCase();
-  if (lower.includes('randomized') || lower.includes('rct')) return 'rct';
-  if (lower.includes('meta-analysis')) return 'meta-analysis';
-  if (lower.includes('systematic review') || lower === 'review') return 'systematic-review';
-  if (lower.includes('cohort')) return 'cohort';
-  if (lower.includes('cross-sectional')) return 'cross-sectional';
-  if (lower.includes('case-control')) return 'case-control';
-  return 'observational';
+  let result = 'observational';
+
+  if (lower.includes('randomized') || lower.includes('rct')) result = 'rct';
+  else if (lower.includes('meta-analysis')) result = 'meta-analysis';
+  else if (lower.includes('systematic review') || lower === 'review') result = 'systematic-review';
+  else if (lower.includes('cohort')) result = 'cohort';
+  else if (lower.includes('cross-sectional')) result = 'cross-sectional';
+  else if (lower.includes('case-control')) result = 'case-control';
+
+  designCache.set(study, result);
+  return result;
 }
 
-function extractPopulationType(population: string | null | undefined): string {
-  if (!population) return 'general';
+function extractPopulationType(study: StudyResult): string {
+  const cached = popCache.get(study);
+  if (cached !== undefined) return cached;
+
+  const population = study.population;
+  if (!population) {
+    popCache.set(study, 'general');
+    return 'general';
+  }
+
   const lower = population.toLowerCase();
-  if (lower.includes('child') || lower.includes('adolescent') || lower.includes('pediatric')) return 'pediatric';
-  if (lower.includes('elderly') || lower.includes('older adult')) return 'elderly';
-  if (lower.includes('adult')) return 'adult';
-  if (lower.includes('patient') || lower.includes('clinical')) return 'clinical';
-  return 'general';
+  let result = 'general';
+
+  if (lower.includes('child') || lower.includes('adolescent') || lower.includes('pediatric')) result = 'pediatric';
+  else if (lower.includes('elderly') || lower.includes('older adult')) result = 'elderly';
+  else if (lower.includes('adult')) result = 'adult';
+  else if (lower.includes('patient') || lower.includes('clinical')) result = 'clinical';
+
+  popCache.set(study, result);
+  return result;
 }
 
 function formatTheme(design: string, popType: string): string {
@@ -310,8 +335,13 @@ function getThemeDescription(design: string, popType: string): string {
 }
 
 function formatCitation(study: StudyResult): string {
+  const cached = citationCache.get(study);
+  if (cached !== undefined) return cached;
+
   const author = extractFirstAuthor(study.citation.formatted);
-  return study.year ? `${author} (${study.year})` : author;
+  const result = study.year ? `${author} (${study.year})` : author;
+  citationCache.set(study, result);
+  return result;
 }
 
 function extractFirstAuthor(citation: string | null | undefined): string {
@@ -324,26 +354,37 @@ function extractFirstAuthor(citation: string | null | undefined): string {
 }
 
 function normalizeOutcome(outcome: string): string {
-  return outcome.
+  const cached = normOutcomeCache.get(outcome);
+  if (cached !== undefined) return cached;
+
+  const result = outcome.
   toLowerCase().
   replace(OUTCOME_NORM_REGEX, '').
   trim();
+
+  normOutcomeCache.set(outcome, result);
+  return result;
 }
 
 function sanitizeResult(result: string): string {
-  return result.replace(CAUSAL_REGEX, (match) => CAUSAL_MAP[match.toLowerCase()] || match);
+  const cached = sanitizeResultCache.get(result);
+  if (cached !== undefined) return cached;
+
+  const sanitized = result.replace(CAUSAL_REGEX, (match) => CAUSAL_MAP[match.toLowerCase()] || match);
+  sanitizeResultCache.set(result, sanitized);
+  return sanitized;
 }
 
 function getQualityNotes(studies: StudyResult[]): string[] {
   const notes: string[] = [];
 
   const preprintCount = studies.filter((s) => s.preprint_status === 'Preprint').length;
-  const rctCount = studies.filter((s) =>
-  s.study_design?.toLowerCase().includes('randomized') ||
-  s.study_design?.toLowerCase().includes('rct')
-  ).length;
+  const rctCount = studies.filter((s) => {
+    const design = s.study_design?.toLowerCase() || '';
+    return design.includes('randomized') || design.includes('rct');
+  }).length;
   const metaCount = studies.filter((s) =>
-  s.study_design?.toLowerCase().includes('meta-analysis')
+    s.study_design?.toLowerCase().includes('meta-analysis')
   ).length;
 
   if (preprintCount === studies.length) {
