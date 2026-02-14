@@ -1,54 +1,67 @@
 
 
-## Chat with Papers
+## Results View Improvements -- All Issues
 
 ### Overview
-Add a chat interface to the report detail page that lets you ask questions about the studies in your narrative review. The AI will answer grounded in the actual paper data (titles, abstracts, outcomes, citations).
+Fix all identified issues in the results view: the broken SynthesisView section, non-functional TableView buttons, missing PDF indicators in Table/Synthesis views, unintegrated COCI button, limited filter options, hardcoded label, and lack of pagination.
 
-### How It Works
-When a report is completed, a "Chat with Papers" panel appears. You type a question (e.g., "Which studies found negative results?" or "What was the largest sample size?"), and the AI responds using only the study data from that report as context.
+---
 
-### Build Fixes First
-The current build errors in `useStudyPdfs.ts` are caused by the `study_pdfs` table not existing in the database schema. This will be fixed by creating the missing table migration.
+### 1. Fix Broken SynthesisView Methodological Quality Note
 
-### Backend: New Edge Function `chat-papers`
-- Receives: `report_id` + `messages` (conversation history)
-- Fetches the report's results from the database
-- Constructs a system prompt that includes all study data (titles, abstracts, outcomes, citations, study designs, sample sizes)
-- Calls Lovable AI (google/gemini-3-flash-preview) with streaming
-- Returns a streamed SSE response
-- The system prompt enforces grounding: the AI must only reference data present in the studies and cite them properly
+The block at lines 238-249 renders nothing due to an empty conditional. Fix it to actually render the quality notes using the existing `getQualityNotes()` helper function that's already defined but never called.
 
-### Frontend Changes
+**Result:** An info box at the bottom of the Synthesis view showing notes like "3 studies use experimental design with randomization" or "All studies are preprints."
 
-1. **New component: `src/components/PaperChat.tsx`**
-   - Chat panel with message list and input field
-   - Streaming token-by-token rendering of AI responses
-   - Markdown rendering for AI messages (using simple formatting)
-   - Appears as a collapsible section or tab on the report detail page
+---
 
-2. **Update `src/pages/ReportDetail.tsx`**
-   - Add a "Chat with Papers" tab/section below the results
-   - Only visible when report status is `completed`
+### 2. Make TableView "Compare" and "Export Selected" Buttons Functional
 
-3. **New hook: `src/hooks/usePaperChat.ts`**
-   - Manages conversation state (messages array)
-   - Handles streaming from the `chat-papers` edge function
-   - Handles loading states and errors
+- **Export Selected**: Calls the existing `downloadCSV()` utility but only for the selected studies. Pass an `onExportSelected` callback from `ResultsTable` into `TableView`.
+- **Compare**: Opens a side-by-side comparison dialog/panel showing the selected studies in columns with their key attributes (design, sample size, outcomes). Uses a Dialog component.
 
-### Database Changes
-- Create `study_pdfs` table migration (fixes build errors)
-- No new tables needed for chat -- conversation is client-side only (no persistence needed)
+**Props change:** `TableView` will accept `onExportSelected(studies)` and `onCompare(studies)` callbacks.
+
+---
+
+### 3. Add PDF Status to TableView and SynthesisView
+
+- Pass `pdfsByDoi` from `ResultsTable` down to `TableView` and `SynthesisView`.
+- **TableView:** Add a small icon in the Links column -- a download icon if available, spinner if pending, or dash if not found.
+- **SynthesisView:** Add a small PDF link/icon next to each study's citation in the expanded group view.
+
+---
+
+### 4. Integrate COCI Citations Button into StudyCard
+
+Add the existing `CociButton` component into the expanded details section of `StudyCard`, shown when the study has a DOI. It appears below the existing external links.
+
+---
+
+### 5. Expand FilterBar Options
+
+- Add `rct`, `cohort`, and `cross-sectional` to the study design filter dropdown.
+- Update the filter logic in `ResultsTable` to match these new values against `study_design`.
+- Rename "Explicit cognitive outcome only" to "Explicit outcome only" (remove the hardcoded "cognitive" reference).
+
+---
+
+### 6. Add Pagination
+
+Add client-side pagination (25 studies per page) to all three view modes (cards, table, synthesis). A simple "Showing X-Y of Z" bar with Previous/Next buttons at the bottom of the results.
+
+---
 
 ### Technical Details
 
-**System prompt strategy:** The edge function builds a context block containing each study's title, year, design, sample size, population, outcomes (with key results and citation snippets), and abstract excerpt. This is injected as a system message so the AI can answer questions grounded in the actual data.
+**Files to modify:**
 
-**File changes:**
-1. **Migration** -- Create `study_pdfs` table (fixes existing build errors)
-2. **`supabase/functions/chat-papers/index.ts`** -- New streaming edge function using Lovable AI
-3. **`src/components/PaperChat.tsx`** -- Chat UI component with streaming support
-4. **`src/hooks/usePaperChat.ts`** -- Chat state and streaming logic
-5. **Update `src/pages/ReportDetail.tsx`** -- Add chat section to completed reports
-6. **Update `supabase/config.toml`** -- Register the new function
+1. **`src/components/SynthesisView.tsx`** -- Fix lines 238-249 to render quality notes; accept and display `pdfsByDoi` prop
+2. **`src/components/TableView.tsx`** -- Wire up Compare/Export Selected buttons; accept `pdfsByDoi`, `onExportSelected`, `onCompare` props; add PDF status column
+3. **`src/components/StudyCard.tsx`** -- Add `CociButton` in expanded details
+4. **`src/components/FilterBar.tsx`** -- Add RCT/cohort/cross-sectional options; rename toggle label
+5. **`src/components/ResultsTable.tsx`** -- Pass new props to TableView/SynthesisView; add pagination state and controls; add compare dialog; update filter logic for new design values
+
+**New file:**
+6. **`src/components/CompareDialog.tsx`** -- Side-by-side comparison dialog for selected studies
 
