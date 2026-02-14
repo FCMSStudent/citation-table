@@ -1,118 +1,66 @@
 
 
-# Strictly Evidence-Grounded Narrative Synthesis
+# Filter Papers by Type and Completeness
 
 ## Overview
 
-Transform the narrative synthesis from free-form AI-generated markdown into a structured, citation-grounded summary where every claim links back to specific evidence table rows. No claim survives without a traceable citation.
+Two changes: (1) exclude papers that aren't one of the allowed study types, and (2) only include studies with at least one complete outcome row in the synthesis.
 
 ## What Changes
 
-### 1. Restructure the edge function output format
+### 1. Post-extraction filtering in the `research` edge function
 
-The `synthesize-papers` edge function currently outputs free-form markdown. It will be updated to return **structured JSON** with explicit citation links per claim.
+After the LLM extracts structured data (line ~683 in `supabase/functions/research/index.ts`), add a filter step that removes any study whose `study_design` is `"unknown"`. The allowed designs map to the user's list:
 
-New output schema:
+| User term | `study_design` value | `review_type` value |
+|-----------|---------------------|---------------------|
+| Original paper / RCT | `"RCT"` | `"None"` |
+| Cohort / Longitudinal | `"cohort"` | `"None"` |
+| Cross-sectional | `"cross-sectional"` | `"None"` |
+| Narrative/Literature review | `"review"` | `"None"` |
+| Systematic review | `"review"` | `"Systematic review"` |
+| Meta-analysis | `"review"` | `"Meta-analysis"` |
 
-```text
-{
-  "sections": [
-    {
-      "heading": "Areas of Agreement",
-      "claims": [
-        {
-          "text": "Sleep deprivation was associated with impaired cognitive performance across multiple populations.",
-          "citations": ["study-0", "study-3", "study-7"],
-          "confidence": "high"   // high = 3+ studies, moderate = 2, low = 1
-        }
-      ]
-    }
-  ],
-  "warnings": [
-    { "type": "gap", "text": "No studies on long-term outcomes (>12 months) found" },
-    { "type": "gap", "text": "No pediatric population studies identified" },
-    { "type": "quality", "text": "3 of 8 studies are preprints without peer review" }
-  ]
-}
-```
+Studies with `study_design === "unknown"` are excluded from the final results.
 
-The LLM prompt will enforce:
-- Every claim must reference specific `[Study N]` indices from the input
-- No new information beyond what appears in the study data
-- Claims that can't be tied to a study index are rejected
-- Warnings are auto-generated for missing populations, designs, or outcome gaps
+### 2. "Complete row" filter for synthesis
 
-### 2. Rebuild the NarrativeSynthesis component
+In `supabase/functions/synthesize-papers/index.ts`, before building the study context for the LLM, filter out any study that has zero outcomes with at least one non-null PICO field. A "complete" outcome row means it has `outcome_measured` AND at least one of: `intervention`, `comparator`, `effect_size`, or `p_value` is non-null.
 
-Replace the simple ReactMarkdown renderer with a structured view featuring:
+Studies with no complete outcome rows are excluded from the synthesis input entirely, and a warning is added noting how many studies were excluded.
 
-**Citation badges:** Each claim renders inline clickable badges like `[Smith et al., 2023]` styled as small colored chips. The badges are built from the studies array using the study indices from the JSON.
+### 3. Update the LLM extraction prompt
 
-**Confidence indicators:** Each claim gets a visual indicator:
-- Green dot + "Strong" = 3 or more supporting studies
-- Yellow dot + "Moderate" = 2 supporting studies  
-- Gray dot + "Limited" = 1 supporting study
-
-**Warnings panel:** A collapsible section at the bottom showing evidence gaps, quality concerns, and missing study types -- styled with amber/warning colors similar to the existing "Methodological Quality Notes" panel.
-
-**Backward compatibility:** If the cached `narrative_synthesis` field contains plain text (old format), it falls back to rendering as markdown. New generations produce JSON.
-
-### 3. No database changes needed
-
-The `narrative_synthesis` column is already `text` type. The structured JSON will be stored as a JSON string in the same column. The component detects format by attempting `JSON.parse`.
+Add to the extraction prompt in `supabase/functions/research/index.ts`: instruct the LLM that `study_design` must be one of `"RCT"`, `"cohort"`, `"cross-sectional"`, or `"review"`. If the paper doesn't clearly fit any of these (e.g., editorials, commentaries, case reports, opinion pieces), classify as `"unknown"` so it gets filtered out.
 
 ## Technical Details
 
 ### Files modified
 
-1. **`supabase/functions/synthesize-papers/index.ts`**
-   - Rewrite the system prompt to require structured JSON output with explicit `[Study N]` citations per claim
-   - Add `responseMimeType: "application/json"` to Gemini config to enforce JSON output
-   - Parse and validate the AI response before caching
-   - Auto-generate warnings by analyzing the study corpus (preprint ratio, missing designs, narrow populations)
+1. **`supabase/functions/research/index.ts`**
+   - After `const results = JSON.parse(...)` (~line 683), add filtering:
+     ```
+     const allowedDesigns = new Set(["RCT", "cohort", "cross-sectional", "review"]);
+     const filtered = results.filter(s => allowedDesigns.has(s.study_design));
+     console.log(`[LLM] Filtered: ${results.length} -> ${filtered.length} (removed ${results.length - filtered.length} unknown/ineligible)`);
+     return filtered;
+     ```
+   - Update the extraction prompt to clarify that editorials, commentaries, case reports, letters, and opinion pieces should be classified as `"unknown"`
 
-2. **`src/components/NarrativeSynthesis.tsx`**
-   - Add a `SynthesisData` TypeScript interface for the structured JSON
-   - Detect format: try `JSON.parse`, fall back to markdown for old cached data
-   - Render each section with heading, claims as prose paragraphs
-   - Render citation tags as clickable `Badge` components styled with author name + year
-   - Show confidence dot per claim
-   - Add collapsible "Evidence Gaps and Warnings" panel at the bottom
-   - Keep existing loading/error/generate states unchanged
+2. **`supabase/functions/synthesize-papers/index.ts`**
+   - Before building `studyContext`, filter studies to only those with at least one complete outcome:
+     ```
+     const eligibleStudies = studies.filter(s =>
+       (s.outcomes || []).some(o =>
+         o.outcome_measured && (o.intervention || o.comparator || o.effect_size || o.p_value)
+       )
+     );
+     ```
+   - Add a computed warning if studies were excluded: `"N of M studies excluded from synthesis due to incomplete extracted data"`
+   - Use `eligibleStudies` for building the prompt context and re-index study numbers accordingly
+   - Pass `eligibleStudies` count in the prompt header
 
-3. **`src/types/research.ts`** (or inline in NarrativeSynthesis)
-   - Add types: `SynthesisClaim`, `SynthesisSection`, `SynthesisWarning`, `SynthesisData`
+### No frontend changes needed
 
-### Edge function prompt strategy
-
-The prompt will:
-- Number each study as `[Study 0]`, `[Study 1]`, etc. (matching array indices)
-- Instruct the LLM: "For each claim, list the study indices that support it. If a claim cannot be supported by any study, do not include it."
-- Request JSON output with `sections[].claims[].citations` as arrays of study index strings
-- Generate warnings by analyzing: missing study designs, population gaps, preprint ratio, small sample sizes
-
-### Citation badge rendering
-
-```text
-Claim text ... [Smith et al., 2023] [Jones et al., 2022]
-                ^^^^^^^^^^^^^^^^^    ^^^^^^^^^^^^^^^^^^
-                clickable badges     clickable badges
-```
-
-Each badge, when clicked, could scroll to or highlight the corresponding row in the evidence table (future enhancement -- for now, a tooltip showing the study title and DOI).
-
-### Confidence calculation
-
-Done on the frontend based on `citations.length`:
-- 3+ citations = "high" (green)
-- 2 citations = "moderate" (yellow)
-- 1 citation = "low" (gray)
-
-This is deterministic, not LLM-generated, ensuring consistency.
-
-### Warnings generation
-
-Partially LLM-generated (evidence gaps) and partially computed in the edge function:
-- **Computed:** Preprint ratio, absence of RCTs, absence of meta-analyses, all studies from single source
-- **LLM-generated:** Specific evidence gaps ("No studies examined long-term outcomes")
+The filtering happens server-side. The UI already handles variable study counts gracefully.
 
