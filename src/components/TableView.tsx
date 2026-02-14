@@ -1,7 +1,7 @@
 // components/TableView.tsx
 import { useMemo, useState } from 'react';
-import { ArrowDown, ArrowUp, ArrowUpDown, ExternalLink } from 'lucide-react';
-import type { StudyResult } from '@/types/research';
+import { ArrowDown, ArrowUp, ArrowUpDown, ExternalLink, Download, Loader2 } from 'lucide-react';
+import type { StudyResult, StudyPdf } from '@/types/research';
 import { Button } from './ui/button';
 import { Checkbox } from './ui/checkbox';
 import { cn } from '@/lib/utils';
@@ -10,12 +10,15 @@ interface TableViewProps {
   studies: StudyResult[];
   query: string;
   showScoreBreakdown?: boolean;
+  pdfsByDoi?: Record<string, StudyPdf>;
+  onExportSelected?: (studies: StudyResult[]) => void;
+  onCompare?: (studies: StudyResult[]) => void;
 }
 
 type SortField = 'title' | 'year' | 'design' | 'sample_size' | 'relevance';
 type SortDirection = 'asc' | 'desc';
 
-export function TableView({ studies, query, showScoreBreakdown = false }: TableViewProps) {
+export function TableView({ studies, query, showScoreBreakdown = false, pdfsByDoi = {}, onExportSelected, onCompare }: TableViewProps) {
   const [sortField, setSortField] = useState<SortField>('relevance');
   const [sortDirection, setSortDirection] = useState<SortDirection>('desc');
   const [selectedStudies, setSelectedStudies] = useState<Set<string>>(new Set());
@@ -87,12 +90,15 @@ export function TableView({ studies, query, showScoreBreakdown = false }: TableV
     }
   };
 
+  const getSelectedStudyObjects = () =>
+    studies.filter((s) => selectedStudies.has(s.study_id));
+
   const SortButton = ({ field, label }: { field: SortField; label: string }) => {
     const isSorted = sortField === field;
     return (
       <button
         onClick={() => handleSort(field)}
-        className="flex items-center gap-1 font-semibold text-gray-700 hover:text-gray-900 dark:text-gray-300 dark:hover:text-gray-100 focus-ring rounded px-1"
+        className="flex items-center gap-1 font-semibold text-muted-foreground hover:text-foreground focus-ring rounded px-1"
         aria-label={`Sort by ${label}${isSorted ? (sortDirection === 'asc' ? ' ascending' : ' descending') : ''}. Click to sort ${isSorted && sortDirection === 'desc' ? 'ascending' : 'descending'}.`}
       >
         {label}
@@ -112,15 +118,15 @@ export function TableView({ studies, query, showScoreBreakdown = false }: TableV
   return (
     <div className="space-y-4">
       {selectedStudies.size > 0 && (
-        <div className="flex items-center justify-between rounded-lg border bg-blue-50 p-3 dark:bg-blue-950/30">
+        <div className="flex items-center justify-between rounded-lg border bg-accent/30 p-3">
           <span className="text-sm font-medium">
             {selectedStudies.size} {selectedStudies.size === 1 ? 'study' : 'studies'} selected
           </span>
           <div className="flex gap-2">
-            <Button variant="outline" size="sm">
+            <Button variant="outline" size="sm" onClick={() => onCompare?.(getSelectedStudyObjects())}>
               Compare
             </Button>
-            <Button variant="outline" size="sm">
+            <Button variant="outline" size="sm" onClick={() => onExportSelected?.(getSelectedStudyObjects())}>
               Export Selected
             </Button>
             <Button variant="ghost" size="sm" onClick={() => setSelectedStudies(new Set())}>
@@ -141,21 +147,21 @@ export function TableView({ studies, query, showScoreBreakdown = false }: TableV
                   aria-label="Select all studies"
                 />
               </th>
-              <th className="border-b p-3 text-left" aria-sort={sortField === 'title' ? (sortDirection === 'asc' ? 'ascending' : 'descending') : 'none'}>
+              <th className="border-b p-3 text-left">
                 <SortButton field="title" label="Study" />
               </th>
-              <th className="border-b p-3 text-left" aria-sort={sortField === 'year' ? (sortDirection === 'asc' ? 'ascending' : 'descending') : 'none'}>
+              <th className="border-b p-3 text-left">
                 <SortButton field="year" label="Year" />
               </th>
-              <th className="border-b p-3 text-left" aria-sort={sortField === 'design' ? (sortDirection === 'asc' ? 'ascending' : 'descending') : 'none'}>
+              <th className="border-b p-3 text-left">
                 <SortButton field="design" label="Design" />
               </th>
-              <th className="border-b p-3 text-left" aria-sort={sortField === 'sample_size' ? (sortDirection === 'asc' ? 'ascending' : 'descending') : 'none'}>
+              <th className="border-b p-3 text-left">
                 <SortButton field="sample_size" label="N" />
               </th>
               <th className="border-b p-3 text-left">Key Findings</th>
               {showScoreBreakdown && (
-                <th className="border-b p-3 text-left" aria-sort={sortField === 'relevance' ? (sortDirection === 'asc' ? 'ascending' : 'descending') : 'none'}>
+                <th className="border-b p-3 text-left">
                   <SortButton field="relevance" label="Score" />
                 </th>
               )}
@@ -166,13 +172,14 @@ export function TableView({ studies, query, showScoreBreakdown = false }: TableV
             {sortedStudies.map((study) => {
               const isSelected = selectedStudies.has(study.study_id);
               const relevanceScore = (study as any).relevanceScore || 0;
+              const pdf = study.citation.doi ? pdfsByDoi[study.citation.doi] : undefined;
 
               return (
                 <tr
                   key={study.study_id}
                   className={cn(
                     'border-b transition-colors hover:bg-muted/30',
-                    isSelected && 'bg-blue-50 dark:bg-blue-950/20',
+                    isSelected && 'bg-accent/20',
                   )}
                 >
                   <td className="p-3">
@@ -209,8 +216,8 @@ export function TableView({ studies, query, showScoreBreakdown = false }: TableV
                           .filter((o) => o.key_result)
                           .slice(0, 2)
                           .map((outcome, idx) => (
-                            <div key={idx} className="text-gray-700 dark:text-gray-300">
-                              <span className="font-medium">{outcome.outcome_measured}:</span>{' '}
+                            <div key={idx} className="text-muted-foreground">
+                              <span className="font-medium text-foreground">{outcome.outcome_measured}:</span>{' '}
                               {truncate(outcome.key_result || '', 80)}
                             </div>
                           ))}
@@ -230,10 +237,10 @@ export function TableView({ studies, query, showScoreBreakdown = false }: TableV
                         className={cn(
                           'rounded-full px-2 py-1 text-xs font-medium',
                           relevanceScore >= 2
-                            ? 'bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200'
+                            ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-900 dark:text-emerald-200'
                             : relevanceScore >= 0
-                              ? 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900 dark:text-yellow-200'
-                              : 'bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-200',
+                              ? 'bg-amber-100 text-amber-800 dark:bg-amber-900 dark:text-amber-200'
+                              : 'bg-destructive/10 text-destructive',
                         )}
                       >
                         {relevanceScore.toFixed(1)}
@@ -265,6 +272,16 @@ export function TableView({ studies, query, showScoreBreakdown = false }: TableV
                             DOI
                           </a>
                         </Button>
+                      )}
+                      {pdf && pdf.status === 'downloaded' && pdf.public_url && (
+                        <Button variant="ghost" size="sm" asChild>
+                          <a href={pdf.public_url} target="_blank" rel="noopener noreferrer" title="Download PDF">
+                            <Download className="h-4 w-4" />
+                          </a>
+                        </Button>
+                      )}
+                      {pdf && pdf.status === 'pending' && (
+                        <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
                       )}
                     </div>
                   </td>

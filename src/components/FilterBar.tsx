@@ -9,7 +9,7 @@ import {
 } from './ui/select';
 
 export type SortOption = 'relevance' | 'year';
-export type StudyDesignFilter = 'all' | 'meta' | 'review' | 'unknown';
+export type StudyDesignFilter = 'all' | 'meta' | 'review' | 'rct' | 'cohort' | 'cross-sectional' | 'unknown';
 
 interface FilterBarProps {
   sortBy: SortOption;
@@ -51,6 +51,9 @@ export function FilterBar({
           </SelectTrigger>
           <SelectContent>
             <SelectItem value="all">All</SelectItem>
+            <SelectItem value="rct">RCT</SelectItem>
+            <SelectItem value="cohort">Cohort</SelectItem>
+            <SelectItem value="cross-sectional">Cross-sectional</SelectItem>
             <SelectItem value="meta">Meta-analysis</SelectItem>
             <SelectItem value="review">Review</SelectItem>
             <SelectItem value="unknown">Unknown</SelectItem>
@@ -61,7 +64,7 @@ export function FilterBar({
       <div className="flex items-center gap-2 rounded-md border px-3 py-2">
         <Switch checked={explicitOnly} onCheckedChange={onExplicitOnlyChange} id="explicit-outcomes" />
         <Label htmlFor="explicit-outcomes" className="text-sm">
-          Explicit cognitive outcome only
+          Explicit outcome only
         </Label>
       </div>
     </div>

@@ -1,6 +1,6 @@
 // components/SynthesisView.tsx
 import { useMemo, useState } from 'react';
-import { ChevronDown, ChevronRight, ExternalLink } from 'lucide-react';
+import { ChevronDown, ChevronRight, ExternalLink, Download, Loader2, FileText, AlertTriangle } from 'lucide-react';
 import type { StudyResult } from "@/types/research";
 import { Button } from './ui/button';
 import { cn } from '@/lib/utils';
@@ -35,6 +35,7 @@ interface SynthesisViewProps {
     }>;
   }>;
   query: string;
+  pdfsByDoi?: Record<string, import('@/types/research').StudyPdf>;
 }
 
 interface ThematicGroup {
@@ -47,7 +48,7 @@ interface ThematicGroup {
   keyFindings: string[];
 }
 
-export function SynthesisView({ studies, outcomeAggregation, query }: SynthesisViewProps) {
+export function SynthesisView({ studies, outcomeAggregation, query, pdfsByDoi = {} }: SynthesisViewProps) {
   const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set(['group-0']));
 
   // Group studies thematically
@@ -195,17 +196,36 @@ export function SynthesisView({ studies, outcomeAggregation, query }: SynthesisV
                               {study.sample_size && ` • n=${study.sample_size}`}
                             </p>
                           </div>
+                        <div className="flex gap-1">
                           {study.citation.openalex_id &&
                       <Button variant="ghost" size="sm" asChild>
-                              <a
-                          href={`https://openalex.org/${study.citation.openalex_id}`}
-                          target="_blank"
-                          rel="noopener noreferrer">
-
-                                <ExternalLink className="h-4 w-4" />
-                              </a>
-                            </Button>
-                      }
+                                <a
+                            href={`https://openalex.org/${study.citation.openalex_id}`}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            title="View in OpenAlex">
+                                  <ExternalLink className="h-4 w-4" />
+                                </a>
+                              </Button>
+                        }
+                          {study.citation.doi && (() => {
+                            const pdf = pdfsByDoi[study.citation.doi!];
+                            if (!pdf) return null;
+                            if (pdf.status === 'downloaded' && pdf.public_url) {
+                              return (
+                                <Button variant="ghost" size="sm" asChild>
+                                  <a href={pdf.public_url} target="_blank" rel="noopener noreferrer" title="Download PDF">
+                                    <Download className="h-4 w-4" />
+                                  </a>
+                                </Button>
+                              );
+                            }
+                            if (pdf.status === 'pending') {
+                              return <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />;
+                            }
+                            return null;
+                          })()}
+                        </div>
                         </div>
 
                         {study.outcomes && study.outcomes.length > 0 &&
@@ -235,20 +255,28 @@ export function SynthesisView({ studies, outcomeAggregation, query }: SynthesisV
       </div>
 
       {/* Methodological quality note */}
-      {thematicGroups.length > 0
-
-
-
-
-
-
-
-
-
-
+      {thematicGroups.length > 0 && (() => {
+        const notes = getQualityNotes(studies);
+        return notes.length > 0 ? (
+          <div className="rounded-lg border bg-amber-50/50 p-4 dark:bg-amber-950/20">
+            <div className="mb-2 flex items-center gap-2 text-sm font-semibold text-amber-900 dark:text-amber-200">
+              <AlertTriangle className="h-4 w-4" />
+              Methodological Quality Notes
+            </div>
+            <ul className="space-y-1 text-sm text-amber-800 dark:text-amber-300">
+              {notes.map((note, idx) => (
+                <li key={idx} className="flex gap-2">
+                  <span className="text-amber-600 dark:text-amber-400">•</span>
+                  {note}
+                </li>
+              ))}
+            </ul>
+          </div>
+        ) : null;
+      })()
       }
-    </div>);
-
+    </div>
+  );
 }
 
 // Helper functions
