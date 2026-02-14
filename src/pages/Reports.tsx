@@ -1,10 +1,13 @@
 import { Link } from 'react-router-dom';
-import { BookOpen, ArrowLeft, FileText } from 'lucide-react';
+import { BookOpen, ArrowLeft, FileText, LogOut } from 'lucide-react';
 import { ReportCard } from '@/components/ReportCard';
 import { useReports } from '@/hooks/useReports';
+import { useAuth } from '@/hooks/useAuth';
 import { Skeleton } from '@/components/ui/skeleton';
+import { Button } from '@/components/ui/button';
 
 const Reports = () => {
+  const { signOut } = useAuth();
   const { reports, isLoading } = useReports();
 
   return (
@@ -22,10 +25,15 @@ const Reports = () => {
                 <p className="text-xs text-muted-foreground">Citation-grounded evidence extraction</p>
               </div>
             </div>
-            <Link to="/" className="flex items-center gap-2 text-sm text-muted-foreground hover:text-foreground transition-colors">
-              <ArrowLeft className="h-4 w-4" />
-              New Search
-            </Link>
+            <div className="flex items-center gap-3">
+              <Link to="/" className="flex items-center gap-2 text-sm text-muted-foreground hover:text-foreground transition-colors">
+                <ArrowLeft className="h-4 w-4" />
+                New Search
+              </Link>
+              <Button variant="ghost" size="sm" onClick={signOut} className="text-muted-foreground">
+                <LogOut className="h-4 w-4" />
+              </Button>
+            </div>
           </div>
         </div>
       </header>

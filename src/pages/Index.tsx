@@ -3,9 +3,12 @@ import { SearchInput } from '@/components/SearchInput';
 import { ErrorMessage } from '@/components/ErrorMessage';
 import { EmptyState } from '@/components/EmptyState';
 import { useResearch } from '@/hooks/useResearch';
-import { BookOpen, FileText } from 'lucide-react';
+import { useAuth } from '@/hooks/useAuth';
+import { BookOpen, FileText, LogOut } from 'lucide-react';
+import { Button } from '@/components/ui/button';
 
 const Index = () => {
+  const { user, signOut } = useAuth();
   const { isLoading, error, search } = useResearch();
 
   return (
@@ -30,13 +33,18 @@ const Index = () => {
                 <p className="text-xs text-muted-foreground">Citation-grounded evidence extraction</p>
               </div>
             </div>
-            <Link
-              to="/reports"
-              className="flex items-center gap-2 text-sm text-muted-foreground hover:text-foreground transition-colors"
-            >
-              <FileText className="h-4 w-4" />
-              Reports
-            </Link>
+            <div className="flex items-center gap-3">
+              <Link
+                to="/reports"
+                className="flex items-center gap-2 text-sm text-muted-foreground hover:text-foreground transition-colors"
+              >
+                <FileText className="h-4 w-4" />
+                Reports
+              </Link>
+              <Button variant="ghost" size="sm" onClick={signOut} className="text-muted-foreground">
+                <LogOut className="h-4 w-4" />
+              </Button>
+            </div>
           </div>
         </div>
       </header>

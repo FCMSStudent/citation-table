@@ -696,6 +696,29 @@ serve(async (req) => {
       );
     }
 
+    // Authenticate user
+    const authHeader = req.headers.get("Authorization");
+    if (!authHeader?.startsWith("Bearer ")) {
+      return new Response(
+        JSON.stringify({ error: "Authentication required" }),
+        { status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    }
+
+    const anonClient = createClient(supabaseUrl, Deno.env.get("SUPABASE_ANON_KEY")!, {
+      global: { headers: { Authorization: authHeader } },
+    });
+    const { data: claimsData, error: claimsError } = await anonClient.auth.getClaims(
+      authHeader.replace("Bearer ", "")
+    );
+    if (claimsError || !claimsData?.claims?.sub) {
+      return new Response(
+        JSON.stringify({ error: "Invalid or expired token" }),
+        { status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    }
+    const userId = claimsData.claims.sub as string;
+
     const { question } = await req.json();
 
     if (!question || typeof question !== "string" || question.trim().length < 5) {
@@ -714,7 +737,7 @@ serve(async (req) => {
 
     const { data: report, error: insertError } = await supabase
       .from("research_reports")
-      .insert({ question: question.trim(), status: "processing" })
+      .insert({ question: question.trim(), status: "processing", user_id: userId })
       .select("id")
       .single();
 
@@ -765,7 +788,7 @@ serve(async (req) => {
                 "Content-Type": "application/json",
                 "Authorization": `Bearer ${Deno.env.get("SUPABASE_ANON_KEY")}`,
               },
-              body: JSON.stringify({ report_id: reportId, dois }),
+              body: JSON.stringify({ report_id: reportId, dois, user_id: userId }),
             }).catch(err => {
               console.error(`[research-async] Failed to trigger PDF downloads:`, err);
             });

@@ -50,6 +50,7 @@ export type Database = {
           semantic_scholar_count: number | null
           status: string
           total_papers_searched: number | null
+          user_id: string | null
         }
         Insert: {
           arxiv_count?: number | null
@@ -65,6 +66,7 @@ export type Database = {
           semantic_scholar_count?: number | null
           status?: string
           total_papers_searched?: number | null
+          user_id?: string | null
         }
         Update: {
           arxiv_count?: number | null
@@ -80,6 +82,7 @@ export type Database = {
           semantic_scholar_count?: number | null
           status?: string
           total_papers_searched?: number | null
+          user_id?: string | null
         }
         Relationships: []
       }
@@ -92,6 +95,7 @@ export type Database = {
           report_id: string
           status: string
           storage_path: string | null
+          user_id: string | null
         }
         Insert: {
           created_at?: string
@@ -101,6 +105,7 @@ export type Database = {
           report_id: string
           status?: string
           storage_path?: string | null
+          user_id?: string | null
         }
         Update: {
           created_at?: string
@@ -110,6 +115,7 @@ export type Database = {
           report_id?: string
           status?: string
           storage_path?: string | null
+          user_id?: string | null
         }
         Relationships: [
           {
