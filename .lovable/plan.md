@@ -1,66 +1,62 @@
 
 
-# Filter Papers by Type and Completeness
+# Fix 504 Timeout: Inline Research Logic
 
-## Overview
+## Problem
 
-Two changes: (1) exclude papers that aren't one of the allowed study types, and (2) only include studies with at least one complete outcome row in the synthesis.
+`research-async` calls the `research` edge function via HTTP. The research process takes 2-3 minutes (fetching from 3 APIs, enriching 73 papers via Crossref, running LLM extraction). The Supabase gateway enforces a timeout shorter than this, killing the connection and returning 504 before the response arrives.
+
+The research function actually finishes its work successfully -- but the HTTP response never reaches `research-async`.
+
+## Solution
+
+Move the core research logic into `research-async` directly. The `research` function stays as-is (for any direct callers), but `research-async` no longer calls it via HTTP. Instead, it imports/inlines the same logic and runs it within its `waitUntil` background task, which is not subject to the HTTP gateway timeout.
 
 ## What Changes
 
-### 1. Post-extraction filtering in the `research` edge function
+### 1. Extract shared research logic
 
-After the LLM extracts structured data (line ~683 in `supabase/functions/research/index.ts`), add a filter step that removes any study whose `study_design` is `"unknown"`. The allowed designs map to the user's list:
+The `research` function contains all the logic (API calls, deduplication, Crossref enrichment, LLM extraction). The key functions to reuse:
 
-| User term | `study_design` value | `review_type` value |
-|-----------|---------------------|---------------------|
-| Original paper / RCT | `"RCT"` | `"None"` |
-| Cohort / Longitudinal | `"cohort"` | `"None"` |
-| Cross-sectional | `"cross-sectional"` | `"None"` |
-| Narrative/Literature review | `"review"` | `"None"` |
-| Systematic review | `"review"` | `"Systematic review"` |
-| Meta-analysis | `"review"` | `"Meta-analysis"` |
+- `extractKeywords()` - query normalization
+- `searchSemanticScholar()` - Semantic Scholar API
+- `searchOpenAlex()` - OpenAlex API  
+- `searchArxiv()` - ArXiv API
+- `deduplicatePapers()` - deduplication
+- `enrichWithCrossref()` - citation enrichment
+- `extractStudyData()` - Gemini LLM extraction
 
-Studies with `study_design === "unknown"` are excluded from the final results.
+Since edge functions can't share modules across directories, the approach is to copy the core logic into `research-async/index.ts`.
 
-### 2. "Complete row" filter for synthesis
+### 2. Update `research-async/index.ts`
 
-In `supabase/functions/synthesize-papers/index.ts`, before building the study context for the LLM, filter out any study that has zero outcomes with at least one non-null PICO field. A "complete" outcome row means it has `outcome_measured` AND at least one of: `intervention`, `comparator`, `effect_size`, or `p_value` is non-null.
+- Remove the HTTP fetch call to `/functions/v1/research`
+- Inline the research pipeline directly in the background task
+- The pipeline runs inside `waitUntil`, which has no HTTP gateway timeout constraint
+- Keep the same error handling: catch errors and update the report row as "failed"
 
-Studies with no complete outcome rows are excluded from the synthesis input entirely, and a warning is added noting how many studies were excluded.
+### 3. Keep `research/index.ts` unchanged
 
-### 3. Update the LLM extraction prompt
-
-Add to the extraction prompt in `supabase/functions/research/index.ts`: instruct the LLM that `study_design` must be one of `"RCT"`, `"cohort"`, `"cross-sectional"`, or `"review"`. If the paper doesn't clearly fit any of these (e.g., editorials, commentaries, case reports, opinion pieces), classify as `"unknown"` so it gets filtered out.
+It continues to work for any direct HTTP callers (though currently only `research-async` calls it).
 
 ## Technical Details
 
 ### Files modified
 
-1. **`supabase/functions/research/index.ts`**
-   - After `const results = JSON.parse(...)` (~line 683), add filtering:
+1. **`supabase/functions/research-async/index.ts`**
+   - Copy the core research functions from `research/index.ts` (keyword extraction, API searches, deduplication, Crossref enrichment, LLM extraction)
+   - Replace the HTTP fetch block (lines 70-81) with direct function calls
+   - The background work section becomes:
      ```
-     const allowedDesigns = new Set(["RCT", "cohort", "cross-sectional", "review"]);
-     const filtered = results.filter(s => allowedDesigns.has(s.study_design));
-     console.log(`[LLM] Filtered: ${results.length} -> ${filtered.length} (removed ${results.length - filtered.length} unknown/ineligible)`);
-     return filtered;
+     const results = await runResearchPipeline(question);
+     // Update report with results directly
      ```
-   - Update the extraction prompt to clarify that editorials, commentaries, case reports, letters, and opinion pieces should be classified as `"unknown"`
 
-2. **`supabase/functions/synthesize-papers/index.ts`**
-   - Before building `studyContext`, filter studies to only those with at least one complete outcome:
-     ```
-     const eligibleStudies = studies.filter(s =>
-       (s.outcomes || []).some(o =>
-         o.outcome_measured && (o.intervention || o.comparator || o.effect_size || o.p_value)
-       )
-     );
-     ```
-   - Add a computed warning if studies were excluded: `"N of M studies excluded from synthesis due to incomplete extracted data"`
-   - Use `eligibleStudies` for building the prompt context and re-index study numbers accordingly
-   - Pass `eligibleStudies` count in the prompt header
+### Why this works
 
-### No frontend changes needed
+`EdgeRuntime.waitUntil()` keeps the isolate alive for background work without being subject to the HTTP response timeout. The gateway timeout only applies to the HTTP request/response cycle. Since `research-async` already returns immediately with the report ID, the background work can run as long as needed.
 
-The filtering happens server-side. The UI already handles variable study counts gracefully.
+### Risk
+
+The file will be large since it contains the full research pipeline. This is a trade-off of Supabase edge functions not supporting cross-function imports. The logic is identical to what's in `research/index.ts`.
 
