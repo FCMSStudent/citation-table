@@ -1,0 +1,1 @@
+ALTER TABLE public.research_reports ADD COLUMN narrative_synthesis text;
