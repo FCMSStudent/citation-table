@@ -18,6 +18,7 @@ export function useAuth(): UseAuthReturn {
 
   useEffect(() => {
     if (!supabase) {
+      console.warn('Supabase client not initialized');
       setIsLoading(false);
       return;
     }
