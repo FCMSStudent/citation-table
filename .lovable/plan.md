@@ -1,74 +1,126 @@
 
-# New Paper-Level Results Table and CSV Export
+
+# Security and Consistency Pass: Auth for chat-papers and synthesize-papers
 
 ## Overview
 
-Create a new `PaperResultsTable` component showing one row per paper (instead of one row per outcome), make it the default "Table" tab, and add a paper-level CSV export. The existing outcome-level table and CSV export remain available as secondary options.
+Both `chat-papers` and `synthesize-papers` edge functions currently use the service role client without validating the user's identity. The frontend calls them with the anon key as a bearer token instead of the user's session token. This means any request with the anon key can access any report's data -- a serious authorization bypass.
+
+This plan adds the same auth pattern used in `research-async` (getClaims validation + ownership check) and updates the frontend to use `supabase.functions.invoke` which automatically sends the user's access token. It also upgrades `chat-papers` to use the top-10 complete study filter and enforce citations.
 
 ## Changes
 
-### 1. Create `src/components/PaperResultsTable.tsx` (new file)
+### 1. `supabase/functions/chat-papers/index.ts` -- Full security + context upgrade
 
-A table component with these columns:
+**Auth (insert after rate limit, before parsing body):**
+- Extract `Authorization` header, reject if missing
+- Create an anon client with the user's token
+- Call `anonClient.auth.getClaims(token)` to validate and extract `userId`
+- After fetching the report (still via service role for reliability), verify `report.user_id === userId`
+- Return 401/404 as appropriate
 
-| Column | Content |
-|--------|---------|
-| Checkbox | Selection (reuse existing pattern) |
-| Paper Info | Title (bold), authors extracted from citation, year, citation count, DOI link (external), abstract/full-text availability indicator |
-| Study Method | Bullet list: design, sample size (N=X), population |
-| Outcomes | Bullet list of `outcome_measured` values from `study.outcomes` |
-| Results | Bullet list of `key_result` values (with effect_size and p_value inline) |
-| Limitations | Bullet list from `study.outcomes` where key_result mentions limitations, or "Not reported" |
-| Conclusion | First outcome's `key_result` summary or abstract excerpt (truncated) |
-| PDF Available | Icon/badge showing PDF availability from legal OA sources |
+**Remove duplicate variable declarations** (lines 55-57 re-declare `supabaseUrl`/`supabaseKey`/`supabase` -- already declared on lines 33-35). Reuse `rlSupabase` for the report fetch, and add a separate user-context client for auth.
 
-**PDF Available column logic** (checks in order, shows first match):
-1. `study.pdf_url` -- from OpenAlex `best_oa_location.pdf_url` or Semantic Scholar `openAccessPdf.url`
-2. `study.landing_page_url` -- from OpenAlex `best_oa_location.landing_page_url`
-3. arXiv PDF: if `study.source === 'arxiv'`, construct `https://arxiv.org/pdf/{study_id}`
-4. Sci-Hub PDF: check `pdfsByDoi` prop for downloaded PDFs
-5. If none available, show a muted "No" indicator
+**Context: top-10 complete studies (same as synthesize-papers):**
+- Add `isCompleteStudy()` and `scoreStudy()` functions (same implementations as in `synthesize-papers`)
+- Filter `report.results` through `isCompleteStudy()`, rank by `scoreStudy()`, take top 10
+- Build `studyContext` from only those 10 studies
 
-Each link opens in a new tab. Multiple sources shown if available.
+**System prompt: enforce citations:**
+- Update the system prompt to explicitly require `(Title, Year)` format for every factual claim
+- Add rule: "If you cannot cite a specific study for a claim, do not make that claim."
+- Update the study count reference to reflect filtered count
 
-Props will mirror `TableView`: `studies`, `query`, `pdfsByDoi`, `onExportSelected`, `onCompare`.
+### 2. `supabase/functions/synthesize-papers/index.ts` -- Add auth
 
-Sortable columns: Paper (by title), Year, Design, Citation Count.
+**Auth (insert after rate limit, before parsing body):**
+- Same pattern: extract Authorization header, create anon client, validate via `getClaims()`, extract `userId`
+- After fetching the report, verify `report.user_id === userId` (add `user_id` to the select query)
+- Return 401 if token invalid, 404 if report not found or not owned by user
 
-### 2. Update `src/components/ResultsTable.tsx`
+**No other changes** -- the top-10 filter and synthesis logic are already correct.
 
-- Import `PaperResultsTable`
-- Change `ViewMode` type to `'synthesis' | 'table' | 'pico' | 'cards'`
-- Rename current "Table" tab to "PICO Table" and add new "Table" tab as default table view
-- Tab order: Synthesis | Table (paper-level, new) | PICO Table (outcome-level, existing) | Cards
-- Wire `viewMode === 'table'` to render `<PaperResultsTable>`, `viewMode === 'pico'` to render existing `<TableView>`
-- Add a dropdown or second button for CSV export: "Export CSV (Paper)" calls new function, "Export CSV (Outcomes)" calls existing `downloadCSV`
+### 3. `src/hooks/usePaperChat.ts` -- Use supabase client
 
-### 3. Create `src/lib/csvPaperExport.ts` (new file)
+Replace the raw `fetch` with `supabase` from `@/integrations/supabase/client`:
 
-New export function `downloadPaperCSV(studies, filename)` with columns matching the table:
-- Title, Authors, Year, DOI, Citation Count, Study Design, Sample Size, Population
-- Outcomes (semicolon-joined list of outcome_measured)
-- Results (semicolon-joined key_result values)
-- Effect Sizes (semicolon-joined)
-- P-values (semicolon-joined)
-- Review Type, Preprint Status
-- PDF URL (first available legal OA link)
-- Landing Page URL
-- OpenAlex ID
+- Import `supabase` from the client
+- Get the user's session via `supabase.auth.getSession()` to obtain `access_token`
+- Replace `fetch(CHAT_URL, ...)` with a `fetch` using `Authorization: Bearer ${accessToken}` (not the anon key)
+- Alternatively, since this uses streaming (SSE), we cannot use `supabase.functions.invoke` (it doesn't support streaming). Keep `fetch` but swap the bearer token from the publishable key to the user's `access_token`
+- Remove the `VITE_SUPABASE_PUBLISHABLE_KEY` usage
+- If no active session, set error "Please sign in to chat"
 
-One row per paper. Reuses `escapeCSV` and `extractAuthors` helpers (extracted to shared or duplicated).
+### 4. `src/components/NarrativeSynthesis.tsx` -- Use supabase.functions.invoke
 
-### 4. Update `src/lib/csvExport.ts`
+Replace the raw `fetch` call in the `generate` function:
 
-- Export the `escapeCSV` and `extractAuthors` helpers so they can be reused by `csvPaperExport.ts`
-- Keep existing `downloadCSV` function unchanged
+- Import `supabase` from `@/integrations/supabase/client`
+- Replace `fetch(...)` with `supabase.functions.invoke('synthesize-papers', { body: { report_id: reportId } })`
+- This automatically includes the user's access token
+- Remove hardcoded URL and anon key fallback
+- Handle errors from the invoke response
+
+## Technical Details
+
+### Auth pattern (matching research-async exactly):
+
+```typescript
+const authHeader = req.headers.get("Authorization");
+if (!authHeader?.startsWith("Bearer ")) {
+  return new Response(
+    JSON.stringify({ error: "Authentication required" }),
+    { status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+  );
+}
+
+const anonClient = createClient(supabaseUrl, Deno.env.get("SUPABASE_ANON_KEY")!, {
+  global: { headers: { Authorization: authHeader } },
+});
+const { data: claimsData, error: claimsError } = await anonClient.auth.getClaims(
+  authHeader.replace("Bearer ", "")
+);
+if (claimsError || !claimsData?.claims?.sub) {
+  return new Response(
+    JSON.stringify({ error: "Invalid or expired token" }),
+    { status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+  );
+}
+const userId = claimsData.claims.sub as string;
+```
+
+### Ownership check (after fetching report):
+
+```typescript
+// Add user_id to select
+.select("question, results, normalized_query, user_id")
+
+// After fetch
+if (!report || report.user_id !== userId) {
+  return new Response(
+    JSON.stringify({ error: "Report not found" }),
+    { status: 404, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+  );
+}
+```
+
+### Streaming chat auth (usePaperChat):
+
+```typescript
+const { data: { session } } = await supabase.auth.getSession();
+if (!session?.access_token) {
+  setError('Please sign in to use chat');
+  return;
+}
+// Use session.access_token as Bearer token in fetch
+```
 
 ## Files Changed
 
 | File | Action |
 |------|--------|
-| `src/components/PaperResultsTable.tsx` | Create: new paper-level table component |
-| `src/lib/csvPaperExport.ts` | Create: paper-level CSV export function |
-| `src/lib/csvExport.ts` | Edit: export helper functions |
-| `src/components/ResultsTable.tsx` | Edit: add new tab, wire up new table and export |
+| `supabase/functions/chat-papers/index.ts` | Edit: add auth, ownership check, top-10 filter, citation enforcement |
+| `supabase/functions/synthesize-papers/index.ts` | Edit: add auth, ownership check |
+| `src/hooks/usePaperChat.ts` | Edit: use session access_token instead of publishable key |
+| `src/components/NarrativeSynthesis.tsx` | Edit: use `supabase.functions.invoke` |
+
