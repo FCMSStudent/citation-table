@@ -3,6 +3,10 @@ export interface Outcome {
   outcome_measured: string;
   key_result: string | null;
   citation_snippet: string; // Verbatim text from abstract supporting this outcome
+  intervention: string | null;    // Treatment/exposure studied
+  comparator: string | null;      // Control/comparison group
+  effect_size: string | null;     // Verbatim effect size (e.g., "d = 0.45", "OR = 2.3")
+  p_value: string | null;         // Verbatim p-value or CI
 }
 
 // Citation information with structured identifiers
