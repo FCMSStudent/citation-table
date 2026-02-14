@@ -1,41 +1,101 @@
 
 
-# Add Public Landing Page and Move Search to /app
+# Improve Paper Retrieval and Add Study Completeness Filter
 
 ## Overview
-Create a public landing page at `/`, move the authenticated search experience to `/app`, and update all internal navigation links accordingly.
 
-## Changes
+Upgrade all three data source integrations in `research-async` to capture richer metadata (open-access PDFs, better sorting), and add a reusable `isCompleteStudy()` filter to exclude incomplete entries before they reach synthesis, table, or chat.
 
-### 1. Create `src/pages/Landing.tsx` (new file)
-A public marketing/landing page that introduces the Research Assistant and directs visitors to sign in or sign up. It will include:
-- Hero section with app name, tagline, and description
-- Call-to-action buttons: "Get Started" (links to `/auth`) and "Sign In" (links to `/auth`)
-- Brief feature highlights (evidence extraction, citation-grounded, etc.)
-- No authentication required to view
+---
 
-### 2. Update `src/App.tsx`
-- Import the new `Landing` component
-- Change route `/` to render `<Landing />` (public, no ProtectedRoute)
-- Add route `/app` wrapped in `<ProtectedRoute>` rendering `<Index />`
-- Keep `/reports` and `/reports/:id` protected as-is
+## 1. Semantic Scholar: Switch to Bulk Search Endpoint
 
-### 3. Update `src/pages/Auth.tsx`
-- Change `<Navigate to="/" replace />` to `<Navigate to="/app" replace />` so signed-in users land on the search page
+**Current**: Uses `/graph/v1/paper/search` with `limit=25`
+**New**: Switch to `/graph/v1/paper/search/bulk` which returns up to 1000 results per call (we'll still slice to top papers later).
 
-### 4. Update `src/pages/Reports.tsx`
-- Line 29: Change `<Link to="/">` to `<Link to="/app">` (New Search link in header)
-- Line 61: Change `<Link to="/">` to `<Link to="/app">` (Start a search link in empty state)
+**Changes to `searchSemanticScholar()`** (lines 221-261):
+- Change URL from `/paper/search` to `/paper/search/bulk`
+- Remove `limit=25` (bulk endpoint doesn't use it; returns up to 1000 by default)
+- Add `openAccessPdf` and `url` to the `fields` parameter
+- Update the `SemanticScholarPaper` interface (lines 56-66) to add:
+  - `openAccessPdf?: { url: string } | null`
+  - `url?: string`
+- Pass these new fields through to `UnifiedPaper` by adding `pdfUrl` and `landingPageUrl` optional fields to the `UnifiedPaper` interface
 
-### 5. Update `src/pages/ReportDetail.tsx`
-- Line 37: Change `<Link to="/">` to `<Link to="/app">` (New Search link in header)
+## 2. OpenAlex: Capture OA Location URLs
 
-### 6. Update `src/pages/Index.tsx`
-- No changes needed (it already works as a standalone page; routing handles protection)
+**Current**: Only reads `primary_location.source.display_name`
+**New**: Also read `best_oa_location.pdf_url` and `best_oa_location.landing_page_url`
 
-## Flow After Changes
+**Changes to `searchOpenAlex()`** (lines 168-209):
+- Update `OpenAlexWork` interface (lines 44-54) to add:
+  - `best_oa_location?: { pdf_url?: string; landing_page_url?: string }`
+- In the `.map()` at line 191, capture:
+  - `pdfUrl: work.best_oa_location?.pdf_url || null`
+  - `landingPageUrl: work.best_oa_location?.landing_page_url || null`
 
-```text
-/ (Landing, public) --> /auth (sign in/up) --> /app (search, protected) --> /reports/:id (protected)
+## 3. arXiv: Add Sorting Parameters
+
+**Current** (line 267): `search_query=all:${encodedQuery}&max_results=25`
+**New**: Append `&sortBy=relevance&sortOrder=descending` to the URL
+
+One-line change.
+
+## 4. Update `UnifiedPaper` Interface
+
+Add two optional fields to the `UnifiedPaper` interface (lines 68-82):
 ```
+pdfUrl?: string | null;
+landingPageUrl?: string | null;
+```
+
+These fields carry through the pipeline for potential downstream use (e.g., linking to full-text PDFs legally). The deduplication function will also merge these fields when combining duplicates.
+
+## 5. Update `StudyResult` Type and Frontend Type
+
+Add to both the edge function's local `StudyResult` interface (line 28) and `src/types/research.ts`:
+```
+pdf_url?: string | null;
+landing_page_url?: string | null;
+```
+
+Pass these fields through from `UnifiedPaper` into the LLM extraction context so they appear on the final result objects (they are metadata fields, not LLM-extracted).
+
+## 6. Create `isCompleteStudy()` Filter
+
+A reusable function defined in both the edge function and a shared frontend utility.
+
+```typescript
+function isCompleteStudy(study: StudyResult): boolean {
+  // Must have title, year, study_design (not "unknown"), and abstract
+  if (!study.title || !study.year) return false;
+  if (study.study_design === "unknown") return false;
+  if (!study.abstract_excerpt || study.abstract_excerpt.trim().length < 50) return false;
+
+  // Must have at least one meaningful outcome
+  // (outcome_measured present AND at least one PICO metric filled)
+  if (!study.outcomes || study.outcomes.length === 0) return false;
+  const hasCompleteOutcome = study.outcomes.some(o =>
+    o.outcome_measured &&
+    (o.effect_size || o.p_value || o.intervention || o.comparator)
+  );
+  return hasCompleteOutcome;
+}
+```
+
+### Where it's applied:
+- **Edge function** (line 554-561): Replace the current design + abstract filters with `isCompleteStudy()` in `extractStudyData()`
+- **Frontend** (`src/utils/isCompleteStudy.ts`): New file exporting the same function
+- **`src/pages/ReportDetail.tsx`**: Filter `report.results` through `isCompleteStudy()` before passing to `ResultsTable`, `PaperChat`, and synthesis components
+
+This ensures that no matter how results are stored, only complete studies reach the user-facing views.
+
+## Files Changed
+
+| File | Action |
+|------|--------|
+| `supabase/functions/research-async/index.ts` | Edit: interfaces, 3 search functions, add `isCompleteStudy`, apply filter |
+| `src/types/research.ts` | Edit: add `pdf_url`, `landing_page_url` to `StudyResult` |
+| `src/utils/isCompleteStudy.ts` | Create: reusable filter function |
+| `src/pages/ReportDetail.tsx` | Edit: filter results through `isCompleteStudy()` |
 
