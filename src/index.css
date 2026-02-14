@@ -1,165 +1,194 @@
-@import url("https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap");
-@import url("https://fonts.googleapis.com/css2?family=Lora:wght@400;500;600;700&display=swap");
-@import url("https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&display=swap");
+@import url("https://fonts.googleapis.com/css2?family=SF+Pro+Display:wght@400;500;600;700&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap");
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
 
-/* Academic Research Assistant Design System
-   Aesthetic: Clean, scholarly, typography-forward
-   Inspired by: Notion, Google Scholar, academic journals
+/* ── Liquid Glass Design System ──
+   Aesthetic: Apple Liquid Glass – translucent frosted layers,
+   luminous tints, diffused depth, soft spectral highlights.
 */
 
 @layer base {
   :root {
-    /* Core backgrounds - warm paper tones */
-    --background: 0 0% 100%;
-    --foreground: 265 4% 12.9%;
+    /* ── Surfaces ── */
+    --background: 220 16% 96%;
+    --foreground: 220 20% 14%;
 
-    /* Cards and surfaces */
-    --card: 0 0% 100%;
-    --card-foreground: 265 4% 12.9%;
+    --card: 0 0% 100% / 72%;
+    --card-foreground: 220 20% 14%;
 
-    /* Popover */
-    --popover: 0 0% 100%;
-    --popover-foreground: 265 4% 12.9%;
+    --popover: 0 0% 100% / 80%;
+    --popover-foreground: 220 20% 14%;
 
-    /* Primary - vibrant scholarly blue */
-    --primary: 250 70% 55%;
-    --primary-foreground: 248 0.3% 98.4%;
+    /* ── Primary – soft blue-violet tint ── */
+    --primary: 215 90% 56%;
+    --primary-foreground: 0 0% 100%;
 
-    /* Secondary - muted warm gray */
-    --secondary: 248 0.7% 96.8%;
-    --secondary-foreground: 266 4% 20.8%;
+    /* ── Secondary – frosted neutral ── */
+    --secondary: 220 14% 92%;
+    --secondary-foreground: 220 20% 24%;
 
-    /* Muted - soft neutrals */
-    --muted: 248 0.7% 96.8%;
-    --muted-foreground: 257 4.6% 55.4%;
+    /* ── Muted – whisper-soft gray ── */
+    --muted: 220 14% 94%;
+    --muted-foreground: 220 10% 50%;
 
-    /* Accent - vibrant pink/magenta */
-    --accent: 340 75% 60%;
-    --accent-foreground: 248 0.3% 98.4%;
+    /* ── Accent – spectral violet ── */
+    --accent: 260 60% 62%;
+    --accent-foreground: 0 0% 100%;
 
-    /* Destructive */
-    --destructive: 27 24.5% 57.7%;
+    /* ── Destructive ── */
+    --destructive: 0 72% 58%;
     --destructive-foreground: 0 0% 100%;
 
-    /* UI elements */
-    --border: 256 1.3% 92.9%;
-    --input: 256 1.3% 92.9%;
-    --ring: 250 70% 55%;
-    --radius: 0.375rem;
+    /* ── UI chrome ── */
+    --border: 220 14% 90%;
+    --input: 220 14% 90%;
+    --ring: 215 90% 56%;
+    --radius: 0.75rem;
 
-    /* Table specific */
-    --table-header: 40 20% 95%;
-    --table-row-hover: 40 25% 96%;
-    --table-border: 40 15% 85%;
+    /* ── Table ── */
+    --table-header: 220 16% 96%;
+    --table-row-hover: 215 40% 96%;
+    --table-border: 220 14% 90%;
 
-    /* Citation highlight */
-    --citation-bg: 45 100% 95%;
-    --citation-border: 45 80% 70%;
+    /* ── Citation ── */
+    --citation-bg: 215 60% 96%;
+    --citation-border: 215 70% 72%;
 
-    /* Status colors - more vibrant */
-    --success: 142 70% 45%;
+    /* ── Status ── */
+    --success: 152 60% 44%;
     --warning: 38 92% 55%;
-    --info: 200 90% 45%;
+    --info: 215 90% 56%;
 
-    /* Vibrant gradients - using theme-consistent HSL values */
-    --gradient-primary: linear-gradient(135deg, hsl(250 70% 65%) 0%, hsl(280 50% 55%) 100%);
-    --gradient-accent: linear-gradient(135deg, hsl(340 90% 75%) 0%, hsl(0 75% 65%) 100%);
-    --gradient-success: linear-gradient(135deg, hsl(200 90% 60%) 0%, hsl(185 100% 50%) 100%);
-    --gradient-warm: linear-gradient(135deg, hsl(340 90% 70%) 0%, hsl(50 95% 60%) 100%);
-    --gradient-cool: linear-gradient(135deg, hsl(185 70% 50%) 0%, hsl(260 60% 30%) 100%);
+    /* ── Liquid Glass Gradients ── */
+    --gradient-primary: linear-gradient(135deg, hsl(215 90% 62% / 0.8) 0%, hsl(260 60% 62% / 0.6) 100%);
+    --gradient-accent: linear-gradient(135deg, hsl(260 60% 68% / 0.7) 0%, hsl(310 50% 62% / 0.5) 100%);
+    --gradient-success: linear-gradient(135deg, hsl(172 60% 50% / 0.7) 0%, hsl(152 60% 44% / 0.6) 100%);
+    --gradient-warm: linear-gradient(135deg, hsl(20 80% 60% / 0.6) 0%, hsl(40 90% 60% / 0.5) 100%);
+    --gradient-cool: linear-gradient(135deg, hsl(200 80% 58% / 0.7) 0%, hsl(240 50% 50% / 0.5) 100%);
+    --gradient-glass: linear-gradient(135deg, hsl(0 0% 100% / 0.5) 0%, hsl(0 0% 100% / 0.2) 100%);
 
-    /* Sidebar */
-    --sidebar-background: 40 25% 96%;
-    --sidebar-foreground: 265 4% 12.9%;
-    --sidebar-primary: 266 4% 20.8%;
-    --sidebar-primary-foreground: 248 0.3% 98.4%;
-    --sidebar-accent: 248 0.7% 96.8%;
-    --sidebar-accent-foreground: 266 4% 20.8%;
-    --sidebar-border: 256 1.3% 92.9%;
-    --sidebar-ring: 257 4% 70.4%;
-    --chart-1: 41 22.2% 64.6%;
-    --chart-2: 185 11.8% 60%;
-    --chart-3: 227 7% 39.8%;
-    --chart-4: 84 18.9% 82.8%;
-    --chart-5: 70 18.8% 76.9%;
-    --sidebar: 248 0.3% 98.4%;
-    --font-sans: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, 'Noto Sans', sans-serif, 'Apple Color Emoji', 'Segoe UI Emoji', 'Segoe UI Symbol', 'Noto Color Emoji';
-    --font-serif: ui-serif, Georgia, Cambria, "Times New Roman", Times, serif;
-    --font-mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
-    --shadow-2xs: 0 1px 3px 0px hsl(0 0% 0% / 0.05);
-    --shadow-xs: 0 1px 3px 0px hsl(0 0% 0% / 0.05);
-    --shadow-sm: 0 1px 3px 0px hsl(0 0% 0% / 0.1), 0 1px 2px -1px hsl(0 0% 0% / 0.1);
-    --shadow: 0 1px 3px 0px hsl(0 0% 0% / 0.1), 0 1px 2px -1px hsl(0 0% 0% / 0.1);
-    --shadow-md: 0 1px 3px 0px hsl(0 0% 0% / 0.1), 0 2px 4px -1px hsl(0 0% 0% / 0.1);
-    --shadow-lg: 0 1px 3px 0px hsl(0 0% 0% / 0.1), 0 4px 6px -1px hsl(0 0% 0% / 0.1);
-    --shadow-xl: 0 1px 3px 0px hsl(0 0% 0% / 0.1), 0 8px 10px -1px hsl(0 0% 0% / 0.1);
-    --shadow-2xl: 0 1px 3px 0px hsl(0 0% 0% / 0.25);
+    /* ── Glass surface ── */
+    --glass-bg: hsl(0 0% 100% / 0.55);
+    --glass-border: hsl(0 0% 100% / 0.6);
+    --glass-blur: 20px;
+    --glass-shadow: 0 8px 32px hsl(215 40% 50% / 0.08), 0 2px 8px hsl(215 40% 50% / 0.04);
+    --glass-highlight: inset 0 1px 0 hsl(0 0% 100% / 0.6);
+
+    /* ── Sidebar ── */
+    --sidebar-background: 220 16% 97%;
+    --sidebar-foreground: 220 20% 14%;
+    --sidebar-primary: 215 90% 56%;
+    --sidebar-primary-foreground: 0 0% 100%;
+    --sidebar-accent: 220 14% 94%;
+    --sidebar-accent-foreground: 220 20% 24%;
+    --sidebar-border: 220 14% 90%;
+    --sidebar-ring: 215 90% 56%;
+    --sidebar: 220 16% 97%;
+
+    /* ── Chart ── */
+    --chart-1: 215 90% 56%;
+    --chart-2: 172 50% 50%;
+    --chart-3: 260 50% 58%;
+    --chart-4: 38 80% 55%;
+    --chart-5: 340 60% 58%;
+
+    /* ── Typography ── */
+    --font-sans: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+    --font-serif: Georgia, Cambria, "Times New Roman", Times, serif;
+    --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+
+    /* ── Shadows – diffused, luminous ── */
+    --shadow-2xs: 0 1px 2px hsl(215 30% 50% / 0.04);
+    --shadow-xs: 0 1px 3px hsl(215 30% 50% / 0.06);
+    --shadow-sm: 0 2px 6px hsl(215 30% 50% / 0.06), 0 1px 2px hsl(215 30% 50% / 0.04);
+    --shadow: 0 4px 12px hsl(215 30% 50% / 0.06), 0 1px 4px hsl(215 30% 50% / 0.04);
+    --shadow-md: 0 6px 20px hsl(215 30% 50% / 0.08), 0 2px 6px hsl(215 30% 50% / 0.04);
+    --shadow-lg: 0 12px 40px hsl(215 30% 50% / 0.1), 0 4px 12px hsl(215 30% 50% / 0.05);
+    --shadow-xl: 0 20px 60px hsl(215 30% 50% / 0.12), 0 8px 20px hsl(215 30% 50% / 0.06);
+    --shadow-2xl: 0 32px 80px hsl(215 30% 50% / 0.16);
     --tracking-normal: 0em;
     --spacing: 0.25rem;
   }
 
   .dark {
-    /* Dark mode - deep scholarly tones */
-    --background: 0 0% 15%;
-    --foreground: 248 0.3% 98.4%;
+    /* ── Surfaces ── */
+    --background: 225 20% 8%;
+    --foreground: 220 10% 92%;
 
-    --card: 266 4% 20.8%;
-    --card-foreground: 248 0.3% 98.4%;
+    --card: 225 18% 14% / 65%;
+    --card-foreground: 220 10% 92%;
 
-    --popover: 266 4% 20.8%;
-    --popover-foreground: 248 0.3% 98.4%;
+    --popover: 225 18% 14% / 80%;
+    --popover-foreground: 220 10% 92%;
 
-    --primary: 256 1.3% 92.9%;
-    --primary-foreground: 266 4% 20.8%;
+    /* ── Primary ── */
+    --primary: 215 80% 64%;
+    --primary-foreground: 225 20% 8%;
 
-    --secondary: 260 4.1% 27.9%;
-    --secondary-foreground: 248 0.3% 98.4%;
+    /* ── Secondary ── */
+    --secondary: 225 14% 18%;
+    --secondary-foreground: 220 10% 85%;
 
-    --muted: 260 4.1% 27.9%;
-    --muted-foreground: 257 4% 70.4%;
+    /* ── Muted ── */
+    --muted: 225 14% 18%;
+    --muted-foreground: 220 10% 55%;
 
-    --accent: 260 4.1% 27.9%;
-    --accent-foreground: 248 0.3% 98.4%;
+    /* ── Accent ── */
+    --accent: 260 50% 68%;
+    --accent-foreground: 225 20% 8%;
 
-    --destructive: 22 19.1% 70.4%;
-    --destructive-foreground: 248 0.3% 98.4%;
+    /* ── Destructive ── */
+    --destructive: 0 65% 55%;
+    --destructive-foreground: 220 10% 92%;
 
-    --border: 0 0% 100% / 10%;
-    --input: 0 0% 100% / 15%;
-    --ring: 264 2.7% 55.1%;
+    /* ── UI chrome ── */
+    --border: 0 0% 100% / 8%;
+    --input: 0 0% 100% / 10%;
+    --ring: 215 80% 64%;
 
-    --table-header: 220 15% 15%;
-    --table-row-hover: 220 15% 16%;
-    --table-border: 220 12% 22%;
+    /* ── Table ── */
+    --table-header: 225 18% 12%;
+    --table-row-hover: 225 18% 14%;
+    --table-border: 0 0% 100% / 8%;
 
-    --citation-bg: 45 40% 15%;
-    --citation-border: 45 60% 40%;
+    /* ── Citation ── */
+    --citation-bg: 215 40% 14%;
+    --citation-border: 215 50% 40%;
 
-    --sidebar-background: 220 18% 12%;
-    --sidebar-foreground: 248 0.3% 98.4%;
-    --sidebar-primary: 264 24.3% 48.8%;
-    --sidebar-primary-foreground: 248 0.3% 98.4%;
-    --sidebar-accent: 260 4.1% 27.9%;
-    --sidebar-accent-foreground: 248 0.3% 98.4%;
-    --sidebar-border: 0 0% 100% / 10%;
-    --sidebar-ring: 264 2.7% 55.1%;
-    --chart-1: 264 24.3% 48.8%;
-    --chart-2: 162 17% 69.6%;
-    --chart-3: 70 18.8% 76.9%;
-    --chart-4: 304 26.5% 62.7%;
-    --chart-5: 16 24.6% 64.5%;
-    --sidebar: 266 4% 20.8%;
-    --shadow-2xs: 0 1px 3px 0px hsl(0 0% 0% / 0.05);
-    --shadow-xs: 0 1px 3px 0px hsl(0 0% 0% / 0.05);
-    --shadow-sm: 0 1px 3px 0px hsl(0 0% 0% / 0.1), 0 1px 2px -1px hsl(0 0% 0% / 0.1);
-    --shadow: 0 1px 3px 0px hsl(0 0% 0% / 0.1), 0 1px 2px -1px hsl(0 0% 0% / 0.1);
-    --shadow-md: 0 1px 3px 0px hsl(0 0% 0% / 0.1), 0 2px 4px -1px hsl(0 0% 0% / 0.1);
-    --shadow-lg: 0 1px 3px 0px hsl(0 0% 0% / 0.1), 0 4px 6px -1px hsl(0 0% 0% / 0.1);
-    --shadow-xl: 0 1px 3px 0px hsl(0 0% 0% / 0.1), 0 8px 10px -1px hsl(0 0% 0% / 0.1);
-    --shadow-2xl: 0 1px 3px 0px hsl(0 0% 0% / 0.25);
+    /* ── Glass ── */
+    --glass-bg: hsl(225 18% 16% / 0.55);
+    --glass-border: hsl(0 0% 100% / 0.1);
+    --glass-shadow: 0 8px 32px hsl(0 0% 0% / 0.2), 0 2px 8px hsl(0 0% 0% / 0.1);
+    --glass-highlight: inset 0 1px 0 hsl(0 0% 100% / 0.08);
+
+    /* ── Sidebar ── */
+    --sidebar-background: 225 18% 10%;
+    --sidebar-foreground: 220 10% 92%;
+    --sidebar-primary: 215 80% 64%;
+    --sidebar-primary-foreground: 225 20% 8%;
+    --sidebar-accent: 225 14% 18%;
+    --sidebar-accent-foreground: 220 10% 85%;
+    --sidebar-border: 0 0% 100% / 8%;
+    --sidebar-ring: 215 80% 64%;
+    --sidebar: 225 18% 10%;
+
+    /* ── Chart ── */
+    --chart-1: 215 80% 64%;
+    --chart-2: 172 45% 55%;
+    --chart-3: 260 45% 65%;
+    --chart-4: 38 70% 58%;
+    --chart-5: 340 55% 62%;
+
+    /* ── Shadows ── */
+    --shadow-2xs: 0 1px 2px hsl(0 0% 0% / 0.1);
+    --shadow-xs: 0 1px 3px hsl(0 0% 0% / 0.15);
+    --shadow-sm: 0 2px 6px hsl(0 0% 0% / 0.15), 0 1px 2px hsl(0 0% 0% / 0.1);
+    --shadow: 0 4px 12px hsl(0 0% 0% / 0.15), 0 1px 4px hsl(0 0% 0% / 0.1);
+    --shadow-md: 0 6px 20px hsl(0 0% 0% / 0.2), 0 2px 6px hsl(0 0% 0% / 0.1);
+    --shadow-lg: 0 12px 40px hsl(0 0% 0% / 0.25), 0 4px 12px hsl(0 0% 0% / 0.12);
+    --shadow-xl: 0 20px 60px hsl(0 0% 0% / 0.3), 0 8px 20px hsl(0 0% 0% / 0.15);
+    --shadow-2xl: 0 32px 80px hsl(0 0% 0% / 0.4);
   }
 }
 
@@ -170,36 +199,68 @@
 
   body {
     @apply bg-background text-foreground antialiased;
-    font-feature-settings: "kern" 1, "liga" 1;
+    font-feature-settings: "kern" 1, "liga" 1, "calt" 1;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
   }
 
-  /* Typography scale - academic feel */
   h1, h2, h3, h4, h5, h6 {
     @apply font-semibold tracking-tight;
+    letter-spacing: -0.02em;
   }
 }
 
 @layer components {
-  /* Research question input */
+  /* ── Liquid Glass Surface ── */
+  .glass {
+    background: var(--glass-bg);
+    backdrop-filter: blur(var(--glass-blur));
+    -webkit-backdrop-filter: blur(var(--glass-blur));
+    border: 1px solid var(--glass-border);
+    box-shadow: var(--glass-shadow), var(--glass-highlight);
+  }
+
+  .glass-subtle {
+    background: var(--glass-bg);
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+    border: 1px solid var(--glass-border);
+  }
+
+  .glass-prominent {
+    background: var(--glass-bg);
+    backdrop-filter: blur(32px) saturate(1.8);
+    -webkit-backdrop-filter: blur(32px) saturate(1.8);
+    border: 1px solid var(--glass-border);
+    box-shadow: var(--glass-shadow), var(--glass-highlight),
+      inset 0 0 80px hsl(215 60% 80% / 0.04);
+  }
+
+  /* ── Research Input ── */
   .research-input {
-    @apply w-full px-4 py-3 text-lg bg-card border border-border rounded-lg;
-    @apply focus:outline-none focus:ring-2 focus:ring-ring focus:border-transparent;
-    @apply placeholder:text-muted-foreground transition-all duration-200;
+    @apply w-full px-5 py-3.5 text-lg rounded-xl;
+    background: var(--glass-bg);
+    backdrop-filter: blur(var(--glass-blur));
+    -webkit-backdrop-filter: blur(var(--glass-blur));
+    border: 1px solid var(--glass-border);
+    box-shadow: var(--glass-highlight);
+    @apply focus:outline-none focus:ring-2 focus:ring-primary/40 focus:border-primary/30;
+    @apply placeholder:text-muted-foreground transition-all duration-300;
   }
 
   .research-input:focus {
-    @apply shadow-md;
+    box-shadow: var(--glass-shadow), 0 0 0 4px hsl(215 90% 56% / 0.1);
   }
 
-  /* Results table */
+  /* ── Results Table ── */
   .results-table {
     @apply w-full border-collapse;
   }
 
   .results-table th {
-    @apply px-4 py-3 text-left text-sm font-semibold;
+    @apply px-4 py-3 text-left text-sm font-medium;
     @apply bg-[hsl(var(--table-header))] border-b border-[hsl(var(--table-border))];
-    @apply text-foreground;
+    @apply text-muted-foreground uppercase tracking-wider text-xs;
   }
 
   .results-table td {
@@ -211,61 +272,61 @@
     @apply bg-[hsl(var(--table-row-hover))];
   }
 
-  /* Expandable row citation panel */
+  /* ── Citation Panel ── */
   .citation-panel {
-    @apply p-4 bg-[hsl(var(--citation-bg))] border-l-4 border-[hsl(var(--citation-border))];
-    @apply text-sm leading-relaxed;
+    @apply p-4 rounded-lg text-sm leading-relaxed;
+    background: hsl(var(--citation-bg));
+    border-left: 3px solid hsl(var(--citation-border));
   }
 
-  /* Study type badges */
+  /* ── Study Badges ── */
   .study-badge {
-    @apply inline-flex items-center px-2 py-0.5 text-xs font-medium rounded;
+    @apply inline-flex items-center px-2.5 py-0.5 text-xs font-medium rounded-full;
+    backdrop-filter: blur(8px);
+    -webkit-backdrop-filter: blur(8px);
   }
 
   .study-badge-rct {
-    @apply bg-emerald-100 text-emerald-800;
+    @apply bg-emerald-500/10 text-emerald-700 dark:text-emerald-300 border border-emerald-500/20;
   }
 
   .study-badge-cohort {
-    @apply bg-blue-100 text-blue-800;
+    @apply bg-blue-500/10 text-blue-700 dark:text-blue-300 border border-blue-500/20;
   }
 
   .study-badge-review {
-    @apply bg-purple-100 text-purple-800;
+    @apply bg-purple-500/10 text-purple-700 dark:text-purple-300 border border-purple-500/20;
   }
 
   .study-badge-cross-sectional {
-    @apply bg-amber-100 text-amber-800;
+    @apply bg-amber-500/10 text-amber-700 dark:text-amber-300 border border-amber-500/20;
   }
 
   .study-badge-unknown {
-    @apply bg-gray-100 text-gray-700;
+    @apply bg-muted text-muted-foreground border border-border;
   }
 
-  /* Loading skeleton for table */
+  /* ── Skeleton ── */
   .skeleton-row {
     @apply animate-pulse;
   }
 
   .skeleton-cell {
-    @apply h-4 bg-muted rounded;
+    @apply h-4 bg-muted rounded-lg;
   }
 
-  /* Null/missing value indicator */
   .null-value {
     @apply text-muted-foreground italic;
   }
 }
 
 @layer utilities {
-  /* Smooth transitions */
   .transition-expand {
     transition: max-height 0.3s ease-out, opacity 0.2s ease-out;
   }
 
-  /* Focus visible for accessibility */
   .focus-ring {
-    @apply focus:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2;
+    @apply focus:outline-none focus-visible:ring-2 focus-visible:ring-ring/50 focus-visible:ring-offset-2;
   }
 
   /* Gradient backgrounds */
@@ -288,94 +349,83 @@
   .bg-gradient-cool {
     background: var(--gradient-cool);
   }
+
+  .bg-gradient-glass {
+    background: var(--gradient-glass);
+  }
 }
 
-/* Keyframe animations for vibrant UI */
+/* ── Keyframe Animations ── */
 @keyframes shimmer {
-  0% {
-    background-position: -1000px 0;
-  }
-  100% {
-    background-position: 1000px 0;
-  }
+  0% { background-position: -1000px 0; }
+  100% { background-position: 1000px 0; }
 }
 
 @keyframes fadeInUp {
-  from {
-    opacity: 0;
-    transform: translateY(20px);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0);
-  }
+  from { opacity: 0; transform: translateY(12px); }
+  to { opacity: 1; transform: translateY(0); }
 }
 
 @keyframes scaleIn {
-  from {
-    opacity: 0;
-    transform: scale(0.95);
-  }
-  to {
-    opacity: 1;
-    transform: scale(1);
-  }
+  from { opacity: 0; transform: scale(0.97); }
+  to { opacity: 1; transform: scale(1); }
 }
 
 @keyframes pulse-glow {
-  0%, 100% {
-    box-shadow: 0 0 0 0 hsl(var(--primary) / 0.4);
-  }
-  50% {
-    box-shadow: 0 0 20px 5px hsl(var(--primary) / 0.2);
-  }
+  0%, 100% { box-shadow: 0 0 0 0 hsl(215 90% 56% / 0.3); }
+  50% { box-shadow: 0 0 24px 6px hsl(215 90% 56% / 0.12); }
 }
 
 @keyframes gradient-shift {
-  0%, 100% {
-    background-position: 0% 50%;
-  }
-  50% {
-    background-position: 100% 50%;
-  }
+  0%, 100% { background-position: 0% 50%; }
+  50% { background-position: 100% 50%; }
 }
 
-/* Animation classes */
+@keyframes glass-refract {
+  0%, 100% { backdrop-filter: blur(20px) saturate(1.4); }
+  50% { backdrop-filter: blur(24px) saturate(1.6); }
+}
+
 .animate-shimmer {
-  animation: shimmer 2s infinite linear;
+  animation: shimmer 2.5s infinite linear;
   background: linear-gradient(
     to right,
     transparent 0%,
-    rgba(255, 255, 255, 0.4) 50%,
+    hsl(0 0% 100% / 0.3) 50%,
     transparent 100%
   );
   background-size: 1000px 100%;
 }
 
 .animate-fadeInUp {
-  animation: fadeInUp 0.5s cubic-bezier(0.4, 0, 0.2, 1);
+  animation: fadeInUp 0.4s cubic-bezier(0.16, 1, 0.3, 1);
 }
 
 .animate-scaleIn {
-  animation: scaleIn 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  animation: scaleIn 0.3s cubic-bezier(0.16, 1, 0.3, 1);
 }
 
 .animate-pulse-glow {
-  animation: pulse-glow 2s infinite;
+  animation: pulse-glow 2.5s infinite;
 }
 
 .animate-gradient-shift {
-  animation: gradient-shift 3s ease infinite;
+  animation: gradient-shift 4s ease infinite;
   background-size: 200% 200%;
 }
 
-/* Reduced motion support */
+.animate-glass-refract {
+  animation: glass-refract 6s ease-in-out infinite;
+}
+
+/* ── Reduced Motion ── */
 @media (prefers-reduced-motion: reduce) {
   .animate-shimmer,
   .animate-fadeInUp,
   .animate-scaleIn,
   .animate-pulse-glow,
-  .animate-gradient-shift {
+  .animate-gradient-shift,
+  .animate-glass-refract {
     animation: none;
   }
 
