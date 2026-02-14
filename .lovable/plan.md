@@ -1,62 +1,52 @@
 
 
-# Fix 504 Timeout: Inline Research Logic
+# Filter by Abstract and Surface PDF Icons
 
-## Problem
+## Overview
 
-`research-async` calls the `research` edge function via HTTP. The research process takes 2-3 minutes (fetching from 3 APIs, enriching 73 papers via Crossref, running LLM extraction). The Supabase gateway enforces a timeout shorter than this, killing the connection and returning 504 before the response arrives.
-
-The research function actually finishes its work successfully -- but the HTTP response never reaches `research-async`.
-
-## Solution
-
-Move the core research logic into `research-async` directly. The `research` function stays as-is (for any direct callers), but `research-async` no longer calls it via HTTP. Instead, it imports/inlines the same logic and runs it within its `waitUntil` background task, which is not subject to the HTTP gateway timeout.
+Two changes: (1) exclude any paper that doesn't have a complete extracted abstract, and (2) show a PDF download icon prominently on study cards and table rows when a PDF is available.
 
 ## What Changes
 
-### 1. Extract shared research logic
+### 1. Filter out papers without a full abstract
 
-The `research` function contains all the logic (API calls, deduplication, Crossref enrichment, LLM extraction). The key functions to reuse:
+In `supabase/functions/research-async/index.ts`, after the LLM extraction and study design filter, add a second filter that removes any study where `abstract_excerpt` is empty, null, or too short (under 50 characters). This ensures only papers with meaningfully extracted abstracts appear in results.
 
-- `extractKeywords()` - query normalization
-- `searchSemanticScholar()` - Semantic Scholar API
-- `searchOpenAlex()` - OpenAlex API  
-- `searchArxiv()` - ArXiv API
-- `deduplicatePapers()` - deduplication
-- `enrichWithCrossref()` - citation enrichment
-- `extractStudyData()` - Gemini LLM extraction
+Additionally, in the frontend (`src/components/ResultsTable.tsx`), add a client-side safety filter so that even cached/old reports exclude studies with missing abstracts.
 
-Since edge functions can't share modules across directories, the approach is to copy the core logic into `research-async/index.ts`.
+### 2. Add PDF icon to study card headers
 
-### 2. Update `research-async/index.ts`
+Currently the PDF download link only appears inside the expanded "Show details" section of `StudyCard`. Move/add a small PDF icon (using `FileText` or `Download` from lucide) into the card header area (next to the badges) so it's visible without expanding. The icon will:
+- Show a green `FileText` icon linking to the PDF when status is `downloaded`
+- Show a spinning loader when status is `pending`  
+- Show nothing when status is `not_found` or `failed` (no clutter)
 
-- Remove the HTTP fetch call to `/functions/v1/research`
-- Inline the research pipeline directly in the background task
-- The pipeline runs inside `waitUntil`, which has no HTTP gateway timeout constraint
-- Keep the same error handling: catch errors and update the report row as "failed"
-
-### 3. Keep `research/index.ts` unchanged
-
-It continues to work for any direct HTTP callers (though currently only `research-async` calls it).
+The `TableView` already shows PDF icons inline -- no changes needed there.
 
 ## Technical Details
 
 ### Files modified
 
 1. **`supabase/functions/research-async/index.ts`**
-   - Copy the core research functions from `research/index.ts` (keyword extraction, API searches, deduplication, Crossref enrichment, LLM extraction)
-   - Replace the HTTP fetch block (lines 70-81) with direct function calls
-   - The background work section becomes:
+   - After line 556 (the `allowedDesigns` filter), add a second filter:
      ```
-     const results = await runResearchPipeline(question);
-     // Update report with results directly
+     const withAbstract = filtered.filter((s: any) => 
+       s.abstract_excerpt && s.abstract_excerpt.trim().length >= 50
+     );
+     console.log(`[LLM] Abstract filter: ${filtered.length} -> ${withAbstract.length}`);
+     return withAbstract;
      ```
 
-### Why this works
+2. **`src/components/ResultsTable.tsx`**
+   - Add a client-side filter early in the component (after `scoredResults`) to exclude studies with missing/empty `abstract_excerpt`, so old cached reports also benefit from this filter
 
-`EdgeRuntime.waitUntil()` keeps the isolate alive for background work without being subject to the HTTP response timeout. The gateway timeout only applies to the HTTP request/response cycle. Since `research-async` already returns immediately with the report ID, the background work can run as long as needed.
+3. **`src/components/StudyCard.tsx`**
+   - In the card header area (around line 126, near the badge row), add a conditional PDF icon:
+     - If `pdfData?.status === 'downloaded'` and `pdfData.public_url`: show a clickable green `FileText` icon linking to the PDF
+     - If `pdfData?.status === 'pending'`: show a small spinning `Loader2`
+     - Otherwise: show nothing
+   - This makes PDF availability visible at a glance without expanding the card
 
-### Risk
+### No database or schema changes needed
 
-The file will be large since it contains the full research pipeline. This is a trade-off of Supabase edge functions not supporting cross-function imports. The logic is identical to what's in `research/index.ts`.
-
+All filtering is done in the edge function and frontend code. The `abstract_excerpt` field already exists in the `StudyResult` type.
