@@ -21,6 +21,7 @@ export type Database = {
           created_at: string
           error_message: string | null
           id: string
+          narrative_synthesis: string | null
           normalized_query: string | null
           openalex_count: number | null
           question: string
@@ -35,6 +36,7 @@ export type Database = {
           created_at?: string
           error_message?: string | null
           id?: string
+          narrative_synthesis?: string | null
           normalized_query?: string | null
           openalex_count?: number | null
           question: string
@@ -49,6 +51,7 @@ export type Database = {
           created_at?: string
           error_message?: string | null
           id?: string
+          narrative_synthesis?: string | null
           normalized_query?: string | null
           openalex_count?: number | null
           question?: string

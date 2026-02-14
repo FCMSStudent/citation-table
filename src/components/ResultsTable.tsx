@@ -5,10 +5,10 @@ import { StudyCard } from './StudyCard';
 import { SynthesisView } from './SynthesisView';
 import { TableView } from './TableView';
 import { CompareDialog } from './CompareDialog';
+import { NarrativeSynthesis } from './NarrativeSynthesis';
 import { Button } from './ui/button';
 import { downloadRISFile } from '@/lib/risExport';
 import { downloadCSV } from '@/lib/csvExport';
-import { generateNarrativeSummary } from '@/lib/narrativeSummary';
 import { sortByRelevance, isLowValueStudy, getOutcomeText } from '@/utils/relevanceScore';
 import { FilterBar, type SortOption, type StudyDesignFilter } from './FilterBar';
 import { Tabs, TabsList, TabsTrigger } from './ui/tabs';
@@ -27,6 +27,8 @@ interface ResultsTableProps {
   semanticScholarCount?: number;
   arxivCount?: number;
   pdfsByDoi?: Record<string, StudyPdf>;
+  reportId?: string;
+  cachedSynthesis?: string | null;
 }
 
 export function ResultsTable({
@@ -38,6 +40,8 @@ export function ResultsTable({
   semanticScholarCount,
   arxivCount,
   pdfsByDoi = {},
+  reportId,
+  cachedSynthesis,
 }: ResultsTableProps) {
   const [viewMode, setViewMode] = useState<ViewMode>('synthesis');
   const [showExcludedStudies, setShowExcludedStudies] = useState(false);
@@ -94,7 +98,7 @@ export function ResultsTable({
   const totalPages = Math.ceil(mainStudies.length / PAGE_SIZE);
   const paginatedStudies = mainStudies.slice((currentPage - 1) * PAGE_SIZE, currentPage * PAGE_SIZE);
 
-  const narrativeSummary = useMemo(() => generateNarrativeSummary(mainStudies, activeQuery), [mainStudies, activeQuery]);
+  // narrativeSummary removed -- replaced by LLM-generated NarrativeSynthesis component
 
   const outcomeAggregation = useMemo(() => {
     const outcomeMap = new Map<string, Array<{ study: StudyResult; result: string }>>();
@@ -141,19 +145,21 @@ export function ResultsTable({
           </div>
         </div>
 
-        <div className="rounded-lg border-l-4 border-l-primary bg-gradient-to-r from-primary/5 to-transparent p-4">
-          <h3 className="mb-2 font-semibold text-foreground">Research Synthesis</h3>
-          <p className="text-sm leading-relaxed text-muted-foreground">{narrativeSummary}</p>
-          {outcomeAggregation.length > 0 && (
-            <div className="mt-3 flex flex-wrap gap-2">
-              {outcomeAggregation.slice(0, 5).map(({ outcome, studyCount }) => (
-                <span key={outcome} className="inline-flex items-center rounded-full bg-primary/10 px-3 py-1 text-xs font-medium text-primary">
-                  {outcome} <span className="ml-1 opacity-70">({studyCount})</span>
-                </span>
-              ))}
-            </div>
-          )}
-        </div>
+        {reportId ? (
+          <NarrativeSynthesis
+            reportId={reportId}
+            studies={mainStudies}
+            query={activeQuery}
+            cachedSynthesis={cachedSynthesis}
+          />
+        ) : (
+          <div className="rounded-lg border-l-4 border-l-primary bg-gradient-to-r from-primary/5 to-transparent p-4">
+            <h3 className="mb-2 font-semibold text-foreground">Research Synthesis</h3>
+            <p className="text-sm leading-relaxed text-muted-foreground">
+              {mainStudies.length} studies found across {totalPapersSearched} papers searched.
+            </p>
+          </div>
+        )}
 
         <FilterBar
           sortBy={sortBy}

@@ -114,6 +114,8 @@ const ReportDetail = () => {
                     semanticScholarCount={report.semantic_scholar_count}
                     arxivCount={report.arxiv_count}
                     pdfsByDoi={pdfsByDoi}
+                    reportId={id}
+                    cachedSynthesis={(report as any).narrative_synthesis}
                   />
                 </section>
 
