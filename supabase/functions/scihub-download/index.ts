@@ -239,10 +239,10 @@ serve(async (req) => {
               continue;
             }
 
-            // Get public URL
-            const { data: urlData } = supabase.storage
+            // Generate signed URL (1 hour expiry) instead of public URL
+            const { data: signedUrlData } = await supabase.storage
               .from("papers")
-              .getPublicUrl(filename);
+              .createSignedUrl(filename, 3600);
 
             // Update database with success
             await supabase
@@ -250,7 +250,7 @@ serve(async (req) => {
               .update({
                 status: "downloaded",
                 storage_path: filename,
-                public_url: urlData.publicUrl,
+                public_url: signedUrlData?.signedUrl || null,
               })
               .eq("report_id", report_id)
               .eq("doi", normalizedDoi);
