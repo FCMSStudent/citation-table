@@ -272,6 +272,26 @@ export function NarrativeSynthesis({ reportId, studies, query, cachedSynthesis }
     return <StructuredSynthesisView data={structured} studies={studies} onRegenerate={generate} />;
   }
 
+  // Invalid JSON fallback — show error with regenerate option
+  if (rawSynthesis.trimStart().startsWith('{') || rawSynthesis.trimStart().startsWith('[')) {
+    return (
+      <div className="rounded-lg border-l-4 border-l-destructive bg-destructive/5 p-4">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <AlertCircle className="h-4 w-4 text-destructive" />
+            <h3 className="font-semibold text-foreground">Synthesis Data Corrupted</h3>
+          </div>
+          <Button variant="outline" size="sm" onClick={generate} className="gap-2">
+            <RefreshCw className="h-3 w-3" />Regenerate
+          </Button>
+        </div>
+        <p className="mt-2 text-sm text-muted-foreground">
+          The cached synthesis was truncated. Click Regenerate to create a new one.
+        </p>
+      </div>
+    );
+  }
+
   // Legacy markdown fallback
   return (
     <div className="rounded-lg border-l-4 border-l-primary bg-gradient-to-r from-primary/5 to-transparent p-4">

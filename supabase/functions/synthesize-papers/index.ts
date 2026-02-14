@@ -114,15 +114,14 @@ serve(async (req) => {
     const anonClient = createClient(supabaseUrl, Deno.env.get("SUPABASE_ANON_KEY")!, {
       global: { headers: { Authorization: authHeader } },
     });
-    const token = authHeader.replace("Bearer ", "");
-    const { data: claimsData, error: claimsError } = await anonClient.auth.getClaims(token);
-    if (claimsError || !claimsData?.claims?.sub) {
+    const { data: userData, error: userError } = await anonClient.auth.getUser();
+    if (userError || !userData?.user?.id) {
       return new Response(
         JSON.stringify({ error: "Invalid or expired token" }),
         { status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
     }
-    const userId = claimsData.claims.sub as string;
+    const userId = userData.user.id;
 
     const { report_id } = await req.json();
 
@@ -259,7 +258,7 @@ CRITICAL RULES:
           ],
           generationConfig: {
             temperature: 0.3,
-            maxOutputTokens: 3000,
+            maxOutputTokens: 8000,
             responseMimeType: "application/json",
           },
         }),
@@ -289,18 +288,14 @@ CRITICAL RULES:
     let synthesisData: any;
     try {
       synthesisData = JSON.parse(rawText);
-    } catch {
-      // If JSON parse fails, wrap raw text as legacy format
-      console.error("Failed to parse synthesis JSON, storing raw text");
-      const { error: updateError } = await rlSupabase
-        .from("research_reports")
-        .update({ narrative_synthesis: rawText })
-        .eq("id", report_id);
-      if (updateError) console.error("Failed to cache synthesis:", updateError);
-
+      if (!synthesisData.sections || !Array.isArray(synthesisData.sections)) {
+        throw new Error("Missing sections array");
+      }
+    } catch (parseErr) {
+      console.error("Failed to parse/validate synthesis JSON:", parseErr);
       return new Response(
-        JSON.stringify({ synthesis: rawText }),
-        { headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        JSON.stringify({ error: "AI returned invalid synthesis. Please try again." }),
+        { status: 502, headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
     }
 
