@@ -9,14 +9,13 @@ import { Label } from '@/components/ui/label';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 
 const Auth = () => {
-  const { user, isLoading: authLoading } = useAuth();
+  const { user, isLoading: authLoading, signUp, signIn } = useAuth();
   const [isSignUp, setIsSignUp] = useState(false);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const { signUp, signIn } = useAuth();
 
   if (authLoading) {
     return (
@@ -55,10 +54,15 @@ const Auth = () => {
 
   const handleGoogleSignIn = async () => {
     setError(null);
-    const { error } = await lovable.auth.signInWithOAuth("google", {
-      redirect_uri: window.location.origin,
-    });
-    if (error) setError(error.message);
+    try {
+      const { error } = await lovable.auth.signInWithOAuth("google", {
+        redirect_uri: window.location.origin,
+      });
+      if (error) setError(error.message);
+    } catch (e) {
+      console.error('Google sign-in error:', e);
+      setError('Google sign-in is temporarily unavailable. Please use email/password.');
+    }
   };
 
   return (
