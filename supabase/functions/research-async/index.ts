@@ -6,6 +6,18 @@ const corsHeaders = {
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version",
 };
 
+/**
+ * Helper to use EdgeRuntime.waitUntil if available, otherwise use fire-and-forget
+ */
+function scheduleBackgroundWork(work: Promise<void>): void {
+  const runtime = globalThis as { EdgeRuntime?: { waitUntil?: (p: Promise<void>) => void } };
+  if (runtime.EdgeRuntime?.waitUntil) {
+    runtime.EdgeRuntime.waitUntil(work);
+  } else {
+    work.catch(console.error);
+  }
+}
+
 serve(async (req) => {
   if (req.method === "OPTIONS") {
     return new Response(null, { headers: corsHeaders });
@@ -94,6 +106,28 @@ serve(async (req) => {
           console.error(`[research-async] Update error for ${reportId}:`, updateError);
         } else {
           console.log(`[research-async] Report ${reportId} completed with ${(data.results || []).length} results`);
+          
+          // Trigger PDF downloads for DOIs
+          const results = data.results || [];
+          const dois = results
+            .map((r: { citation?: { doi?: string } }) => r.citation?.doi?.trim())
+            .filter((doi: string | undefined): doi is string => doi !== undefined && doi !== '');
+          
+          if (dois.length > 0) {
+            console.log(`[research-async] Triggering PDF download for ${dois.length} DOIs`);
+            
+            const scihubUrl = `${supabaseUrl}/functions/v1/scihub-download`;
+            fetch(scihubUrl, {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+                "Authorization": `Bearer ${Deno.env.get("SUPABASE_ANON_KEY")}`,
+              },
+              body: JSON.stringify({ report_id: reportId, dois }),
+            }).catch(err => {
+              console.error(`[research-async] Failed to trigger PDF downloads:`, err);
+            });
+          }
         }
       } catch (err) {
         console.error(`[research-async] Background processing failed for ${reportId}:`, err);
@@ -109,13 +143,8 @@ serve(async (req) => {
       }
     })();
 
-    // Use EdgeRuntime.waitUntil if available, otherwise just fire-and-forget
-    if (typeof (globalThis as any).EdgeRuntime !== "undefined" && (globalThis as any).EdgeRuntime.waitUntil) {
-      (globalThis as any).EdgeRuntime.waitUntil(backgroundWork);
-    } else {
-      // Fallback: don't await, let it run in background
-      backgroundWork.catch(console.error);
-    }
+    // Use helper to schedule background work
+    scheduleBackgroundWork(backgroundWork);
 
     // Return immediately with the report ID
     return new Response(

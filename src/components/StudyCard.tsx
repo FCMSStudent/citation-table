@@ -1,7 +1,7 @@
 import { useMemo, useState, memo } from 'react';
 import type { ReactNode } from 'react';
-import { ChevronDown, ChevronUp, ExternalLink, Info } from 'lucide-react';
-import type { StudyResult } from '@/types/research';
+import { ChevronDown, ChevronUp, ExternalLink, Info, Download, Loader2 } from 'lucide-react';
+import type { StudyResult, StudyPdf } from '@/types/research';
 import { Card, CardContent, CardHeader } from './ui/card';
 import { PreprintBadge } from './PreprintBadge';
 import { ReviewTypeBadge } from './ReviewTypeBadge';
@@ -18,6 +18,7 @@ interface StudyCardProps {
   relevanceScore: number;
   isLowValue?: boolean;
   showScoreBreakdown?: boolean;
+  pdfData?: StudyPdf;
 }
 
 function NullValue({ text = 'Not reported' }: { text?: string }) {
@@ -64,7 +65,7 @@ function getScoreBadgeClass(score: number): string {
   return 'bg-blue-100 text-blue-900 border-blue-300 dark:bg-blue-950 dark:text-blue-200';
 }
 
-export const StudyCard = memo(({ study, query, relevanceScore, isLowValue = false, showScoreBreakdown = false }: StudyCardProps) => {
+export const StudyCard = memo(({ study, query, relevanceScore, isLowValue = false, showScoreBreakdown = false, pdfData }: StudyCardProps) => {
   const [isExpanded, setIsExpanded] = useState(false);
   const [showSupportingText, setShowSupportingText] = useState(false);
   const hasOutcomes = study.outcomes && study.outcomes.length > 0;
@@ -251,6 +252,39 @@ export const StudyCard = memo(({ study, query, relevanceScore, isLowValue = fals
                   View on arXiv
                   <ExternalLink className="h-3 w-3" aria-hidden="true" />
                 </a>
+              )}
+
+              {/* PDF Download Button */}
+              {study.citation.doi && pdfData && (
+                <>
+                  {pdfData.status === 'downloaded' && pdfData.public_url && (
+                    <a
+                      href={sanitizeUrl(pdfData.public_url)}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="inline-flex items-center gap-1 text-sm text-primary hover:underline focus-ring rounded"
+                    >
+                      Download PDF
+                      <Download className="h-3 w-3" aria-hidden="true" />
+                    </a>
+                  )}
+                  {pdfData.status === 'pending' && (
+                    <span className="inline-flex items-center gap-1 text-sm text-muted-foreground">
+                      <Loader2 className="h-3 w-3 animate-spin" aria-hidden="true" />
+                      Downloading PDF...
+                    </span>
+                  )}
+                  {pdfData.status === 'not_found' && (
+                    <span className="inline-flex items-center gap-1 text-sm text-muted-foreground">
+                      PDF not available
+                    </span>
+                  )}
+                  {pdfData.status === 'failed' && (
+                    <span className="inline-flex items-center gap-1 text-sm text-muted-foreground">
+                      PDF download failed
+                    </span>
+                  )}
+                </>
               )}
             </div>
           </div>

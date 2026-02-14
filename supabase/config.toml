@@ -5,3 +5,6 @@ verify_jwt = false
 
 [functions.research-async]
 verify_jwt = false
+
+[functions.scihub-download]
+verify_jwt = false
