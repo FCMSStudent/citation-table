@@ -9,6 +9,7 @@ interface UseAuthReturn {
   signUp: (email: string, password: string) => Promise<{ error: string | null }>;
   signIn: (email: string, password: string) => Promise<{ error: string | null }>;
   signOut: () => Promise<void>;
+  signInAsGuest: () => Promise<{ error: string | null }>;
 }
 
 export function useAuth(): UseAuthReturn {
@@ -55,5 +56,11 @@ export function useAuth(): UseAuthReturn {
     await client.auth.signOut();
   }, []);
 
-  return { user, session, isLoading, signUp, signIn, signOut };
+  const signInAsGuest = useCallback(async () => {
+    const client = getSupabase();
+    const { error } = await client.auth.signInAnonymously();
+    return { error: error?.message ?? null };
+  }, []);
+
+  return { user, session, isLoading, signUp, signIn, signOut, signInAsGuest };
 }
