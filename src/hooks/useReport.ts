@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
-import { supabase } from '@/integrations/supabase/client';
+import { getSupabase } from '@/integrations/supabase/fallback';
 import type { StudyResult } from '@/types/research';
 
 interface Report {
@@ -29,10 +29,11 @@ export function useReport(reportId: string | undefined): UseReportReturn {
   const [error, setError] = useState<string | null>(null);
 
   const fetchReport = useCallback(async () => {
-    if (!reportId || !supabase) return;
+    if (!reportId) return;
 
     try {
-      const { data: row, error: fetchError } = await supabase
+      const client = getSupabase();
+      const { data: row, error: fetchError } = await client
         .from('research_reports')
         .select('*')
         .eq('id', reportId)

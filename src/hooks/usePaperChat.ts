@@ -1,5 +1,5 @@
 import { useState, useCallback } from 'react';
-import { supabase } from '@/integrations/supabase/client';
+import { getSupabase } from '@/integrations/supabase/fallback';
 
 export type ChatMessage = {
   role: 'user' | 'assistant';
@@ -27,7 +27,8 @@ export function usePaperChat(reportId: string | undefined) {
 
     try {
       // Get the user's session access token
-      const { data: { session } } = await supabase.auth.getSession();
+      const client = getSupabase();
+      const { data: { session } } = await client.auth.getSession();
       if (!session?.access_token) {
         setError('Please sign in to use chat');
         setIsStreaming(false);

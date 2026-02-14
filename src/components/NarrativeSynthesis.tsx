@@ -6,7 +6,7 @@ import { Badge } from './ui/badge';
 import { Skeleton } from './ui/skeleton';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from './ui/tooltip';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from './ui/collapsible';
-import { supabase } from '@/integrations/supabase/client';
+import { getSupabase } from '@/integrations/supabase/fallback';
 import type { StudyResult, SynthesisData, SynthesisClaim, SynthesisWarning } from '@/types/research';
 
 interface NarrativeSynthesisProps {
@@ -187,7 +187,8 @@ export function NarrativeSynthesis({ reportId, studies, query, cachedSynthesis }
     setError(null);
 
     try {
-      const { data: result, error: invokeError } = await supabase.functions.invoke('synthesize-papers', {
+      const client = getSupabase();
+      const { data: result, error: invokeError } = await client.functions.invoke('synthesize-papers', {
         body: { report_id: reportId },
       });
 
