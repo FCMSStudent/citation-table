@@ -2,3 +2,6 @@ project_id = "amzlrrrhjsqjndbrdume"
 
 [functions.research]
 verify_jwt = false
+
+[functions.research-async]
+verify_jwt = false
