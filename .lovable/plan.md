@@ -1,102 +1,58 @@
 
 
-## LLM-Generated Narrative Synthesis (Elicit-Style)
+## Remaining Synthesis View Improvements
 
 ### Overview
-Replace the current template-based `generateNarrativeSummary()` with an LLM-generated, table-grounded synthesis. The LLM reads all extracted study data and produces a structured narrative that identifies patterns, agreement, disagreement, and limitations across the evidence -- without introducing new data or performing quantitative meta-analysis.
+Three items from the previous plan remain unimplemented. The wall-of-text summary and condensed narrative function are no longer needed since the LLM-generated NarrativeSynthesis now handles that. The SynthesisOverview stats card is also unnecessary -- the NarrativeSynthesis already covers corpus context.
 
 ---
 
-### How It Changes
+### 1. Fix the "+N more" Button in Key Findings
 
-**Before:** A heuristic function (`narrativeSummary.ts`) concatenates strings like "Observational evidence from 3 studies (combined n=450) reported associations with anxiety." This produces repetitive, hard-to-read output that doesn't actually synthesize findings.
+The button at line 136 of `SynthesisView.tsx` has no click handler. Add an `expandedOutcomes` state (Set of outcome keys) and toggle visibility on click.
 
-**After:** An LLM reads the full study table (titles, designs, sample sizes, outcomes, key results, citation snippets) and produces 3-5 structured paragraphs covering:
-1. **Corpus overview** -- study count, design mix, population range
-2. **Agreement** -- what most studies converge on
-3. **Disagreement** -- conflicting findings and possible explanations (different populations, designs)
-4. **Limitations** -- preprint status, small samples, narrow populations
-5. **Evidence gaps** -- what's not covered
+**File:** `src/components/SynthesisView.tsx`
+- Add `const [expandedOutcomes, setExpandedOutcomes] = useState<Set<string>>(new Set())`
+- On button click, toggle the outcome key in the set
+- When expanded, render all studies instead of slicing to 3
+- Change button text to "Show fewer" when expanded
 
 ---
 
-### Architecture
+### 2. Add Effect Direction Indicators
 
-The synthesis is generated once when a report completes, then cached in the database so it doesn't re-run on every page load.
+Create a heuristic utility that scans `key_result` text for direction keywords and returns positive/negative/neutral.
 
-```text
-Report completes
-       |
-       v
-Frontend detects completed report with no cached synthesis
-       |
-       v
-Calls "synthesize-papers" edge function
-       |
-       v
-Edge function: builds study context -> calls Lovable AI (non-streaming) -> returns structured summary
-       |
-       v
-Frontend stores result in `research_reports.narrative_synthesis` column
-       |
-       v
-On subsequent loads, uses cached synthesis directly
-```
+**New file:** `src/utils/effectDirection.ts`
+- Positive keywords: "improved", "increased", "enhanced", "reduced symptoms", "significant decrease in", "beneficial", "protective"
+- Negative/adverse keywords: "worsened", "increased risk", "adverse", "harmful", "declined"
+- Null keywords: "no significant", "no difference", "similar", "no association", "no effect"
+- Returns `'positive' | 'negative' | 'neutral' | 'mixed'`
+
+**Modified file:** `src/components/SynthesisView.tsx`
+- Import the utility
+- Add a small colored indicator (green up-arrow, red down-arrow, gray dash) next to each outcome result in both "Key Findings by Outcome" and "Evidence by Study Design" sections
+
+---
+
+### 3. Add Expandable Verbatim Citation Snippets
+
+Each outcome in `StudyResult.outcomes[]` has a `citation_snippet` field that is never displayed. Add a small toggle ("Show source text") that reveals the verbatim abstract excerpt grounding each finding.
+
+**File:** `src/components/SynthesisView.tsx`
+- Add `expandedSnippets` state (Set of compound keys like `studyId-outcomeIdx`)
+- Below each outcome result line, add a small "Source" button
+- When toggled, show the `citation_snippet` in a styled blockquote below the result
+- Apply to both "Key Findings by Outcome" and "Evidence by Study Design" sections
 
 ---
 
 ### Technical Details
 
-**1. Database Migration**
-- Add a `narrative_synthesis` text column to `research_reports` table (nullable, no default)
-
-**2. New Edge Function: `supabase/functions/synthesize-papers/index.ts`**
-- Receives `report_id`
-- Fetches study data from `research_reports.results`
-- Builds a structured context block from all studies (same format as `chat-papers`)
-- System prompt instructs the LLM to:
-  - Describe patterns of agreement across studies
-  - Note disagreements and possible methodological explanations
-  - Flag limitations (preprints, small n, narrow populations)
-  - Identify evidence gaps
-  - Cite every claim with (Author, Year)
-  - Use NO causal language unless the study is an RCT
-  - Introduce NO information beyond what's in the data
-- Calls Lovable AI (google/gemini-3-flash-preview) **non-streaming**
-- Saves the result to `research_reports.narrative_synthesis`
-- Returns the synthesis text
-
-**3. Update `supabase/config.toml`**
-- Register `synthesize-papers` with `verify_jwt = false`
-
-**4. Update `src/components/ResultsTable.tsx`**
-- Replace the static `narrativeSummary` paragraph (lines 144-156) with a component that:
-  - Shows cached `narrative_synthesis` if available (passed as prop)
-  - If not cached, shows a "Generate synthesis" button or auto-triggers the edge function
-  - Displays a loading skeleton while generating
-  - Renders the result as markdown (using ReactMarkdown, already installed)
-- Remove the `generateNarrativeSummary()` import and `narrativeSummary` useMemo
-
-**5. New component: `src/components/NarrativeSynthesis.tsx`**
-- Props: `reportId`, `studies`, `query`, `cachedSynthesis`
-- States: `synthesis` (string), `isGenerating` (boolean), `error`
-- On mount: if `cachedSynthesis` exists, use it; otherwise call the edge function
-- Renders markdown with `ReactMarkdown` and `prose` styling
-- Shows a "Regenerate" button to re-run the synthesis
-
-**6. Update `src/pages/ReportDetail.tsx`**
-- Pass `report.narrative_synthesis` to `ResultsTable` as a new prop
-
-**7. Keep `src/lib/narrativeSummary.ts`**
-- Keep as fallback for offline/export use -- no changes needed
-
-### Files Changed
 | File | Action |
 |------|--------|
-| Migration SQL | New -- add `narrative_synthesis` column |
-| `supabase/functions/synthesize-papers/index.ts` | New |
-| `supabase/config.toml` | Add function entry |
-| `src/components/NarrativeSynthesis.tsx` | New |
-| `src/components/ResultsTable.tsx` | Replace static summary with NarrativeSynthesis |
-| `src/pages/ReportDetail.tsx` | Pass cached synthesis prop |
+| `src/utils/effectDirection.ts` | New -- heuristic effect direction parser |
+| `src/components/SynthesisView.tsx` | Modified -- expandable outcomes, effect indicators, citation snippets |
+
+No database changes. No edge functions. No new dependencies.
 
