@@ -1,5 +1,6 @@
 import { useMemo, useState } from 'react';
-import { Code, Download, Eye, EyeOff, FileText, Table2, List } from 'lucide-react';
+import { Code, Download, Eye, EyeOff, FileText, Table2, List, Copy, Check } from 'lucide-react';
+import { toast } from 'sonner';
 import type { StudyResult } from '@/types/research';
 import { StudyCard } from './StudyCard';
 import { SynthesisView } from './SynthesisView'; // NEW
@@ -39,6 +40,7 @@ export function ResultsTable({
   const [viewMode, setViewMode] = useState<ViewMode>('synthesis');
   const [showExcludedStudies, setShowExcludedStudies] = useState(false);
   const [showJSON, setShowJSON] = useState(false);
+  const [copied, setCopied] = useState(false);
   
   // Filter state
   const [sortBy, setSortBy] = useState<SortOption>('relevance');
@@ -138,6 +140,20 @@ export function ResultsTable({
     downloadCSV(mainStudies, `research-${Date.now()}.csv`);
   };
 
+  const handleCopySummary = async () => {
+    if (!narrativeSummary) return;
+
+    try {
+      await navigator.clipboard.writeText(narrativeSummary);
+      setCopied(true);
+      toast.success('Synthesis summary copied to clipboard');
+      setTimeout(() => setCopied(false), 2000);
+    } catch (err) {
+      console.error('Failed to copy text: ', err);
+      toast.error('Failed to copy summary');
+    }
+  };
+
   if (results.length === 0) {
     return null;
   }
@@ -160,7 +176,18 @@ export function ResultsTable({
 
         {/* Synthesis Summary - PROMINENT PLACEMENT */}
         <div className="rounded-lg border-l-4 border-l-blue-500 bg-gradient-to-r from-blue-50 to-transparent p-4 dark:from-blue-950/30">
-          <h3 className="mb-2 font-semibold text-blue-900 dark:text-blue-100">Research Synthesis</h3>
+          <div className="flex items-center justify-between mb-2">
+            <h3 className="font-semibold text-blue-900 dark:text-blue-100">Research Synthesis</h3>
+            <Button
+              variant="ghost"
+              size="sm"
+              className="h-8 w-8 p-0 text-blue-900 hover:bg-blue-100 dark:text-blue-100 dark:hover:bg-blue-900"
+              onClick={handleCopySummary}
+              aria-label="Copy synthesis summary"
+            >
+              {copied ? <Check className="h-4 w-4" /> : <Copy className="h-4 w-4" />}
+            </Button>
+          </div>
           <p className="text-sm leading-relaxed text-gray-700 dark:text-gray-300">
             {narrativeSummary}
           </p>
@@ -222,12 +249,24 @@ export function ResultsTable({
               </Button>
             )}
 
-            <Button onClick={handleExportCSV} variant="outline" size="sm" className="gap-2">
+            <Button
+              onClick={handleExportCSV}
+              variant="outline"
+              size="sm"
+              className="gap-2"
+              aria-label="Export all results as CSV"
+            >
               <Download className="h-4 w-4" />
               Export CSV
             </Button>
 
-            <Button onClick={handleExportRIS} variant="outline" size="sm" className="gap-2">
+            <Button
+              onClick={handleExportRIS}
+              variant="outline"
+              size="sm"
+              className="gap-2"
+              aria-label="Export all results as RIS citation file"
+            >
               <Download className="h-4 w-4" />
               Export RIS
             </Button>

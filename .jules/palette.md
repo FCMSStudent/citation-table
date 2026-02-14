@@ -15,3 +15,9 @@
 **Learning:** Table sorting headers should use `aria-sort` on the `<th>` element to communicate state, and the sorting button should have a dynamic `aria-label` that describes both the current state and the action of clicking (e.g., "Sort by Year (ascending). Click to sort descending"). For selection, always prefer semantic `Checkbox` components over custom icons to ensure proper roles and states are conveyed to assistive technologies.
 
 **Action:** Implement `aria-sort` and descriptive labels in sortable headers; use `Checkbox` components for row selection with labels providing row context.
+
+## 2025-05-17 - Data Portability as UX Delight
+
+**Learning:** Providing a "Copy to Clipboard" shortcut for key generated content (like an AI-generated synthesis) is a high-value micro-UX improvement for research tools. It drastically reduces the friction for users moving from discovery to documentation. When combined with visual feedback (icon change) and toast notifications, it provides a satisfying and clear interaction.
+
+**Action:** Look for key "output" areas in the UI that users are likely to reference or reuse (summaries, findings, citations) and provide one-click copy functionality with clear feedback via icon changes and toast notifications.
