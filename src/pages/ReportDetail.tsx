@@ -6,6 +6,7 @@ import { SearchProgress } from '@/components/SearchProgress';
 import { ResultsTable } from '@/components/ResultsTable';
 import { MedicalDisclaimer } from '@/components/MedicalDisclaimer';
 import { QueryNormalizationNotice } from '@/components/QueryNormalizationNotice';
+import { PaperChat } from '@/components/PaperChat';
 import { Skeleton } from '@/components/ui/skeleton';
 
 const ReportDetail = () => {
@@ -114,6 +115,11 @@ const ReportDetail = () => {
                     arxivCount={report.arxiv_count}
                     pdfsByDoi={pdfsByDoi}
                   />
+                </section>
+
+                {/* Chat with Papers */}
+                <section className="mt-8">
+                  <PaperChat reportId={id!} />
                 </section>
               </>
             )}
