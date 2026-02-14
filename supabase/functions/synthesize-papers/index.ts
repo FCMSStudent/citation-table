@@ -7,6 +7,36 @@ const corsHeaders = {
     "authorization, x-client-info, apikey, content-type, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version",
 };
 
+function isCompleteStudy(study: any): boolean {
+  if (!study.title || !study.year) return false;
+  if (study.study_design === "unknown") return false;
+  if (!study.abstract_excerpt || study.abstract_excerpt.trim().length < 50) return false;
+  if (!study.outcomes || study.outcomes.length === 0) return false;
+  if (!study.population && !study.sample_size) return false;
+  return study.outcomes.some((o: any) =>
+    o.outcome_measured && (o.effect_size || o.p_value || o.intervention || o.comparator)
+  );
+}
+
+function scoreStudy(study: any, query: string): number {
+  let score = 0;
+  const keywords = query.toLowerCase().split(/\s+/).filter((w: string) => w.length > 2);
+  const outcomesText = (study.outcomes || [])
+    .map((o: any) => `${o.outcome_measured} ${o.key_result || ""}`.toLowerCase())
+    .join(" ");
+  const matches = keywords.filter((k: string) => outcomesText.includes(k)).length;
+  if (keywords.length >= 2 && matches >= 2) score += 2;
+  else if (matches >= 1) score += 1;
+
+  if (study.review_type === "Meta-analysis" || study.review_type === "Systematic review") score += 1;
+
+  if (study.citationCount && study.citationCount > 0) {
+    score += Math.min(3, Math.log2(study.citationCount));
+  }
+
+  return score;
+}
+
 function computeWarnings(studies: any[]): { type: string; text: string }[] {
   const warnings: { type: string; text: string }[] = [];
 
@@ -81,11 +111,7 @@ serve(async (req) => {
       );
     }
 
-    const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
-    const supabaseKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
-    const supabase = createClient(supabaseUrl, supabaseKey);
-
-    const { data: report, error: dbError } = await supabase
+    const { data: report, error: dbError } = await rlSupabase
       .from("research_reports")
       .select("question, results, normalized_query, narrative_synthesis")
       .eq("id", report_id)
@@ -99,15 +125,21 @@ serve(async (req) => {
     }
 
     const allStudies = report.results as any[];
+    const queryText = (report.normalized_query || report.question || "").toLowerCase();
 
-    // Filter to studies with at least one complete outcome row
-    const studies = allStudies.filter((s: any) =>
-      (s.outcomes || []).some((o: any) =>
-        o.outcome_measured && (o.intervention || o.comparator || o.effect_size || o.p_value)
-      )
-    );
-    const excludedCount = allStudies.length - studies.length;
-    console.log(`[Synthesis] ${excludedCount} of ${allStudies.length} studies excluded due to incomplete extracted data`);
+    // Step 1: completeness filter
+    const completeStudies = allStudies.filter(isCompleteStudy);
+    const excludedCount = allStudies.length - completeStudies.length;
+    console.log(`[Synthesis] ${excludedCount} of ${allStudies.length} excluded (incomplete)`);
+
+    // Step 2: rank by relevance
+    const ranked = completeStudies
+      .map(s => ({ ...s, _score: scoreStudy(s, queryText) }))
+      .sort((a, b) => b._score - a._score);
+
+    // Step 3: top 10
+    const studies = ranked.slice(0, 10).map(({ _score, ...s }) => s);
+    console.log(`[Synthesis] Selected top ${studies.length} of ${completeStudies.length} complete studies`);
 
     // Build numbered study context
     const studyContext = studies
@@ -135,10 +167,11 @@ ${outcomes}`;
 
     // Compute deterministic warnings
     const computedWarnings = computeWarnings(studies);
-    if (excludedCount > 0) {
+    if (excludedCount > 0 || completeStudies.length > 10) {
+      const totalExcluded = allStudies.length - studies.length;
       computedWarnings.push({
         type: "quality",
-        text: `${excludedCount} of ${allStudies.length} studies excluded from synthesis due to incomplete extracted data`,
+        text: `${totalExcluded} of ${allStudies.length} studies excluded from synthesis (${excludedCount} incomplete, ${completeStudies.length - studies.length} below relevance cutoff)`,
       });
     }
 
@@ -237,7 +270,7 @@ CRITICAL RULES:
     } catch {
       // If JSON parse fails, wrap raw text as legacy format
       console.error("Failed to parse synthesis JSON, storing raw text");
-      const { error: updateError } = await supabase
+      const { error: updateError } = await rlSupabase
         .from("research_reports")
         .update({ narrative_synthesis: rawText })
         .eq("id", report_id);
@@ -273,7 +306,7 @@ CRITICAL RULES:
     const synthesisJson = JSON.stringify(synthesisData);
 
     // Cache in database
-    const { error: updateError } = await supabase
+    const { error: updateError } = await rlSupabase
       .from("research_reports")
       .update({ narrative_synthesis: synthesisJson })
       .eq("id", report_id);
