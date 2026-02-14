@@ -52,7 +52,7 @@ export function useResearch(): UseResearchReturn {
 
         data = responseData;
       } else {
-        const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
+        const supabaseUrl = import.meta.env.VITE_SUPABASE_URL || 'https://amzlrrrhjsqjndbrdume.supabase.co';
         if (!supabaseUrl) {
           throw new Error('Cannot search: backend is not configured.');
         }

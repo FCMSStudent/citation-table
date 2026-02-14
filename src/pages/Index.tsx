@@ -106,7 +106,7 @@ const Index = () => {
         {showEmptyState && <EmptyState />}
       </main>
 
-      {/* Footer */}
+      {/* Footer section */}
       
 
 
