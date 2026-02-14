@@ -165,7 +165,7 @@ function extractSearchKeywords(query: string): string {
     .toLowerCase()
     .replace(/[^a-z0-9\s]/g, " ")
     .split(/\s+/)
-    .filter(w => w.length > 2 && !STOP_WORDS.has(w));
+    .filter(w => w.length >= 1 && !STOP_WORDS.has(w));
   
   // Deduplicate while preserving order
   const seen = new Set<string>();
@@ -475,7 +475,7 @@ async function enrichWithCrossref(papers: UnifiedPaper[]): Promise<UnifiedPaper[
           }
         } catch (error) {
           clearTimeout(timeoutId);
-          if (error.name === 'AbortError') {
+          if ((error as Error).name === 'AbortError') {
             console.warn(`[Crossref] Request timeout for DOI: ${paper.doi}`);
           } else {
             throw error;
@@ -508,7 +508,7 @@ async function enrichWithCrossref(papers: UnifiedPaper[]): Promise<UnifiedPaper[
           }
         } catch (error) {
           clearTimeout(timeoutId);
-          if (error.name === 'AbortError') {
+          if ((error as Error).name === 'AbortError') {
             console.warn(`[Crossref] Request timeout for title search: ${paper.title}`);
           } else {
             throw error;
