@@ -69,7 +69,16 @@ serve(async (req) => {
       );
     }
 
-    const studies = report.results as any[];
+    const allStudies = report.results as any[];
+
+    // Filter to studies with at least one complete outcome row
+    const studies = allStudies.filter((s: any) =>
+      (s.outcomes || []).some((o: any) =>
+        o.outcome_measured && (o.intervention || o.comparator || o.effect_size || o.p_value)
+      )
+    );
+    const excludedCount = allStudies.length - studies.length;
+    console.log(`[Synthesis] ${excludedCount} of ${allStudies.length} studies excluded due to incomplete extracted data`);
 
     // Build numbered study context
     const studyContext = studies
@@ -97,6 +106,12 @@ ${outcomes}`;
 
     // Compute deterministic warnings
     const computedWarnings = computeWarnings(studies);
+    if (excludedCount > 0) {
+      computedWarnings.push({
+        type: "quality",
+        text: `${excludedCount} of ${allStudies.length} studies excluded from synthesis due to incomplete extracted data`,
+      });
+    }
 
     const systemPrompt = `You are a research synthesis assistant. You have ${studies.length} studies from a systematic search on: "${report.question}"${report.normalized_query ? ` (normalized: "${report.normalized_query}")` : ""}.
 
