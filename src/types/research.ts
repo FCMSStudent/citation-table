@@ -45,6 +45,28 @@ export interface ResearchResponse {
   error?: string;
 }
 
+// Structured narrative synthesis types
+export interface SynthesisClaim {
+  text: string;
+  citations: string[]; // e.g. ["study-0", "study-3"]
+  confidence: 'high' | 'moderate' | 'low';
+}
+
+export interface SynthesisSection {
+  heading: string;
+  claims: SynthesisClaim[];
+}
+
+export interface SynthesisWarning {
+  type: 'gap' | 'quality';
+  text: string;
+}
+
+export interface SynthesisData {
+  sections: SynthesisSection[];
+  warnings: SynthesisWarning[];
+}
+
 export type SortField = keyof Pick<StudyResult, 'year' | 'sample_size' | 'study_design' | 'title'>;
 export type SortDirection = 'asc' | 'desc';
 
