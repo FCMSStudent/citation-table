@@ -39,6 +39,8 @@ interface StudyResult {
   review_type: "None" | "Systematic review" | "Meta-analysis";
   source: "openalex" | "semantic_scholar" | "arxiv";
   citationCount?: number;
+  pdf_url?: string | null;
+  landing_page_url?: string | null;
 }
 
 interface OpenAlexWork {
@@ -48,6 +50,7 @@ interface OpenAlexWork {
   abstract_inverted_index?: Record<string, number[]>;
   authorships?: Array<{ author: { display_name: string } }>;
   primary_location?: { source?: { display_name: string } };
+  best_oa_location?: { pdf_url?: string; landing_page_url?: string };
   doi?: string;
   type?: string;
   cited_by_count?: number;
@@ -63,6 +66,8 @@ interface SemanticScholarPaper {
   citationCount: number;
   publicationTypes: string[] | null;
   externalIds: { DOI?: string; PubMed?: string };
+  openAccessPdf?: { url: string } | null;
+  url?: string;
 }
 
 interface UnifiedPaper {
@@ -79,6 +84,8 @@ interface UnifiedPaper {
   citationCount?: number;
   publicationTypes?: string[];
   journal?: string;
+  pdfUrl?: string | null;
+  landingPageUrl?: string | null;
 }
 
 // ─── Helpers (copied from research/index.ts) ─────────────────────────────────
@@ -201,6 +208,8 @@ async function searchOpenAlex(query: string): Promise<UnifiedPaper[]> {
       source: "openalex" as const,
       citationCount: work.cited_by_count,
       publicationTypes: work.type ? [work.type] : undefined,
+      pdfUrl: work.best_oa_location?.pdf_url || null,
+      landingPageUrl: work.best_oa_location?.landing_page_url || null,
     }));
   } catch (error) {
     console.error(`[OpenAlex] Error:`, error);
@@ -222,8 +231,8 @@ async function searchSemanticScholar(query: string): Promise<UnifiedPaper[]> {
   const keywords = extractSearchKeywords(query);
   if (!keywords) return [];
   const encodedQuery = encodeURIComponent(keywords);
-  const fields = "paperId,title,abstract,year,authors,venue,citationCount,publicationTypes,externalIds";
-  const url = `https://api.semanticscholar.org/graph/v1/paper/search?query=${encodedQuery}&fields=${fields}&limit=25`;
+  const fields = "paperId,title,abstract,year,authors,venue,citationCount,publicationTypes,externalIds,openAccessPdf,url";
+  const url = `https://api.semanticscholar.org/graph/v1/paper/search/bulk?query=${encodedQuery}&fields=${fields}`;
   const apiKey = Deno.env.get("SEMANTIC_SCHOLAR_API_KEY");
   console.log(`[SemanticScholar] Searching: ${query}${apiKey ? ' (with API key)' : ' (public tier)'}`);
   try {
@@ -240,6 +249,7 @@ async function searchSemanticScholar(query: string): Promise<UnifiedPaper[]> {
     console.log(`[SemanticScholar] Found ${papers.length} papers`);
     return papers
       .filter(paper => paper.abstract && paper.abstract.length > 50)
+      .slice(0, 50)
       .map(paper => ({
         id: paper.paperId,
         title: paper.title || "Untitled",
@@ -253,6 +263,8 @@ async function searchSemanticScholar(query: string): Promise<UnifiedPaper[]> {
         source: "semantic_scholar" as const,
         citationCount: paper.citationCount,
         publicationTypes: paper.publicationTypes ?? undefined,
+        pdfUrl: paper.openAccessPdf?.url || null,
+        landingPageUrl: paper.url || null,
       }));
   } catch (error) {
     console.error(`[SemanticScholar] Error:`, error);
@@ -264,7 +276,7 @@ async function searchArxiv(query: string): Promise<UnifiedPaper[]> {
   const keywords = extractSearchKeywords(query);
   if (!keywords) return [];
   const encodedQuery = encodeURIComponent(keywords);
-  const url = `https://export.arxiv.org/api/query?search_query=all:${encodedQuery}&max_results=25`;
+  const url = `https://export.arxiv.org/api/query?search_query=all:${encodedQuery}&max_results=25&sortBy=relevance&sortOrder=descending`;
   console.log(`[ArXiv] Searching: ${keywords}`);
   try {
     const response = await fetch(url);
@@ -338,6 +350,8 @@ function deduplicateAndMerge(s2Papers: UnifiedPaper[], openAlexPapers: UnifiedPa
       }
       if (paper.pubmed_id && !existingPaper.pubmed_id) existingPaper.pubmed_id = paper.pubmed_id;
       if (paper.openalex_id && !existingPaper.openalex_id) existingPaper.openalex_id = paper.openalex_id;
+      if (paper.pdfUrl && !existingPaper.pdfUrl) existingPaper.pdfUrl = paper.pdfUrl;
+      if (paper.landingPageUrl && !existingPaper.landingPageUrl) existingPaper.landingPageUrl = paper.landingPageUrl;
       if (doi && !existingPaper.doi) {
         existingPaper.doi = paper.doi;
         doiMap.set(doi, existingPaper);
@@ -431,6 +445,20 @@ async function enrichWithCrossref(papers: UnifiedPaper[]): Promise<UnifiedPaper[
   return enrichedPapers;
 }
 
+// ─── Study Completeness Filter ──────────────────────────────────────────────
+
+function isCompleteStudy(study: any): boolean {
+  if (!study.title || !study.year) return false;
+  if (study.study_design === "unknown") return false;
+  if (!study.abstract_excerpt || study.abstract_excerpt.trim().length < 50) return false;
+  if (!study.outcomes || study.outcomes.length === 0) return false;
+  const hasCompleteOutcome = study.outcomes.some((o: any) =>
+    o.outcome_measured &&
+    (o.effect_size || o.p_value || o.intervention || o.comparator)
+  );
+  return hasCompleteOutcome;
+}
+
 // ─── LLM Extraction ─────────────────────────────────────────────────────────
 
 async function extractStudyData(
@@ -449,6 +477,8 @@ async function extractStudyData(
     pubmed_id: p.pubmed_id,
     openalex_id: p.openalex_id,
     citationCount: p.citationCount,
+    pdfUrl: p.pdfUrl,
+    landingPageUrl: p.landingPageUrl,
   }));
 
   const systemPrompt = `You are a rigorous medical research data extractor following strict evidence-based principles.
@@ -551,14 +581,19 @@ Extract structured data from each paper's abstract following the strict rules. R
   try {
     const results = JSON.parse(jsonStr.trim());
     console.log(`[LLM] Parsed ${results.length} study results`);
-    const allowedDesigns = new Set(["RCT", "cohort", "cross-sectional", "review"]);
-    const filtered = results.filter((s: any) => allowedDesigns.has(s.study_design));
-    console.log(`[LLM] Filtered: ${results.length} -> ${filtered.length} (removed ${results.length - filtered.length} unknown/ineligible)`);
-    const withAbstract = filtered.filter((s: any) =>
-      s.abstract_excerpt && s.abstract_excerpt.trim().length >= 50
-    );
-    console.log(`[LLM] Abstract filter: ${filtered.length} -> ${withAbstract.length}`);
-    return withAbstract;
+
+    // Merge pdf_url / landing_page_url from original papers into LLM results
+    for (const study of results) {
+      const matchedPaper = papers.find(p => p.id === study.study_id);
+      if (matchedPaper) {
+        study.pdf_url = matchedPaper.pdfUrl || null;
+        study.landing_page_url = matchedPaper.landingPageUrl || null;
+      }
+    }
+
+    const complete = results.filter((s: any) => isCompleteStudy(s));
+    console.log(`[LLM] isCompleteStudy filter: ${results.length} -> ${complete.length}`);
+    return complete;
   } catch (parseError) {
     console.error(`[LLM] JSON parse error:`, parseError);
     throw new Error("Failed to parse LLM response as JSON");

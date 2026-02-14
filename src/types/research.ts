@@ -31,6 +31,8 @@ export interface StudyResult {
   review_type: "None" | "Systematic review" | "Meta-analysis";
   source: "openalex" | "semantic_scholar" | "arxiv"; // Track data source
   citationCount?: number; // Available from Semantic Scholar
+  pdf_url?: string | null; // Open-access PDF URL
+  landing_page_url?: string | null; // Publisher or S2 landing page URL
 }
 
 export interface ResearchResponse {
