@@ -1,58 +1,88 @@
 
 
-## Remaining Synthesis View Improvements
+# Restructure Research Table to PICO Evidence Grid
 
-### Overview
-Three items from the previous plan remain unimplemented. The wall-of-text summary and condensed narrative function are no longer needed since the LLM-generated NarrativeSynthesis now handles that. The SynthesisOverview stats card is also unnecessary -- the NarrativeSynthesis already covers corpus context.
+## Overview
 
----
+Transform the current study-level table into a structured PICO (Population, Intervention, Comparator, Outcome) evidence grid where each row represents an individual **outcome** from a paper, not just the paper itself.
 
-### 1. Fix the "+N more" Button in Key Findings
+## What Changes
 
-The button at line 136 of `SynthesisView.tsx` has no click handler. Add an `expandedOutcomes` state (Set of outcome keys) and toggle visibility on click.
+### 1. Extend the data model with new fields
 
-**File:** `src/components/SynthesisView.tsx`
-- Add `const [expandedOutcomes, setExpandedOutcomes] = useState<Set<string>>(new Set())`
-- On button click, toggle the outcome key in the set
-- When expanded, render all studies instead of slicing to 3
-- Change button text to "Show fewer" when expanded
+Add `intervention`, `comparator`, `effect_size`, and `p_value` to the `Outcome` type in `src/types/research.ts`. This keeps the data at the outcome level where it belongs.
 
----
+```
+Outcome {
+  outcome_measured: string;
+  key_result: string | null;
+  citation_snippet: string;
+  intervention: string | null;    // NEW
+  comparator: string | null;      // NEW
+  effect_size: string | null;     // NEW (e.g., "d = 0.45")
+  p_value: string | null;         // NEW (e.g., "p < 0.001")
+}
+```
 
-### 2. Add Effect Direction Indicators
+### 2. Update the LLM extraction prompt
 
-Create a heuristic utility that scans `key_result` text for direction keywords and returns positive/negative/neutral.
+Modify the `extractStudyData` function in `supabase/functions/research/index.ts` to instruct the LLM to extract these four new fields per outcome. The prompt will require verbatim extraction (no inference), returning `null` when not stated in the abstract.
 
-**New file:** `src/utils/effectDirection.ts`
-- Positive keywords: "improved", "increased", "enhanced", "reduced symptoms", "significant decrease in", "beneficial", "protective"
-- Negative/adverse keywords: "worsened", "increased risk", "adverse", "harmful", "declined"
-- Null keywords: "no significant", "no difference", "similar", "no association", "no effect"
-- Returns `'positive' | 'negative' | 'neutral' | 'mixed'`
+### 3. Rebuild the TableView component
 
-**Modified file:** `src/components/SynthesisView.tsx`
-- Import the utility
-- Add a small colored indicator (green up-arrow, red down-arrow, gray dash) next to each outcome result in both "Key Findings by Outcome" and "Evidence by Study Design" sections
+Replace the current study-level table in `src/components/TableView.tsx` with an outcome-level PICO grid:
 
----
+| Column | Source |
+|--------|--------|
+| Paper | `study.title` + author/year |
+| Population | `study.population` |
+| Intervention | `outcome.intervention` (new) |
+| Comparator | `outcome.comparator` (new) |
+| Outcome | `outcome.outcome_measured` |
+| Effect Size | `outcome.effect_size` (new) |
+| Direction | Derived via `getEffectDirection()` (existing) |
+| P-value | `outcome.p_value` (new) |
+| Study Design | `study.study_design` |
 
-### 3. Add Expandable Verbatim Citation Snippets
+Key behaviors:
+- Each row = one outcome from one study
+- Studies with multiple outcomes produce multiple rows
+- Rows from the same study are visually grouped (first row shows the paper title, subsequent rows show a subtle indent/dash)
+- Direction column uses color-coded arrows/badges (green for positive, red for negative, gray for neutral, amber for mixed)
+- All columns are sortable
+- Checkbox selection still works at the study level
+- Links column (DOI, OpenAlex, PDF) retained
 
-Each outcome in `StudyResult.outcomes[]` has a `citation_snippet` field that is never displayed. Add a small toggle ("Show source text") that reveals the verbatim abstract excerpt grounding each finding.
+### 4. Update CSV export
 
-**File:** `src/components/SynthesisView.tsx`
-- Add `expandedSnippets` state (Set of compound keys like `studyId-outcomeIdx`)
-- Below each outcome result line, add a small "Source" button
-- When toggled, show the `citation_snippet` in a styled blockquote below the result
-- Apply to both "Key Findings by Outcome" and "Evidence by Study Design" sections
+Update `src/lib/csvExport.ts` to include the new Intervention, Comparator, Effect Size, and P-value columns in exported files.
 
----
+## Technical Details
 
-### Technical Details
+### Edge function prompt changes (`supabase/functions/research/index.ts`)
 
-| File | Action |
-|------|--------|
-| `src/utils/effectDirection.ts` | New -- heuristic effect direction parser |
-| `src/components/SynthesisView.tsx` | Modified -- expandable outcomes, effect indicators, citation snippets |
+The outcome schema in the LLM prompt will be updated to:
+```json
+{
+  "outcome_measured": "string",
+  "key_result": "verbatim finding" | null,
+  "citation_snippet": "verbatim text",
+  "intervention": "treatment/exposure" | null,
+  "comparator": "control/comparison group" | null,
+  "effect_size": "verbatim effect size (e.g., Cohen's d, OR, RR, HR)" | null,
+  "p_value": "verbatim p-value or CI" | null
+}
+```
 
-No database changes. No edge functions. No new dependencies.
+### Backward compatibility
+
+The new fields are all nullable (`string | null`), so existing reports with stored results will continue to work -- those outcomes will simply show "--" in the new columns.
+
+### Files modified
+
+1. `src/types/research.ts` -- add 4 fields to `Outcome`
+2. `supabase/functions/research/index.ts` -- update extraction prompt
+3. `src/components/TableView.tsx` -- complete rebuild as PICO grid
+4. `src/lib/csvExport.ts` -- add new columns to export
+5. `supabase/functions/research-async/index.ts` -- update extraction prompt (if it has its own copy)
 
