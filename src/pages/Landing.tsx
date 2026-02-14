@@ -1,16 +1,19 @@
 import { Link } from 'react-router-dom';
-import { BookOpen, Search, FileText, Shield, ArrowRight } from 'lucide-react';
+import { Search, FileText, Shield, ArrowRight } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { PageShell } from '@/components/ui/page-shell';
+import { PageHeader } from '@/components/ui/page-header';
+import { FeatureCard } from '@/components/ui/feature-card';
 
 const Landing = () => {
   return (
-    <div className="min-h-screen bg-background">
+    <PageShell>
       {/* Nav */}
       <header className="border-b border-border">
         <div className="container max-w-6xl mx-auto px-4 py-4 flex items-center justify-between">
           <div className="flex items-center gap-2">
             <div className="p-2 rounded-lg bg-primary/10">
-              <BookOpen className="h-5 w-5 text-primary" />
+              <Search className="h-5 w-5 text-primary" />
             </div>
             <span className="text-lg font-semibold text-foreground tracking-tight">Research Assistant</span>
           </div>
@@ -38,36 +41,24 @@ const Landing = () => {
 
         {/* Features */}
         <div className="mt-24 grid md:grid-cols-3 gap-8 text-left">
-          <div className="space-y-3">
-            <div className="p-2 rounded-lg bg-primary/10 w-fit">
-              <Search className="h-5 w-5 text-primary" />
-            </div>
-            <h3 className="font-semibold text-foreground">Multi-source search</h3>
-            <p className="text-sm text-muted-foreground leading-relaxed">
-              Queries PubMed, OpenAlex, Semantic Scholar, and arXiv in parallel, then deduplicates and ranks results.
-            </p>
-          </div>
-          <div className="space-y-3">
-            <div className="p-2 rounded-lg bg-primary/10 w-fit">
-              <FileText className="h-5 w-5 text-primary" />
-            </div>
-            <h3 className="font-semibold text-foreground">Citation-grounded</h3>
-            <p className="text-sm text-muted-foreground leading-relaxed">
-              Every finding links back to its source paper with DOI, journal, and publication date.
-            </p>
-          </div>
-          <div className="space-y-3">
-            <div className="p-2 rounded-lg bg-primary/10 w-fit">
-              <Shield className="h-5 w-5 text-primary" />
-            </div>
-            <h3 className="font-semibold text-foreground">AI synthesis</h3>
-            <p className="text-sm text-muted-foreground leading-relaxed">
-              Get a narrative summary and chat with your papers to explore the evidence interactively.
-            </p>
-          </div>
+          <FeatureCard
+            icon={Search}
+            title="Multi-source search"
+            description="Queries PubMed, OpenAlex, Semantic Scholar, and arXiv in parallel, then deduplicates and ranks results."
+          />
+          <FeatureCard
+            icon={FileText}
+            title="Citation-grounded"
+            description="Every finding links back to its source paper with DOI, journal, and publication date."
+          />
+          <FeatureCard
+            icon={Shield}
+            title="AI synthesis"
+            description="Get a narrative summary and chat with your papers to explore the evidence interactively."
+          />
         </div>
       </main>
-    </div>
+    </PageShell>
   );
 };
 

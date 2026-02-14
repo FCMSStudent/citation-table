@@ -1,10 +1,11 @@
 // components/SynthesisView.tsx
 import { useMemo, useState } from 'react';
-import { ChevronDown, ChevronRight, ExternalLink, Download, Loader2, FileText, AlertTriangle, ArrowUp, ArrowDown, Minus, Quote } from 'lucide-react';
+import { ChevronDown, ChevronRight, ExternalLink, Download, Loader2, AlertTriangle, Quote } from 'lucide-react';
 import type { StudyResult } from "@/types/research";
 import { Button } from './ui/button';
 import { cn } from '@/lib/utils';
 import { getEffectDirection, type EffectDirection } from '@/utils/effectDirection';
+import { DirectionBadge } from './ui/direction-badge';
 
 const OUTCOME_NORM_REGEX = /\b(symptoms?|levels?|scores?|measures?|rates?|performance)\b/g;
 const AUTHOR_EXTRACT_REGEX = /^([^,(]+)/;
@@ -47,20 +48,6 @@ interface ThematicGroup {
     relevanceScore: number;
   }>;
   keyFindings: string[];
-}
-
-function EffectDirectionIcon({ direction }: { direction: EffectDirection }) {
-  switch (direction) {
-    case 'positive':
-      return <span title="Positive effect"><ArrowUp className="inline h-3.5 w-3.5 text-emerald-600 dark:text-emerald-400" /></span>;
-    case 'negative':
-      return <span title="Negative/adverse effect"><ArrowDown className="inline h-3.5 w-3.5 text-red-600 dark:text-red-400" /></span>;
-    case 'mixed':
-      return <span title="Mixed results"><Minus className="inline h-3.5 w-3.5 text-amber-600 dark:text-amber-400" /></span>;
-    case 'neutral':
-    default:
-      return <span title="No significant effect"><Minus className="inline h-3.5 w-3.5 text-muted-foreground" /></span>;
-  }
 }
 
 function CitationSnippet({ snippet, snippetKey, expandedSnippets, toggleSnippet }: {
@@ -112,7 +99,6 @@ export function SynthesisView({ studies, outcomeAggregation, query, pdfsByDoi = 
     });
   };
 
-  // Group studies thematically
   const thematicGroups = useMemo(() => {
     const groups = new Map<string, ThematicGroup>();
 
@@ -137,7 +123,6 @@ export function SynthesisView({ studies, outcomeAggregation, query, pdfsByDoi = 
       });
     });
 
-    // Extract key findings for each group
     groups.forEach((group) => {
       const findings = new Set<string>();
       group.studies.forEach(({ study }) => {
@@ -151,19 +136,16 @@ export function SynthesisView({ studies, outcomeAggregation, query, pdfsByDoi = 
       group.keyFindings = Array.from(findings).slice(0, 4);
     });
 
-    return Array.from(groups.entries()).
-    map(([key, group], idx) => ({ ...group, id: `group-${idx}` })).
-    sort((a, b) => b.studies.length - a.studies.length);
+    return Array.from(groups.entries())
+      .map(([key, group], idx) => ({ ...group, id: `group-${idx}` }))
+      .sort((a, b) => b.studies.length - a.studies.length);
   }, [studies]);
 
   const toggleGroup = (groupId: string) => {
     setExpandedGroups((prev) => {
       const next = new Set(prev);
-      if (next.has(groupId)) {
-        next.delete(groupId);
-      } else {
-        next.add(groupId);
-      }
+      if (next.has(groupId)) next.delete(groupId);
+      else next.add(groupId);
       return next;
     });
   };
@@ -171,8 +153,8 @@ export function SynthesisView({ studies, outcomeAggregation, query, pdfsByDoi = 
   return (
     <div className="space-y-6">
       {/* Outcome-based synthesis */}
-      {outcomeAggregation.length > 0 &&
-      <div className="rounded-lg border bg-card p-6">
+      {outcomeAggregation.length > 0 && (
+        <div className="rounded-lg border bg-card p-6">
           <h2 className="mb-4 text-lg font-semibold">Key Findings by Outcome</h2>
           <div className="space-y-6">
             {outcomeAggregation.slice(0, 10).map(({ outcome, studyCount, studies: outcomeStudies }) => {
@@ -193,7 +175,6 @@ export function SynthesisView({ studies, outcomeAggregation, query, pdfsByDoi = 
                       const citation = formatCitation(study);
                       const sanitized = sanitizeResult(result);
                       const direction = getEffectDirection(result);
-                      // Find matching outcome for citation snippet
                       const matchingOutcome = study.outcomes?.find(
                         (o) => o.key_result === result || o.outcome_measured.toLowerCase() === outcome.toLowerCase()
                       );
@@ -202,7 +183,7 @@ export function SynthesisView({ studies, outcomeAggregation, query, pdfsByDoi = 
                       return (
                         <div key={study.study_id}>
                           <div className="flex items-start gap-1.5 text-gray-700 dark:text-gray-300">
-                            <EffectDirectionIcon direction={direction} />
+                            <DirectionBadge direction={direction} variant="icon" />
                             <div>
                               <span className="font-medium">{citation}:</span> {sanitized}
                             </div>
@@ -237,7 +218,7 @@ export function SynthesisView({ studies, outcomeAggregation, query, pdfsByDoi = 
             })}
           </div>
         </div>
-      }
+      )}
 
       {/* Study design-based synthesis */}
       <div className="space-y-4">
@@ -248,13 +229,13 @@ export function SynthesisView({ studies, outcomeAggregation, query, pdfsByDoi = 
             <div key={group.id} className="rounded-lg border bg-card">
               <button
                 onClick={() => toggleGroup(group.id)}
-                className="flex w-full items-start gap-3 p-4 text-left transition-colors hover:bg-muted/50">
-
-                {isExpanded ?
-                <ChevronDown className="mt-1 h-5 w-5 flex-shrink-0 text-muted-foreground" /> :
-
-                <ChevronRight className="mt-1 h-5 w-5 flex-shrink-0 text-muted-foreground" />
-                }
+                className="flex w-full items-start gap-3 p-4 text-left transition-colors hover:bg-muted/50"
+              >
+                {isExpanded ? (
+                  <ChevronDown className="mt-1 h-5 w-5 flex-shrink-0 text-muted-foreground" />
+                ) : (
+                  <ChevronRight className="mt-1 h-5 w-5 flex-shrink-0 text-muted-foreground" />
+                )}
                 <div className="flex-1">
                   <h3 className="mb-1 font-semibold">
                     {group.theme}
@@ -263,26 +244,23 @@ export function SynthesisView({ studies, outcomeAggregation, query, pdfsByDoi = 
                     </span>
                   </h3>
                   <p className="text-sm text-muted-foreground">{group.description}</p>
-                  {group.keyFindings.length > 0 &&
-                  <div className="mt-2 flex flex-wrap gap-2">
-                      {group.keyFindings.map((finding) =>
-                    <span
-                      key={finding}
-                      className="rounded-full bg-muted px-2 py-0.5 text-xs font-medium">
-
+                  {group.keyFindings.length > 0 && (
+                    <div className="mt-2 flex flex-wrap gap-2">
+                      {group.keyFindings.map((finding) => (
+                        <span key={finding} className="rounded-full bg-muted px-2 py-0.5 text-xs font-medium">
                           {finding}
                         </span>
-                    )}
+                      ))}
                     </div>
-                  }
+                  )}
                 </div>
               </button>
 
-              {isExpanded &&
-              <div className="border-t bg-muted/20 p-4">
+              {isExpanded && (
+                <div className="border-t bg-muted/20 p-4">
                   <div className="space-y-4">
-                    {group.studies.map(({ study, relevanceScore }) =>
-                  <div key={study.study_id} className="rounded-lg border bg-card p-4">
+                    {group.studies.map(({ study }) => (
+                      <div key={study.study_id} className="rounded-lg border bg-card p-4">
                         <div className="mb-2 flex items-start justify-between gap-4">
                           <div className="flex-1">
                             <h4 className="font-medium leading-tight">{study.title}</h4>
@@ -291,80 +269,76 @@ export function SynthesisView({ studies, outcomeAggregation, query, pdfsByDoi = 
                               {study.sample_size && ` • n=${study.sample_size}`}
                             </p>
                           </div>
-                        <div className="flex gap-1">
-                          {study.citation.openalex_id &&
-                      <Button variant="ghost" size="sm" asChild>
-                                <a
-                            href={`https://openalex.org/${study.citation.openalex_id}`}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            title="View in OpenAlex">
+                          <div className="flex gap-1">
+                            {study.citation.openalex_id && (
+                              <Button variant="ghost" size="sm" asChild>
+                                <a href={`https://openalex.org/${study.citation.openalex_id}`} target="_blank" rel="noopener noreferrer" title="View in OpenAlex">
                                   <ExternalLink className="h-4 w-4" />
                                 </a>
                               </Button>
-                        }
-                          {study.citation.doi && (() => {
-                            const pdf = pdfsByDoi[study.citation.doi!];
-                            if (!pdf) return null;
-                            if (pdf.status === 'downloaded' && pdf.public_url) {
-                              return (
-                                <Button variant="ghost" size="sm" asChild>
-                                  <a href={pdf.public_url} target="_blank" rel="noopener noreferrer" title="Download PDF">
-                                    <Download className="h-4 w-4" />
-                                  </a>
-                                </Button>
-                              );
-                            }
-                            if (pdf.status === 'pending') {
-                              return <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />;
-                            }
-                            return null;
-                          })()}
-                        </div>
+                            )}
+                            {study.citation.doi && (() => {
+                              const pdf = pdfsByDoi[study.citation.doi!];
+                              if (!pdf) return null;
+                              if (pdf.status === 'downloaded' && pdf.public_url) {
+                                return (
+                                  <Button variant="ghost" size="sm" asChild>
+                                    <a href={pdf.public_url} target="_blank" rel="noopener noreferrer" title="Download PDF">
+                                      <Download className="h-4 w-4" />
+                                    </a>
+                                  </Button>
+                                );
+                              }
+                              if (pdf.status === 'pending') {
+                                return <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />;
+                              }
+                              return null;
+                            })()}
+                          </div>
                         </div>
 
-                        {study.outcomes && study.outcomes.length > 0 &&
-                    <div className="mt-3 space-y-2">
-                            {study.outcomes.
-                      filter((o) => o.key_result).
-                      map((outcome, idx) => {
-                        const direction = getEffectDirection(outcome.key_result);
-                        const snippetKey = `design-${study.study_id}-${idx}`;
-                        return (
-                          <div key={idx} className="text-sm">
-                            <div className="flex items-start gap-1.5">
-                              <EffectDirectionIcon direction={direction} />
-                              <div>
-                                <span className="font-medium text-gray-900 dark:text-gray-100">
-                                  {outcome.outcome_measured}:
-                                </span>{' '}
-                                <span className="text-gray-700 dark:text-gray-300">
-                                  {sanitizeResult(outcome.key_result || '')}
-                                </span>
-                              </div>
-                            </div>
-                            {outcome.citation_snippet && (
-                              <div className="ml-5">
-                                <CitationSnippet
-                                  snippet={outcome.citation_snippet}
-                                  snippetKey={snippetKey}
-                                  expandedSnippets={expandedSnippets}
-                                  toggleSnippet={toggleSnippet}
-                                />
-                              </div>
-                            )}
+                        {study.outcomes && study.outcomes.length > 0 && (
+                          <div className="mt-3 space-y-2">
+                            {study.outcomes
+                              .filter((o) => o.key_result)
+                              .map((outcome, idx) => {
+                                const direction = getEffectDirection(outcome.key_result);
+                                const snippetKey = `design-${study.study_id}-${idx}`;
+                                return (
+                                  <div key={idx} className="text-sm">
+                                    <div className="flex items-start gap-1.5">
+                                      <DirectionBadge direction={direction} variant="icon" />
+                                      <div>
+                                        <span className="font-medium text-gray-900 dark:text-gray-100">
+                                          {outcome.outcome_measured}:
+                                        </span>{' '}
+                                        <span className="text-gray-700 dark:text-gray-300">
+                                          {sanitizeResult(outcome.key_result || '')}
+                                        </span>
+                                      </div>
+                                    </div>
+                                    {outcome.citation_snippet && (
+                                      <div className="ml-5">
+                                        <CitationSnippet
+                                          snippet={outcome.citation_snippet}
+                                          snippetKey={snippetKey}
+                                          expandedSnippets={expandedSnippets}
+                                          toggleSnippet={toggleSnippet}
+                                        />
+                                      </div>
+                                    )}
+                                  </div>
+                                );
+                              })}
                           </div>
-                        );
-                      })}
-                          </div>
-                    }
+                        )}
                       </div>
-                  )}
+                    ))}
                   </div>
                 </div>
-              }
-            </div>);
-
+              )}
+            </div>
+          );
         })}
       </div>
 
@@ -387,8 +361,7 @@ export function SynthesisView({ studies, outcomeAggregation, query, pdfsByDoi = 
             </ul>
           </div>
         ) : null;
-      })()
-      }
+      })()}
     </div>
   );
 }
@@ -425,7 +398,6 @@ function formatTheme(design: string, popType: string): string {
     'case-control': 'Case-Control Studies',
     'observational': 'Observational Studies'
   };
-
   const popLabels: Record<string, string> = {
     'pediatric': 'in Pediatric Populations',
     'elderly': 'in Elderly Populations',
@@ -433,7 +405,6 @@ function formatTheme(design: string, popType: string): string {
     'clinical': 'in Clinical Populations',
     'general': ''
   };
-
   return `${designLabels[design] || 'Studies'} ${popLabels[popType] || ''}`.trim();
 }
 
@@ -447,7 +418,6 @@ function getThemeDescription(design: string, popType: string): string {
     'case-control': 'Retrospective comparison of cases and controls',
     'observational': 'Studies without experimental manipulation'
   };
-
   return descriptions[design] || 'Studies examining the research question';
 }
 
@@ -459,17 +429,12 @@ function formatCitation(study: StudyResult): string {
 function extractFirstAuthor(citation: string | null | undefined): string {
   if (!citation) return 'Unknown';
   const match = citation.match(AUTHOR_EXTRACT_REGEX);
-  if (match) {
-    return match[1].replace(ET_AL_REGEX, '').trim();
-  }
+  if (match) return match[1].replace(ET_AL_REGEX, '').trim();
   return 'Unknown';
 }
 
 function normalizeOutcome(outcome: string): string {
-  return outcome.
-  toLowerCase().
-  replace(OUTCOME_NORM_REGEX, '').
-  trim();
+  return outcome.toLowerCase().replace(OUTCOME_NORM_REGEX, '').trim();
 }
 
 function sanitizeResult(result: string): string {
@@ -478,33 +443,23 @@ function sanitizeResult(result: string): string {
 
 function getQualityNotes(studies: StudyResult[]): string[] {
   const notes: string[] = [];
-
-  const preprintCount = studies.filter((s) => s.preprint_status === 'Preprint').length;
-  const rctCount = studies.filter((s) =>
-  s.study_design?.toLowerCase().includes('randomized') ||
-  s.study_design?.toLowerCase().includes('rct')
-  ).length;
-  const metaCount = studies.filter((s) =>
-  s.study_design?.toLowerCase().includes('meta-analysis')
-  ).length;
+  const preprintCount = studies.filter(s => s.preprint_status === 'Preprint').length;
+  const rctCount = studies.filter(s => s.study_design?.toLowerCase().includes('randomized') || s.study_design?.toLowerCase().includes('rct')).length;
+  const metaCount = studies.filter(s => s.study_design?.toLowerCase().includes('meta-analysis')).length;
 
   if (preprintCount === studies.length) {
     notes.push('All studies are preprints and have not undergone formal peer review');
   } else if (preprintCount > studies.length / 2) {
     notes.push(`${preprintCount} of ${studies.length} studies are preprints`);
   }
-
   if (metaCount > 0) {
     notes.push(`Includes ${metaCount} meta-${metaCount === 1 ? 'analysis' : 'analyses'} providing systematic evidence synthesis`);
   }
-
   if (rctCount > 0) {
     notes.push(`${rctCount} ${rctCount === 1 ? 'study uses' : 'studies use'} experimental design with randomization`);
   }
-
   if (notes.length === 0) {
     notes.push('Evidence is primarily observational; causal interpretations should be made cautiously');
   }
-
   return notes;
 }

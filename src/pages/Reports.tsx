@@ -1,42 +1,28 @@
 import { Link } from 'react-router-dom';
-import { BookOpen, ArrowLeft, FileText, LogOut } from 'lucide-react';
+import { ArrowLeft, FileText, LogOut } from 'lucide-react';
 import { ReportCard } from '@/components/ReportCard';
 import { useReports } from '@/hooks/useReports';
 import { useAuth } from '@/hooks/useAuth';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Button } from '@/components/ui/button';
+import { PageShell } from '@/components/ui/page-shell';
+import { PageHeader } from '@/components/ui/page-header';
 
 const Reports = () => {
   const { signOut } = useAuth();
   const { reports, isLoading } = useReports();
 
   return (
-    <div className="min-h-screen bg-background">
-      {/* Header */}
-      <header className="border-b border-border sticky top-0 z-10 bg-background/95 backdrop-blur-sm">
-        <div className="container max-w-7xl mx-auto px-4 py-4">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-3">
-              <div className="p-2 rounded-lg bg-primary/10">
-                <BookOpen className="h-5 w-5 text-primary" />
-              </div>
-              <div>
-                <h1 className="text-lg font-semibold text-foreground">Research Assistant</h1>
-                <p className="text-xs text-muted-foreground">Citation-grounded evidence extraction</p>
-              </div>
-            </div>
-            <div className="flex items-center gap-3">
-              <Link to="/app" className="flex items-center gap-2 text-sm text-muted-foreground hover:text-foreground transition-colors">
-                <ArrowLeft className="h-4 w-4" />
-                New Search
-              </Link>
-              <Button variant="ghost" size="sm" onClick={signOut} className="text-muted-foreground">
-                <LogOut className="h-4 w-4" />
-              </Button>
-            </div>
-          </div>
-        </div>
-      </header>
+    <PageShell>
+      <PageHeader>
+        <Link to="/app" className="flex items-center gap-2 text-sm text-muted-foreground hover:text-foreground transition-colors">
+          <ArrowLeft className="h-4 w-4" />
+          New Search
+        </Link>
+        <Button variant="ghost" size="sm" onClick={signOut} className="text-muted-foreground">
+          <LogOut className="h-4 w-4" />
+        </Button>
+      </PageHeader>
 
       <main className="container max-w-3xl mx-auto px-4 py-8">
         <div className="mb-6 flex items-center gap-3">
@@ -79,7 +65,7 @@ const Reports = () => {
           </div>
         )}
       </main>
-    </div>
+    </PageShell>
   );
 };
 

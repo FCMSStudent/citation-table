@@ -7,6 +7,8 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { PageShell } from '@/components/ui/page-shell';
+import { IconBox } from '@/components/ui/icon-box';
 
 const Auth = () => {
   const { user, isLoading: authLoading, signUp, signIn, signInAsGuest } = useAuth();
@@ -19,9 +21,9 @@ const Auth = () => {
 
   if (authLoading) {
     return (
-      <div className="min-h-screen bg-background flex items-center justify-center">
+      <PageShell className="flex items-center justify-center">
         <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
-      </div>
+      </PageShell>
     );
   }
 
@@ -66,11 +68,11 @@ const Auth = () => {
   };
 
   return (
-    <div className="min-h-screen bg-background flex items-center justify-center px-4">
+    <PageShell className="flex items-center justify-center px-4">
       <Card className="w-full max-w-md">
         <CardHeader className="text-center">
-          <div className="mx-auto mb-2 p-2 rounded-lg bg-primary/10 w-fit">
-            <BookOpen className="h-6 w-6 text-primary" />
+          <div className="mx-auto mb-2 w-fit">
+            <IconBox icon={BookOpen} size="lg" />
           </div>
           <CardTitle>{isSignUp ? 'Create Account' : 'Sign In'}</CardTitle>
           <CardDescription>
@@ -186,7 +188,7 @@ const Auth = () => {
           <p className="text-center text-xs text-muted-foreground">Temporary testing mode</p>
         </CardContent>
       </Card>
-    </div>
+    </PageShell>
   );
 };
 
