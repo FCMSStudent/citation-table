@@ -1,8 +1,9 @@
 // components/TableView.tsx
 import { useMemo, useState } from 'react';
-import { ArrowDown, ArrowUp, ArrowUpDown, ExternalLink, CheckSquare, Square } from 'lucide-react';
+import { ArrowDown, ArrowUp, ArrowUpDown, ExternalLink } from 'lucide-react';
 import type { StudyResult } from '@/types/research';
 import { Button } from './ui/button';
+import { Checkbox } from './ui/checkbox';
 import { cn } from '@/lib/utils';
 
 interface TableViewProps {
@@ -86,23 +87,27 @@ export function TableView({ studies, query, showScoreBreakdown = false }: TableV
     }
   };
 
-  const SortButton = ({ field, label }: { field: SortField; label: string }) => (
-    <button
-      onClick={() => handleSort(field)}
-      className="flex items-center gap-1 font-semibold text-gray-700 hover:text-gray-900 dark:text-gray-300 dark:hover:text-gray-100"
-    >
-      {label}
-      {sortField === field ? (
-        sortDirection === 'asc' ? (
-          <ArrowUp className="h-4 w-4" />
+  const SortButton = ({ field, label }: { field: SortField; label: string }) => {
+    const isSorted = sortField === field;
+    return (
+      <button
+        onClick={() => handleSort(field)}
+        className="flex items-center gap-1 font-semibold text-gray-700 hover:text-gray-900 dark:text-gray-300 dark:hover:text-gray-100 focus-ring rounded px-1"
+        aria-label={`Sort by ${label}${isSorted ? (sortDirection === 'asc' ? ' ascending' : ' descending') : ''}. Click to sort ${isSorted && sortDirection === 'desc' ? 'ascending' : 'descending'}.`}
+      >
+        {label}
+        {isSorted ? (
+          sortDirection === 'asc' ? (
+            <ArrowUp className="h-4 w-4" aria-hidden="true" />
+          ) : (
+            <ArrowDown className="h-4 w-4" aria-hidden="true" />
+          )
         ) : (
-          <ArrowDown className="h-4 w-4" />
-        )
-      ) : (
-        <ArrowUpDown className="h-4 w-4 opacity-30" />
-      )}
-    </button>
-  );
+          <ArrowUpDown className="h-4 w-4 opacity-30" aria-hidden="true" />
+        )}
+      </button>
+    );
+  };
 
   return (
     <div className="space-y-4">
@@ -130,32 +135,27 @@ export function TableView({ studies, query, showScoreBreakdown = false }: TableV
           <thead className="bg-muted/50">
             <tr>
               <th className="border-b p-3 text-left">
-                <button
-                  onClick={toggleSelectAll}
-                  className="flex items-center gap-2 text-gray-700 hover:text-gray-900 dark:text-gray-300 dark:hover:text-gray-100"
-                >
-                  {selectedStudies.size === studies.length && studies.length > 0 ? (
-                    <CheckSquare className="h-4 w-4" />
-                  ) : (
-                    <Square className="h-4 w-4" />
-                  )}
-                </button>
+                <Checkbox
+                  checked={selectedStudies.size === studies.length && studies.length > 0}
+                  onCheckedChange={toggleSelectAll}
+                  aria-label="Select all studies"
+                />
               </th>
-              <th className="border-b p-3 text-left">
+              <th className="border-b p-3 text-left" aria-sort={sortField === 'title' ? (sortDirection === 'asc' ? 'ascending' : 'descending') : 'none'}>
                 <SortButton field="title" label="Study" />
               </th>
-              <th className="border-b p-3 text-left">
+              <th className="border-b p-3 text-left" aria-sort={sortField === 'year' ? (sortDirection === 'asc' ? 'ascending' : 'descending') : 'none'}>
                 <SortButton field="year" label="Year" />
               </th>
-              <th className="border-b p-3 text-left">
+              <th className="border-b p-3 text-left" aria-sort={sortField === 'design' ? (sortDirection === 'asc' ? 'ascending' : 'descending') : 'none'}>
                 <SortButton field="design" label="Design" />
               </th>
-              <th className="border-b p-3 text-left">
+              <th className="border-b p-3 text-left" aria-sort={sortField === 'sample_size' ? (sortDirection === 'asc' ? 'ascending' : 'descending') : 'none'}>
                 <SortButton field="sample_size" label="N" />
               </th>
               <th className="border-b p-3 text-left">Key Findings</th>
               {showScoreBreakdown && (
-                <th className="border-b p-3 text-left">
+                <th className="border-b p-3 text-left" aria-sort={sortField === 'relevance' ? (sortDirection === 'asc' ? 'ascending' : 'descending') : 'none'}>
                   <SortButton field="relevance" label="Score" />
                 </th>
               )}
@@ -176,16 +176,11 @@ export function TableView({ studies, query, showScoreBreakdown = false }: TableV
                   )}
                 >
                   <td className="p-3">
-                    <button
-                      onClick={() => toggleStudySelection(study.study_id)}
-                      className="text-gray-700 hover:text-gray-900 dark:text-gray-300 dark:hover:text-gray-100"
-                    >
-                      {isSelected ? (
-                        <CheckSquare className="h-4 w-4 text-blue-600 dark:text-blue-400" />
-                      ) : (
-                        <Square className="h-4 w-4" />
-                      )}
-                    </button>
+                    <Checkbox
+                      checked={isSelected}
+                      onCheckedChange={() => toggleStudySelection(study.study_id)}
+                      aria-label={`Select study: ${study.title}`}
+                    />
                   </td>
                   <td className="p-3">
                     <div>

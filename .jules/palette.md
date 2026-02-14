@@ -9,3 +9,9 @@
 **Learning:** When making table rows interactive (e.g., for expansion), avoid using `role="button"` on the `<tr>` element. Doing so overrides the semantic row role and can break standard table navigation for screen reader users. Instead, place a dedicated `<button>` within a cell (e.g., the first cell with the expansion icon) to handle the interaction. This maintains the table's structural integrity while providing accessible controls.
 
 **Action:** Use nested `<button>` elements within `<td>` for row-level actions like expansion or deletion, ensuring they have appropriate ARIA labels and `aria-expanded` states.
+
+## 2025-05-16 - Accessible Table Sorting and Selection
+
+**Learning:** Table sorting headers should use `aria-sort` on the `<th>` element to communicate state, and the sorting button should have a dynamic `aria-label` that describes both the current state and the action of clicking (e.g., "Sort by Year (ascending). Click to sort descending"). For selection, always prefer semantic `Checkbox` components over custom icons to ensure proper roles and states are conveyed to assistive technologies.
+
+**Action:** Implement `aria-sort` and descriptive labels in sortable headers; use `Checkbox` components for row selection with labels providing row context.
