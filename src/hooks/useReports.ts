@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { supabase } from '@/integrations/supabase/client';
+import { getSupabase } from '@/integrations/supabase/fallback';
 
 interface ReportSummary {
   id: string;
@@ -15,8 +15,8 @@ export function useReports() {
 
   const fetchReports = async () => {
     try {
-      if (!supabase) return;
-      const { data, error } = await supabase
+      const client = getSupabase();
+      const { data, error } = await client
         .from('research_reports')
         .select('id, question, status, created_at, results')
         .order('created_at', { ascending: false })

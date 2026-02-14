@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { supabase } from '@/integrations/supabase/client';
+import { getSupabase } from '@/integrations/supabase/fallback';
 import type { StudyPdf } from '@/types/research';
 
 interface UseStudyPdfsResult {
@@ -29,7 +29,8 @@ export function useStudyPdfs(reportId: string | undefined): UseStudyPdfsResult {
 
     const fetchPdfs = async () => {
       try {
-        const { data, error: fetchError } = await supabase
+        const client = getSupabase();
+        const { data, error: fetchError } = await client
           .from('study_pdfs')
           .select('*')
           .eq('report_id', reportId);

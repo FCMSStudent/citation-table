@@ -1,6 +1,6 @@
 import { useState, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { supabase } from '@/integrations/supabase/client';
+import { getSupabase } from '@/integrations/supabase/fallback';
 
 interface UseResearchReturn {
   isLoading: boolean;
@@ -23,9 +23,9 @@ export function useResearch(): UseResearchReturn {
     setError(null);
 
     try {
-      if (!supabase) throw new Error('Backend not configured');
+      const client = getSupabase();
 
-      const { data, error: fnError } = await supabase.functions.invoke<{ report_id: string }>('research-async', {
+      const { data, error: fnError } = await client.functions.invoke<{ report_id: string }>('research-async', {
         body: { question },
       });
 
