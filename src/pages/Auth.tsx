@@ -9,7 +9,7 @@ import { Label } from '@/components/ui/label';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 
 const Auth = () => {
-  const { user, isLoading: authLoading, signUp, signIn } = useAuth();
+  const { user, isLoading: authLoading, signUp, signIn, signInAsGuest } = useAuth();
   const [isSignUp, setIsSignUp] = useState(false);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -155,6 +155,35 @@ const Auth = () => {
               {isSignUp ? 'Sign In' : 'Sign Up'}
             </button>
           </p>
+
+          <div className="relative">
+            <div className="absolute inset-0 flex items-center">
+              <span className="w-full border-t" />
+            </div>
+            <div className="relative flex justify-center text-xs uppercase">
+              <span className="bg-card px-2 text-muted-foreground">or</span>
+            </div>
+          </div>
+
+          <Button
+            variant="ghost"
+            className="w-full text-muted-foreground"
+            disabled={isSubmitting}
+            onClick={async () => {
+              setError(null);
+              setIsSubmitting(true);
+              try {
+                const { error } = await signInAsGuest();
+                if (error) setError(error);
+              } finally {
+                setIsSubmitting(false);
+              }
+            }}
+          >
+            {isSubmitting ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
+            Continue as Guest
+          </Button>
+          <p className="text-center text-xs text-muted-foreground">Temporary testing mode</p>
         </CardContent>
       </Card>
     </div>
