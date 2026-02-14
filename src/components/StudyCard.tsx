@@ -1,6 +1,6 @@
 import { useMemo, useState, memo } from 'react';
 import type { ReactNode } from 'react';
-import { ChevronDown, ChevronUp, ExternalLink, Info, Download, Loader2, FileText } from 'lucide-react';
+import { ChevronDown, ChevronUp, ExternalLink, Download, Loader2, FileText } from 'lucide-react';
 import { CociButton } from './CociButton';
 import type { StudyResult, StudyPdf } from '@/types/research';
 import { Card, CardContent, CardHeader } from './ui/card';
@@ -8,10 +8,11 @@ import { PreprintBadge } from './PreprintBadge';
 import { ReviewTypeBadge } from './ReviewTypeBadge';
 import { SourceBadge } from './SourceBadge';
 import { Button } from './ui/button';
-import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from './ui/tooltip';
+import { Tooltip, TooltipContent, TooltipTrigger } from './ui/tooltip';
 import { getScoreBreakdown } from '@/utils/explainScore';
 import { highlightTerms } from '@/utils/highlightTerms';
 import { cn, sanitizeUrl } from '@/lib/utils';
+import { ScoreBadge } from './ui/score-badge';
 
 interface StudyCardProps {
   study: StudyResult;
@@ -39,31 +40,10 @@ function renderHighlightedText(text: string, query: string): ReactNode {
 }
 
 function getDesignStyle(study: StudyResult): string {
-  if (study.review_type === 'Meta-analysis') {
-    return 'border-l-4 border-l-emerald-500';
-  }
-
-  if (study.study_design === 'RCT') {
-    return 'border-l-4 border-l-blue-500';
-  }
-
-  if (study.study_design === 'review' || study.review_type === 'Systematic review') {
-    return 'border-l-4 border-l-slate-400';
-  }
-
+  if (study.review_type === 'Meta-analysis') return 'border-l-4 border-l-emerald-500';
+  if (study.study_design === 'RCT') return 'border-l-4 border-l-blue-500';
+  if (study.study_design === 'review' || study.review_type === 'Systematic review') return 'border-l-4 border-l-slate-400';
   return 'border-l-4 border-l-muted';
-}
-
-function getScoreBadgeClass(score: number): string {
-  if (score >= 2) {
-    return 'bg-emerald-100 text-emerald-900 border-emerald-300 dark:bg-emerald-950 dark:text-emerald-200';
-  }
-
-  if (score <= 0) {
-    return 'bg-amber-100 text-amber-900 border-amber-300 dark:bg-amber-950 dark:text-amber-200';
-  }
-
-  return 'bg-blue-100 text-blue-900 border-blue-300 dark:bg-blue-950 dark:text-blue-200';
 }
 
 export const StudyCard = memo(({ study, query, relevanceScore, isLowValue = false, showScoreBreakdown = false, pdfData }: StudyCardProps) => {
@@ -102,19 +82,7 @@ export const StudyCard = memo(({ study, query, relevanceScore, isLowValue = fals
 
             <div className="mb-2 flex flex-wrap items-center gap-2">
               <span className="rounded border px-2 py-0.5 text-xs font-medium">{study.review_type === 'Meta-analysis' ? 'Meta-analysis' : study.study_design === 'RCT' ? 'RCT' : study.study_design === 'review' || study.review_type === 'Systematic review' ? 'Review' : 'Unknown'}</span>
-              <span className={cn('inline-flex items-center gap-1 rounded border px-2 py-0.5 text-xs font-semibold', getScoreBadgeClass(relevanceScore))}>
-                Score: {relevanceScore > 0 ? '+' : ''}{relevanceScore}
-                <Tooltip>
-                  <TooltipTrigger asChild>
-                    <button type="button" className="inline-flex focus-ring rounded-full" aria-label="How relevance score is computed">
-                      <Info className="h-3.5 w-3.5" aria-hidden="true" />
-                    </button>
-                  </TooltipTrigger>
-                  <TooltipContent>
-                    Score based on keyword match + study design weighting. No semantic inference.
-                  </TooltipContent>
-                </Tooltip>
-              </span>
+              <ScoreBadge score={relevanceScore} />
             </div>
 
             {showScoreBreakdown && (
@@ -234,88 +202,48 @@ export const StudyCard = memo(({ study, query, relevanceScore, isLowValue = fals
 
             <div className="flex flex-wrap gap-3">
               {study.citation.doi && (
-                <a
-                  href={sanitizeUrl(`https://doi.org/${study.citation.doi}`)}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="inline-flex items-center gap-1 text-sm text-primary hover:underline focus-ring rounded"
-                >
-                  View DOI
-                  <ExternalLink className="h-3 w-3" aria-hidden="true" />
+                <a href={sanitizeUrl(`https://doi.org/${study.citation.doi}`)} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1 text-sm text-primary hover:underline focus-ring rounded">
+                  View DOI <ExternalLink className="h-3 w-3" aria-hidden="true" />
                 </a>
               )}
-
               {study.citation.openalex_id && (
-                <a
-                  href={sanitizeUrl(study.citation.openalex_id)}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="inline-flex items-center gap-1 text-sm text-primary hover:underline focus-ring rounded"
-                >
-                  View on OpenAlex
-                  <ExternalLink className="h-3 w-3" aria-hidden="true" />
+                <a href={sanitizeUrl(study.citation.openalex_id)} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1 text-sm text-primary hover:underline focus-ring rounded">
+                  View on OpenAlex <ExternalLink className="h-3 w-3" aria-hidden="true" />
                 </a>
               )}
-
               {study.source === 'semantic_scholar' && (
-                <a
-                  href={sanitizeUrl(`https://www.semanticscholar.org/paper/${study.study_id}`)}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="inline-flex items-center gap-1 text-sm text-primary hover:underline focus-ring rounded"
-                >
-                  View on Semantic Scholar
-                  <ExternalLink className="h-3 w-3" aria-hidden="true" />
+                <a href={sanitizeUrl(`https://www.semanticscholar.org/paper/${study.study_id}`)} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1 text-sm text-primary hover:underline focus-ring rounded">
+                  View on Semantic Scholar <ExternalLink className="h-3 w-3" aria-hidden="true" />
                 </a>
               )}
-
               {study.source === 'arxiv' && study.study_id && (
-                <a
-                  href={sanitizeUrl(`https://arxiv.org/abs/${study.study_id}`)}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="inline-flex items-center gap-1 text-sm text-primary hover:underline focus-ring rounded"
-                >
-                  View on arXiv
-                  <ExternalLink className="h-3 w-3" aria-hidden="true" />
+                <a href={sanitizeUrl(`https://arxiv.org/abs/${study.study_id}`)} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1 text-sm text-primary hover:underline focus-ring rounded">
+                  View on arXiv <ExternalLink className="h-3 w-3" aria-hidden="true" />
                 </a>
               )}
 
-              {/* PDF Download Button */}
               {study.citation.doi && pdfData && (
                 <>
                   {pdfData.status === 'downloaded' && pdfData.public_url && (
-                    <a
-                      href={sanitizeUrl(pdfData.public_url)}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="inline-flex items-center gap-1 text-sm text-primary hover:underline focus-ring rounded"
-                    >
-                      Download PDF
-                      <Download className="h-3 w-3" aria-hidden="true" />
+                    <a href={sanitizeUrl(pdfData.public_url)} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1 text-sm text-primary hover:underline focus-ring rounded">
+                      Download PDF <Download className="h-3 w-3" aria-hidden="true" />
                     </a>
                   )}
                   {pdfData.status === 'pending' && (
                     <span className="inline-flex items-center gap-1 text-sm text-muted-foreground">
-                      <Loader2 className="h-3 w-3 animate-spin" aria-hidden="true" />
-                      Downloading PDF...
+                      <Loader2 className="h-3 w-3 animate-spin" aria-hidden="true" /> Downloading PDF...
                     </span>
                   )}
                   {pdfData.status === 'not_found' && (
-                    <span className="inline-flex items-center gap-1 text-sm text-muted-foreground">
-                      PDF not available
-                    </span>
+                    <span className="inline-flex items-center gap-1 text-sm text-muted-foreground">PDF not available</span>
                   )}
                   {pdfData.status === 'failed' && (
-                    <span className="inline-flex items-center gap-1 text-sm text-muted-foreground">
-                      PDF download failed
-                    </span>
+                    <span className="inline-flex items-center gap-1 text-sm text-muted-foreground">PDF download failed</span>
                   )}
                 </>
               )}
             </div>
 
-            {/* COCI Citations */}
             {study.citation.doi && (
               <div className="mt-3">
                 <CociButton doi={study.citation.doi} />

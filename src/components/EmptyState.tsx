@@ -1,4 +1,7 @@
-import { BookOpen, Table2, Quote, FileSearch } from 'lucide-react';
+import { FileSearch, Table2, Quote } from 'lucide-react';
+import { FeatureCard } from './ui/feature-card';
+import { IconBox } from './ui/icon-box';
+import { BookOpen } from 'lucide-react';
 
 export function EmptyState() {
   return (
@@ -17,29 +20,21 @@ export function EmptyState() {
       </p>
       
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6 text-left">
-        <div className="p-4 rounded-lg bg-card border border-border">
-          <FileSearch className="h-5 w-5 text-primary mb-2" />
-          <h3 className="font-medium text-foreground mb-1">Semantic Search</h3>
-          <p className="text-sm text-muted-foreground">
-            Searches OpenAlex + Semantic Scholar + arXiv using your natural language query
-          </p>
-        </div>
-        
-        <div className="p-4 rounded-lg bg-card border border-border">
-          <Table2 className="h-5 w-5 text-primary mb-2" />
-          <h3 className="font-medium text-foreground mb-1">Structured Extraction</h3>
-          <p className="text-sm text-muted-foreground">
-            Extracts study design, sample size, outcomes, and results into a table
-          </p>
-        </div>
-        
-        <div className="p-4 rounded-lg bg-card border border-border">
-          <Quote className="h-5 w-5 text-primary mb-2" />
-          <h3 className="font-medium text-foreground mb-1">Citation Grounded</h3>
-          <p className="text-sm text-muted-foreground">
-            Every claim linked to source text. Null when not explicitly stated.
-          </p>
-        </div>
+        <FeatureCard
+          icon={FileSearch}
+          title="Semantic Search"
+          description="Searches OpenAlex + Semantic Scholar + arXiv using your natural language query"
+        />
+        <FeatureCard
+          icon={Table2}
+          title="Structured Extraction"
+          description="Extracts study design, sample size, outcomes, and results into a table"
+        />
+        <FeatureCard
+          icon={Quote}
+          title="Citation Grounded"
+          description="Every claim linked to source text. Null when not explicitly stated."
+        />
       </div>
     </div>
   );
