@@ -16,6 +16,7 @@ const SCIHUB_MIRRORS = [
 interface DownloadRequest {
   report_id: string;
   dois: string[];
+  user_id?: string;
 }
 
 /**
@@ -172,7 +173,7 @@ serve(async (req) => {
       );
     }
 
-    const { report_id, dois }: DownloadRequest = await req.json();
+    const { report_id, dois, user_id }: DownloadRequest = await req.json();
 
     if (!report_id || !dois || !Array.isArray(dois)) {
       return new Response(
@@ -190,6 +191,7 @@ serve(async (req) => {
         report_id,
         doi: normalizeDoi(doi),
         status: "pending",
+        ...(user_id ? { user_id } : {}),
       }));
 
     if (pendingEntries.length > 0) {

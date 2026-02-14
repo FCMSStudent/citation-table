@@ -23,31 +23,14 @@ export function useResearch(): UseResearchReturn {
     setError(null);
 
     try {
-      let reportId: string | null = null;
+      if (!supabase) throw new Error('Backend not configured');
 
-      if (supabase) {
-        const { data, error: fnError } = await supabase.functions.invoke<{ report_id: string }>('research-async', {
-          body: { question },
-        });
+      const { data, error: fnError } = await supabase.functions.invoke<{ report_id: string }>('research-async', {
+        body: { question },
+      });
 
-        if (fnError) throw new Error(fnError.message || 'Failed to start search');
-        reportId = data?.report_id || null;
-      } else {
-        const supabaseUrl = import.meta.env.VITE_SUPABASE_URL || 'https://amzlrrrhjsqjndbrdume.supabase.co';
-        const response = await fetch(`${supabaseUrl}/functions/v1/research-async`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ question }),
-        });
-
-        if (!response.ok) {
-          const errorData = await response.json().catch(() => ({}));
-          throw new Error(errorData.error || `Search failed: ${response.statusText}`);
-        }
-
-        const data = await response.json();
-        reportId = data.report_id;
-      }
+      if (fnError) throw new Error(fnError.message || 'Failed to start search');
+      const reportId = data?.report_id;
 
       if (reportId) {
         navigate(`/reports/${reportId}`);
