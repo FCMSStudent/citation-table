@@ -8,6 +8,8 @@ import { MedicalDisclaimer } from '@/components/MedicalDisclaimer';
 import { QueryNormalizationNotice } from '@/components/QueryNormalizationNotice';
 import { PaperChat } from '@/components/PaperChat';
 import { Skeleton } from '@/components/ui/skeleton';
+import { isCompleteStudy } from '@/utils/isCompleteStudy';
+import type { StudyResult } from '@/types/research';
 
 const ReportDetail = () => {
   const { id } = useParams<{ id: string }>();
@@ -86,7 +88,9 @@ const ReportDetail = () => {
             )}
 
             {/* Completed state - show results */}
-            {report.status === 'completed' && report.results && (
+            {report.status === 'completed' && report.results && (() => {
+              const completeResults = (report.results as unknown as StudyResult[]).filter(isCompleteStudy);
+              return (
               <>
                 {/* Medical disclaimer */}
                 <section className="mb-6">
@@ -106,7 +110,7 @@ const ReportDetail = () => {
                 {/* Results */}
                 <section>
                   <ResultsTable
-                    results={report.results}
+                    results={completeResults}
                     query={report.question}
                     normalizedQuery={report.normalized_query || undefined}
                     totalPapersSearched={report.total_papers_searched}
@@ -124,7 +128,8 @@ const ReportDetail = () => {
                   <PaperChat reportId={id!} />
                 </section>
               </>
-            )}
+              );
+            })()}
           </div>
         ) : null}
       </main>
