@@ -1,6 +1,7 @@
 import { useMemo, useState, memo } from 'react';
 import type { ReactNode } from 'react';
 import { ChevronDown, ChevronUp, ExternalLink, Info, Download, Loader2 } from 'lucide-react';
+import { CociButton } from './CociButton';
 import type { StudyResult, StudyPdf } from '@/types/research';
 import { Card, CardContent, CardHeader } from './ui/card';
 import { PreprintBadge } from './PreprintBadge';
@@ -287,6 +288,13 @@ export const StudyCard = memo(({ study, query, relevanceScore, isLowValue = fals
                 </>
               )}
             </div>
+
+            {/* COCI Citations */}
+            {study.citation.doi && (
+              <div className="mt-3">
+                <CociButton doi={study.citation.doi} />
+              </div>
+            )}
           </div>
         )}
       </CardContent>
