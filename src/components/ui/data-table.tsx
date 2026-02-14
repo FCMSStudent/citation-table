@@ -18,31 +18,49 @@ export function DataTable({
   );
 }
 
-/* ── DataTableHeader: styled thead ── */
+/* ── DataTableHeader: styled thead with gradient option ── */
 export function DataTableHeader({
   children,
   className,
+  gradient = false,
 }: {
   children: React.ReactNode;
   className?: string;
+  gradient?: boolean;
 }) {
-  return <thead className={cn("bg-muted/50", className)}>{children}</thead>;
+  return (
+    <thead 
+      className={cn(
+        gradient 
+          ? "bg-gradient-to-r from-primary/10 to-accent/10" 
+          : "bg-muted/50",
+        className
+      )}
+    >
+      {children}
+    </thead>
+  );
 }
 
-/* ── DataTableRow: tr with hover + selection ── */
+/* ── DataTableRow: tr with hover + selection + animations ── */
 export function DataTableRow({
   children,
   isSelected,
   className,
+  animationDelay = 0,
   ...props
-}: React.HTMLAttributes<HTMLTableRowElement> & { isSelected?: boolean }) {
+}: React.HTMLAttributes<HTMLTableRowElement> & { 
+  isSelected?: boolean;
+  animationDelay?: number;
+}) {
   return (
     <tr
       className={cn(
-        "border-b transition-colors hover:bg-muted/30",
+        "border-b transition-all duration-200 hover:bg-muted/30 hover:scale-[1.01] animate-fadeInUp",
         isSelected && "bg-accent/20",
         className
       )}
+      style={{ animationDelay: `${animationDelay}ms` }}
       {...props}
     >
       {children}
@@ -50,7 +68,7 @@ export function DataTableRow({
   );
 }
 
-/* ── SortButton: reusable column sort trigger ── */
+/* ── SortButton: reusable column sort trigger with rotation animations ── */
 interface SortButtonProps<T extends string> {
   field: T;
   label: string;
@@ -70,23 +88,28 @@ export function SortButton<T extends string>({
   return (
     <button
       onClick={() => onSort(field)}
-      className="flex items-center gap-1 font-semibold text-muted-foreground hover:text-foreground rounded px-1 whitespace-nowrap"
+      className="flex items-center gap-1 font-semibold text-muted-foreground hover:text-foreground rounded px-1 whitespace-nowrap transition-all duration-150 hover:scale-105"
     >
       {label}
-      {isActive ? (
-        direction === "asc" ? (
-          <ArrowUp className="h-3.5 w-3.5" />
+      <span className={cn(
+        "transition-transform duration-300",
+        isActive && direction === "desc" && "rotate-180"
+      )}>
+        {isActive ? (
+          direction === "asc" ? (
+            <ArrowUp className="h-3.5 w-3.5" />
+          ) : (
+            <ArrowDown className="h-3.5 w-3.5" />
+          )
         ) : (
-          <ArrowDown className="h-3.5 w-3.5" />
-        )
-      ) : (
-        <ArrowUpDown className="h-3.5 w-3.5 opacity-30" />
-      )}
+          <ArrowUpDown className="h-3.5 w-3.5 opacity-30" />
+        )}
+      </span>
     </button>
   );
 }
 
-/* ── SelectionToolbar: "{n} selected" bar ── */
+/* ── SelectionToolbar: "{n} selected" bar with slide-in animation ── */
 interface SelectionToolbarProps {
   count: number;
   onCompare?: () => void;
@@ -102,7 +125,7 @@ export function SelectionToolbar({
 }: SelectionToolbarProps) {
   if (count === 0) return null;
   return (
-    <div className="flex items-center justify-between rounded-lg border bg-accent/30 p-3">
+    <div className="flex items-center justify-between rounded-lg border bg-accent/30 p-3 animate-fadeInUp backdrop-blur-sm">
       <span className="text-sm font-medium">
         {count} {count === 1 ? "study" : "studies"} selected
       </span>

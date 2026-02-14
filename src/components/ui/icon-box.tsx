@@ -6,6 +6,8 @@ interface IconBoxProps {
   icon: LucideIcon;
   size?: "sm" | "md" | "lg";
   className?: string;
+  gradient?: boolean;
+  pulse?: boolean;
 }
 
 const sizeClasses = {
@@ -20,16 +22,29 @@ const iconSizeClasses = {
   lg: "h-6 w-6",
 } as const;
 
-export function IconBox({ icon: Icon, size = "md", className }: IconBoxProps) {
+export function IconBox({ 
+  icon: Icon, 
+  size = "md", 
+  className,
+  gradient = false,
+  pulse = false,
+}: IconBoxProps) {
   return (
     <div
       className={cn(
-        "rounded-lg bg-primary/10",
+        "rounded-lg transition-all duration-300",
+        gradient 
+          ? "bg-gradient-primary text-white shadow-md hover:shadow-lg" 
+          : "bg-primary/10 hover:bg-primary/20",
+        pulse && "hover:animate-pulse-glow",
         sizeClasses[size],
         className
       )}
     >
-      <Icon className={cn("text-primary", iconSizeClasses[size])} />
+      <Icon className={cn(
+        gradient ? "text-white" : "text-primary", 
+        iconSizeClasses[size]
+      )} />
     </div>
   );
 }
