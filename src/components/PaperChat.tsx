@@ -1,4 +1,5 @@
 import { useState, useRef, useEffect } from 'react';
+import ReactMarkdown from 'react-markdown';
 import { MessageCircle, Send, Trash2, AlertCircle, Bot, User } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
@@ -65,13 +66,17 @@ export function PaperChat({ reportId }: PaperChatProps) {
               </div>
             )}
             <div
-              className={`max-w-[80%] rounded-lg px-3 py-2 text-sm leading-relaxed whitespace-pre-wrap ${
+              className={`max-w-[80%] rounded-lg px-3 py-2 text-sm leading-relaxed ${
                 msg.role === 'user'
-                  ? 'bg-primary text-primary-foreground'
-                  : 'bg-muted text-foreground'
+                  ? 'bg-primary text-primary-foreground whitespace-pre-wrap'
+                  : 'bg-muted text-foreground prose prose-sm prose-neutral dark:prose-invert max-w-none [&>*:first-child]:mt-0 [&>*:last-child]:mb-0'
               }`}
             >
-              {msg.content}
+              {msg.role === 'user' ? (
+                msg.content
+              ) : (
+                <ReactMarkdown>{msg.content}</ReactMarkdown>
+              )}
               {msg.role === 'assistant' && isStreaming && i === messages.length - 1 && (
                 <span className="inline-block w-1.5 h-4 bg-primary/60 animate-pulse ml-0.5 align-text-bottom" />
               )}
