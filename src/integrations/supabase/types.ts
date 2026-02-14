@@ -14,6 +14,27 @@ export type Database = {
   }
   public: {
     Tables: {
+      rate_limits: {
+        Row: {
+          client_ip: string
+          created_at: string
+          function_name: string
+          id: string
+        }
+        Insert: {
+          client_ip: string
+          created_at?: string
+          function_name: string
+          id?: string
+        }
+        Update: {
+          client_ip?: string
+          created_at?: string
+          function_name?: string
+          id?: string
+        }
+        Relationships: []
+      }
       research_reports: {
         Row: {
           arxiv_count: number | null
