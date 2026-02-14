@@ -19,6 +19,18 @@ interface DownloadRequest {
 }
 
 /**
+ * Helper to use EdgeRuntime.waitUntil if available, otherwise use fire-and-forget
+ */
+function scheduleBackgroundWork(work: Promise<void>): void {
+  const runtime = globalThis as { EdgeRuntime?: { waitUntil?: (p: Promise<void>) => void } };
+  if (runtime.EdgeRuntime?.waitUntil) {
+    runtime.EdgeRuntime.waitUntil(work);
+  } else {
+    work.catch(console.error);
+  }
+}
+
+/**
  * Normalize DOI by removing common prefixes
  */
 function normalizeDoi(doi: string): string {
@@ -242,12 +254,8 @@ serve(async (req) => {
       console.log(`[scihub-download] Completed processing for report ${report_id}`);
     })();
 
-    // Use EdgeRuntime.waitUntil if available
-    if (typeof (globalThis as Record<string, unknown>).EdgeRuntime !== "undefined" && (globalThis as { EdgeRuntime?: { waitUntil?: (p: Promise<void>) => void } }).EdgeRuntime?.waitUntil) {
-      (globalThis as { EdgeRuntime: { waitUntil: (p: Promise<void>) => void } }).EdgeRuntime.waitUntil(backgroundWork);
-    } else {
-      backgroundWork.catch(console.error);
-    }
+    // Use helper to schedule background work
+    scheduleBackgroundWork(backgroundWork);
 
     return new Response(
       JSON.stringify({ success: true, message: `Processing ${dois.length} DOIs` }),

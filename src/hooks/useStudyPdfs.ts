@@ -46,10 +46,10 @@ export function useStudyPdfs(reportId: string | undefined): UseStudyPdfsResult {
           setIsLoading(false);
 
           // Check if any PDFs are still pending
-          const hasPending = data.some(pdf => pdf.status === 'pending');
+          const hasPending = data.length > 0 && data.some(pdf => pdf.status === 'pending');
           
-          // Stop polling if no pending PDFs
-          if (!hasPending && pollInterval) {
+          // Stop polling if no PDFs or no pending PDFs
+          if ((!hasPending || data.length === 0) && pollInterval) {
             clearInterval(pollInterval);
             pollInterval = null;
           }
@@ -58,6 +58,11 @@ export function useStudyPdfs(reportId: string | undefined): UseStudyPdfsResult {
         if (isMounted) {
           setError(err instanceof Error ? err.message : 'Failed to fetch PDFs');
           setIsLoading(false);
+          // Stop polling on error
+          if (pollInterval) {
+            clearInterval(pollInterval);
+            pollInterval = null;
+          }
         }
       }
     };
