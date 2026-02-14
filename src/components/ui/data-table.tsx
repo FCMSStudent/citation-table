@@ -51,6 +51,11 @@ export function DataTableRow({
   ...props
 }: React.HTMLAttributes<HTMLTableRowElement> & { 
   isSelected?: boolean;
+  /**
+   * Animation delay in milliseconds for staggered entrance animations.
+   * Use getStaggerDelay() from src/lib/animations.ts to calculate this value.
+   * @example animationDelay={getStaggerDelay(index, 50)}
+   */
   animationDelay?: number;
 }) {
   return (

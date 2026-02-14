@@ -7,11 +7,11 @@ const gradientTextVariants = cva(
   {
     variants: {
       gradient: {
-        primary: "bg-gradient-to-r from-[#667eea] to-[#764ba2]",
-        accent: "bg-gradient-to-r from-[#f093fb] to-[#f5576c]",
-        success: "bg-gradient-to-r from-[#4facfe] to-[#00f2fe]",
-        warm: "bg-gradient-to-r from-[#fa709a] to-[#fee140]",
-        cool: "bg-gradient-to-r from-[#30cfd0] to-[#330867]",
+        primary: "bg-gradient-to-r from-[hsl(250,70%,65%)] to-[hsl(280,50%,55%)]",
+        accent: "bg-gradient-to-r from-[hsl(340,90%,75%)] to-[hsl(0,75%,65%)]",
+        success: "bg-gradient-to-r from-[hsl(200,90%,60%)] to-[hsl(185,100%,50%)]",
+        warm: "bg-gradient-to-r from-[hsl(340,90%,70%)] to-[hsl(50,95%,60%)]",
+        cool: "bg-gradient-to-r from-[hsl(185,70%,50%)] to-[hsl(260,60%,30%)]",
       },
       animated: {
         true: "bg-[length:200%_auto] animate-gradient-shift",
@@ -28,6 +28,11 @@ const gradientTextVariants = cva(
 interface GradientTextProps 
   extends React.HTMLAttributes<HTMLElement>,
     VariantProps<typeof gradientTextVariants> {
+  /**
+   * The HTML element to render as.
+   * Use semantic HTML: h1-h3 for headings, span for inline text, p for paragraphs.
+   * Avoid nesting heading elements or using headings inappropriately.
+   */
   as?: "h1" | "h2" | "h3" | "span" | "p";
   children: React.ReactNode;
 }

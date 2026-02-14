@@ -1,3 +1,6 @@
+// Re-export React for the hook
+import * as React from 'react';
+
 /**
  * Animation utilities for the vibrant UI
  * Provides stagger delays, entrance animations, and intersection observer hooks
@@ -97,6 +100,3 @@ export function useIntersectionAnimation(options?: IntersectionObserverInit) {
 
   return { ref, isVisible };
 }
-
-// Re-export React for the hook
-import * as React from 'react';

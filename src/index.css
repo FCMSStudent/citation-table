@@ -64,12 +64,12 @@
     --warning: 38 92% 55%;
     --info: 200 90% 45%;
 
-    /* Vibrant gradients */
-    --gradient-primary: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-    --gradient-accent: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);
-    --gradient-success: linear-gradient(135deg, #4facfe 0%, #00f2fe 100%);
-    --gradient-warm: linear-gradient(135deg, #fa709a 0%, #fee140 100%);
-    --gradient-cool: linear-gradient(135deg, #30cfd0 0%, #330867 100%);
+    /* Vibrant gradients - using theme-consistent HSL values */
+    --gradient-primary: linear-gradient(135deg, hsl(250 70% 65%) 0%, hsl(280 50% 55%) 100%);
+    --gradient-accent: linear-gradient(135deg, hsl(340 90% 75%) 0%, hsl(0 75% 65%) 100%);
+    --gradient-success: linear-gradient(135deg, hsl(200 90% 60%) 0%, hsl(185 100% 50%) 100%);
+    --gradient-warm: linear-gradient(135deg, hsl(340 90% 70%) 0%, hsl(50 95% 60%) 100%);
+    --gradient-cool: linear-gradient(135deg, hsl(185 70% 50%) 0%, hsl(260 60% 30%) 100%);
 
     /* Sidebar */
     --sidebar-background: 40 25% 96%;
