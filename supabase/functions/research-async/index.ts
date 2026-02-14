@@ -646,6 +646,34 @@ function scheduleBackgroundWork(work: Promise<void>): void {
   }
 }
 
+// ─── Rate Limiting ───────────────────────────────────────────────────────────
+
+async function checkRateLimit(
+  supabase: any,
+  functionName: string,
+  clientIp: string,
+  maxRequests: number,
+  windowMinutes: number
+): Promise<boolean> {
+  const windowStart = new Date(Date.now() - windowMinutes * 60_000).toISOString();
+  const { count, error } = await supabase
+    .from("rate_limits")
+    .select("*", { count: "exact", head: true })
+    .eq("function_name", functionName)
+    .eq("client_ip", clientIp)
+    .gte("created_at", windowStart);
+
+  if (error) {
+    console.error("[rate-limit] Check failed:", error);
+    return true; // fail open
+  }
+
+  if ((count || 0) >= maxRequests) return false;
+
+  await supabase.from("rate_limits").insert({ function_name: functionName, client_ip: clientIp });
+  return true;
+}
+
 // ─── Main Handler ────────────────────────────────────────────────────────────
 
 serve(async (req) => {
@@ -658,6 +686,16 @@ serve(async (req) => {
   const supabase = createClient(supabaseUrl, supabaseKey);
 
   try {
+    // Rate limit: 10 research requests per IP per hour
+    const clientIp = req.headers.get("x-forwarded-for")?.split(",")[0]?.trim() || "unknown";
+    const allowed = await checkRateLimit(supabase, "research-async", clientIp, 10, 60);
+    if (!allowed) {
+      return new Response(
+        JSON.stringify({ error: "Rate limit exceeded. Please try again later." }),
+        { status: 429, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    }
+
     const { question } = await req.json();
 
     if (!question || typeof question !== "string" || question.trim().length < 5) {
