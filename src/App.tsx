@@ -6,6 +6,7 @@ import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import { useAuth } from "@/hooks/useAuth";
 import { Loader2 } from "lucide-react";
 import Index from "./pages/Index";
+import Landing from "./pages/Landing";
 import Reports from "./pages/Reports";
 import ReportDetail from "./pages/ReportDetail";
 import Auth from "./pages/Auth";
@@ -39,7 +40,8 @@ const App = () => (
       <BrowserRouter>
         <Routes>
           <Route path="/auth" element={<Auth />} />
-          <Route path="/" element={<ProtectedRoute><Index /></ProtectedRoute>} />
+          <Route path="/" element={<Landing />} />
+          <Route path="/app" element={<ProtectedRoute><Index /></ProtectedRoute>} />
           <Route path="/reports" element={<ProtectedRoute><Reports /></ProtectedRoute>} />
           <Route path="/reports/:id" element={<ProtectedRoute><ReportDetail /></ProtectedRoute>} />
           <Route path="*" element={<NotFound />} />

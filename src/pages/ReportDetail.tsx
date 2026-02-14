@@ -34,7 +34,7 @@ const ReportDetail = () => {
                 <FileText className="h-4 w-4" />
                 All Reports
               </Link>
-              <Link to="/" className="flex items-center gap-2 text-sm text-muted-foreground hover:text-foreground transition-colors">
+              <Link to="/app" className="flex items-center gap-2 text-sm text-muted-foreground hover:text-foreground transition-colors">
                 <ArrowLeft className="h-4 w-4" />
                 New Search
               </Link>
