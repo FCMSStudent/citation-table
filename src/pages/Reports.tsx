@@ -26,7 +26,7 @@ const Reports = () => {
               </div>
             </div>
             <div className="flex items-center gap-3">
-              <Link to="/" className="flex items-center gap-2 text-sm text-muted-foreground hover:text-foreground transition-colors">
+              <Link to="/app" className="flex items-center gap-2 text-sm text-muted-foreground hover:text-foreground transition-colors">
                 <ArrowLeft className="h-4 w-4" />
                 New Search
               </Link>
@@ -58,7 +58,7 @@ const Reports = () => {
               Search for a research question to create your first report.
             </p>
             <Link
-              to="/"
+              to="/app"
               className="mt-4 inline-flex items-center gap-2 text-sm text-primary hover:underline"
             >
               Start a search
