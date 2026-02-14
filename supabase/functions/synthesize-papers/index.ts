@@ -102,6 +102,28 @@ serve(async (req) => {
       );
     }
 
+    // --- Auth: validate JWT and extract userId ---
+    const authHeader = req.headers.get("Authorization");
+    if (!authHeader?.startsWith("Bearer ")) {
+      return new Response(
+        JSON.stringify({ error: "Authentication required" }),
+        { status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    }
+
+    const anonClient = createClient(supabaseUrl, Deno.env.get("SUPABASE_ANON_KEY")!, {
+      global: { headers: { Authorization: authHeader } },
+    });
+    const token = authHeader.replace("Bearer ", "");
+    const { data: claimsData, error: claimsError } = await anonClient.auth.getClaims(token);
+    if (claimsError || !claimsData?.claims?.sub) {
+      return new Response(
+        JSON.stringify({ error: "Invalid or expired token" }),
+        { status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    }
+    const userId = claimsData.claims.sub as string;
+
     const { report_id } = await req.json();
 
     if (!report_id) {
@@ -113,13 +135,13 @@ serve(async (req) => {
 
     const { data: report, error: dbError } = await rlSupabase
       .from("research_reports")
-      .select("question, results, normalized_query, narrative_synthesis")
+      .select("question, results, normalized_query, narrative_synthesis, user_id")
       .eq("id", report_id)
       .single();
 
-    if (dbError || !report?.results) {
+    if (dbError || !report?.results || report.user_id !== userId) {
       return new Response(
-        JSON.stringify({ error: "Report not found or has no results" }),
+        JSON.stringify({ error: "Report not found" }),
         { status: 404, headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
     }

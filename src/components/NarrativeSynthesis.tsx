@@ -6,6 +6,7 @@ import { Badge } from './ui/badge';
 import { Skeleton } from './ui/skeleton';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from './ui/tooltip';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from './ui/collapsible';
+import { supabase } from '@/integrations/supabase/client';
 import type { StudyResult, SynthesisData, SynthesisClaim, SynthesisWarning } from '@/types/research';
 
 interface NarrativeSynthesisProps {
@@ -186,25 +187,15 @@ export function NarrativeSynthesis({ reportId, studies, query, cachedSynthesis }
     setError(null);
 
     try {
-      const supabaseUrl = import.meta.env.VITE_SUPABASE_URL || 'https://amzlrrrhjsqjndbrdume.supabase.co';
-      const anonKey = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImFtemxycnJoanNxam5kYnJkdW1lIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzA0MTQ1NDIsImV4cCI6MjA4NTk5MDU0Mn0.UbmXG7RfWAQjNX9HTkCp50m_wwSFB4P40gfuqCA-f2c';
-
-      const res = await fetch(`${supabaseUrl}/functions/v1/synthesize-papers`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${anonKey}`,
-        },
-        body: JSON.stringify({ report_id: reportId }),
+      const { data: result, error: invokeError } = await supabase.functions.invoke('synthesize-papers', {
+        body: { report_id: reportId },
       });
 
-      if (!res.ok) {
-        const body = await res.json().catch(() => ({}));
-        throw new Error(body.error || `Failed to generate synthesis (${res.status})`);
+      if (invokeError) {
+        throw new Error(invokeError.message || 'Failed to generate synthesis');
       }
 
-      const data = await res.json();
-      setRawSynthesis(data.synthesis);
+      setRawSynthesis(result.synthesis);
     } catch (err) {
       console.error('Synthesis generation failed:', err);
       setError(err instanceof Error ? err.message : 'Failed to generate synthesis');
