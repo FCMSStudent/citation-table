@@ -1,67 +1,102 @@
 
 
-## Results View Improvements -- All Issues
+## LLM-Generated Narrative Synthesis (Elicit-Style)
 
 ### Overview
-Fix all identified issues in the results view: the broken SynthesisView section, non-functional TableView buttons, missing PDF indicators in Table/Synthesis views, unintegrated COCI button, limited filter options, hardcoded label, and lack of pagination.
+Replace the current template-based `generateNarrativeSummary()` with an LLM-generated, table-grounded synthesis. The LLM reads all extracted study data and produces a structured narrative that identifies patterns, agreement, disagreement, and limitations across the evidence -- without introducing new data or performing quantitative meta-analysis.
 
 ---
 
-### 1. Fix Broken SynthesisView Methodological Quality Note
+### How It Changes
 
-The block at lines 238-249 renders nothing due to an empty conditional. Fix it to actually render the quality notes using the existing `getQualityNotes()` helper function that's already defined but never called.
+**Before:** A heuristic function (`narrativeSummary.ts`) concatenates strings like "Observational evidence from 3 studies (combined n=450) reported associations with anxiety." This produces repetitive, hard-to-read output that doesn't actually synthesize findings.
 
-**Result:** An info box at the bottom of the Synthesis view showing notes like "3 studies use experimental design with randomization" or "All studies are preprints."
-
----
-
-### 2. Make TableView "Compare" and "Export Selected" Buttons Functional
-
-- **Export Selected**: Calls the existing `downloadCSV()` utility but only for the selected studies. Pass an `onExportSelected` callback from `ResultsTable` into `TableView`.
-- **Compare**: Opens a side-by-side comparison dialog/panel showing the selected studies in columns with their key attributes (design, sample size, outcomes). Uses a Dialog component.
-
-**Props change:** `TableView` will accept `onExportSelected(studies)` and `onCompare(studies)` callbacks.
+**After:** An LLM reads the full study table (titles, designs, sample sizes, outcomes, key results, citation snippets) and produces 3-5 structured paragraphs covering:
+1. **Corpus overview** -- study count, design mix, population range
+2. **Agreement** -- what most studies converge on
+3. **Disagreement** -- conflicting findings and possible explanations (different populations, designs)
+4. **Limitations** -- preprint status, small samples, narrow populations
+5. **Evidence gaps** -- what's not covered
 
 ---
 
-### 3. Add PDF Status to TableView and SynthesisView
+### Architecture
 
-- Pass `pdfsByDoi` from `ResultsTable` down to `TableView` and `SynthesisView`.
-- **TableView:** Add a small icon in the Links column -- a download icon if available, spinner if pending, or dash if not found.
-- **SynthesisView:** Add a small PDF link/icon next to each study's citation in the expanded group view.
+The synthesis is generated once when a report completes, then cached in the database so it doesn't re-run on every page load.
 
----
-
-### 4. Integrate COCI Citations Button into StudyCard
-
-Add the existing `CociButton` component into the expanded details section of `StudyCard`, shown when the study has a DOI. It appears below the existing external links.
-
----
-
-### 5. Expand FilterBar Options
-
-- Add `rct`, `cohort`, and `cross-sectional` to the study design filter dropdown.
-- Update the filter logic in `ResultsTable` to match these new values against `study_design`.
-- Rename "Explicit cognitive outcome only" to "Explicit outcome only" (remove the hardcoded "cognitive" reference).
-
----
-
-### 6. Add Pagination
-
-Add client-side pagination (25 studies per page) to all three view modes (cards, table, synthesis). A simple "Showing X-Y of Z" bar with Previous/Next buttons at the bottom of the results.
+```text
+Report completes
+       |
+       v
+Frontend detects completed report with no cached synthesis
+       |
+       v
+Calls "synthesize-papers" edge function
+       |
+       v
+Edge function: builds study context -> calls Lovable AI (non-streaming) -> returns structured summary
+       |
+       v
+Frontend stores result in `research_reports.narrative_synthesis` column
+       |
+       v
+On subsequent loads, uses cached synthesis directly
+```
 
 ---
 
 ### Technical Details
 
-**Files to modify:**
+**1. Database Migration**
+- Add a `narrative_synthesis` text column to `research_reports` table (nullable, no default)
 
-1. **`src/components/SynthesisView.tsx`** -- Fix lines 238-249 to render quality notes; accept and display `pdfsByDoi` prop
-2. **`src/components/TableView.tsx`** -- Wire up Compare/Export Selected buttons; accept `pdfsByDoi`, `onExportSelected`, `onCompare` props; add PDF status column
-3. **`src/components/StudyCard.tsx`** -- Add `CociButton` in expanded details
-4. **`src/components/FilterBar.tsx`** -- Add RCT/cohort/cross-sectional options; rename toggle label
-5. **`src/components/ResultsTable.tsx`** -- Pass new props to TableView/SynthesisView; add pagination state and controls; add compare dialog; update filter logic for new design values
+**2. New Edge Function: `supabase/functions/synthesize-papers/index.ts`**
+- Receives `report_id`
+- Fetches study data from `research_reports.results`
+- Builds a structured context block from all studies (same format as `chat-papers`)
+- System prompt instructs the LLM to:
+  - Describe patterns of agreement across studies
+  - Note disagreements and possible methodological explanations
+  - Flag limitations (preprints, small n, narrow populations)
+  - Identify evidence gaps
+  - Cite every claim with (Author, Year)
+  - Use NO causal language unless the study is an RCT
+  - Introduce NO information beyond what's in the data
+- Calls Lovable AI (google/gemini-3-flash-preview) **non-streaming**
+- Saves the result to `research_reports.narrative_synthesis`
+- Returns the synthesis text
 
-**New file:**
-6. **`src/components/CompareDialog.tsx`** -- Side-by-side comparison dialog for selected studies
+**3. Update `supabase/config.toml`**
+- Register `synthesize-papers` with `verify_jwt = false`
+
+**4. Update `src/components/ResultsTable.tsx`**
+- Replace the static `narrativeSummary` paragraph (lines 144-156) with a component that:
+  - Shows cached `narrative_synthesis` if available (passed as prop)
+  - If not cached, shows a "Generate synthesis" button or auto-triggers the edge function
+  - Displays a loading skeleton while generating
+  - Renders the result as markdown (using ReactMarkdown, already installed)
+- Remove the `generateNarrativeSummary()` import and `narrativeSummary` useMemo
+
+**5. New component: `src/components/NarrativeSynthesis.tsx`**
+- Props: `reportId`, `studies`, `query`, `cachedSynthesis`
+- States: `synthesis` (string), `isGenerating` (boolean), `error`
+- On mount: if `cachedSynthesis` exists, use it; otherwise call the edge function
+- Renders markdown with `ReactMarkdown` and `prose` styling
+- Shows a "Regenerate" button to re-run the synthesis
+
+**6. Update `src/pages/ReportDetail.tsx`**
+- Pass `report.narrative_synthesis` to `ResultsTable` as a new prop
+
+**7. Keep `src/lib/narrativeSummary.ts`**
+- Keep as fallback for offline/export use -- no changes needed
+
+### Files Changed
+| File | Action |
+|------|--------|
+| Migration SQL | New -- add `narrative_synthesis` column |
+| `supabase/functions/synthesize-papers/index.ts` | New |
+| `supabase/config.toml` | Add function entry |
+| `src/components/NarrativeSynthesis.tsx` | New |
+| `src/components/ResultsTable.tsx` | Replace static summary with NarrativeSynthesis |
+| `src/pages/ReportDetail.tsx` | Pass cached synthesis prop |
 
