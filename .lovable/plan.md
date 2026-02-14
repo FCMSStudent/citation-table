@@ -1,119 +1,74 @@
 
-
-# Update `synthesize-papers` to Filter, Rank, and Cap at Top 10 Studies
+# New Paper-Level Results Table and CSV Export
 
 ## Overview
 
-Modify the `synthesize-papers` edge function to apply the same completeness filter used elsewhere, rank surviving studies by query relevance, select only the top 10, and run synthesis + warnings exclusively on that subset.
+Create a new `PaperResultsTable` component showing one row per paper (instead of one row per outcome), make it the default "Table" tab, and add a paper-level CSV export. The existing outcome-level table and CSV export remain available as secondary options.
 
-## Changes (single file: `supabase/functions/synthesize-papers/index.ts`)
+## Changes
 
-### A. Add `isCompleteStudy()` function (before `computeWarnings`)
+### 1. Create `src/components/PaperResultsTable.tsx` (new file)
 
-Inline the same logic used in `research-async` and `src/utils/isCompleteStudy.ts`:
+A table component with these columns:
 
-```typescript
-function isCompleteStudy(study: any): boolean {
-  if (!study.title || !study.year) return false;
-  if (study.study_design === "unknown") return false;
-  if (!study.abstract_excerpt || study.abstract_excerpt.trim().length < 50) return false;
-  if (!study.outcomes || study.outcomes.length === 0) return false;
-  if (!study.population && !study.sample_size) return false;  // extra: population or sample_size
-  return study.outcomes.some((o: any) =>
-    o.outcome_measured && (o.effect_size || o.p_value || o.intervention || o.comparator)
-  );
-}
-```
+| Column | Content |
+|--------|---------|
+| Checkbox | Selection (reuse existing pattern) |
+| Paper Info | Title (bold), authors extracted from citation, year, citation count, DOI link (external), abstract/full-text availability indicator |
+| Study Method | Bullet list: design, sample size (N=X), population |
+| Outcomes | Bullet list of `outcome_measured` values from `study.outcomes` |
+| Results | Bullet list of `key_result` values (with effect_size and p_value inline) |
+| Limitations | Bullet list from `study.outcomes` where key_result mentions limitations, or "Not reported" |
+| Conclusion | First outcome's `key_result` summary or abstract excerpt (truncated) |
+| PDF Available | Icon/badge showing PDF availability from legal OA sources |
 
-This adds one additional check vs. the existing `isCompleteStudy`: requiring `population` or `sample_size` to be present, per the request.
+**PDF Available column logic** (checks in order, shows first match):
+1. `study.pdf_url` -- from OpenAlex `best_oa_location.pdf_url` or Semantic Scholar `openAccessPdf.url`
+2. `study.landing_page_url` -- from OpenAlex `best_oa_location.landing_page_url`
+3. arXiv PDF: if `study.source === 'arxiv'`, construct `https://arxiv.org/pdf/{study_id}`
+4. Sci-Hub PDF: check `pdfsByDoi` prop for downloaded PDFs
+5. If none available, show a muted "No" indicator
 
-### B. Add `scoreStudy()` relevance ranking function
+Each link opens in a new tab. Multiple sources shown if available.
 
-```typescript
-function scoreStudy(study: any, query: string): number {
-  let score = 0;
-  // Keyword matches in outcomes
-  const keywords = query.toLowerCase().split(/\s+/).filter(w => w.length > 2);
-  const outcomesText = (study.outcomes || [])
-    .map((o: any) => `${o.outcome_measured} ${o.key_result || ""}`.toLowerCase())
-    .join(" ");
-  const matches = keywords.filter(k => outcomesText.includes(k)).length;
-  if (keywords.length >= 2 && matches >= 2) score += 2;
-  else if (matches >= 1) score += 1;
+Props will mirror `TableView`: `studies`, `query`, `pdfsByDoi`, `onExportSelected`, `onCompare`.
 
-  // Review type boost
-  if (study.review_type === "Meta-analysis" || study.review_type === "Systematic review") score += 1;
+Sortable columns: Paper (by title), Year, Design, Citation Count.
 
-  // Citation count log boost (log2, capped at +3)
-  if (study.citationCount && study.citationCount > 0) {
-    score += Math.min(3, Math.log2(study.citationCount));
-  }
+### 2. Update `src/components/ResultsTable.tsx`
 
-  return score;
-}
-```
+- Import `PaperResultsTable`
+- Change `ViewMode` type to `'synthesis' | 'table' | 'pico' | 'cards'`
+- Rename current "Table" tab to "PICO Table" and add new "Table" tab as default table view
+- Tab order: Synthesis | Table (paper-level, new) | PICO Table (outcome-level, existing) | Cards
+- Wire `viewMode === 'table'` to render `<PaperResultsTable>`, `viewMode === 'pico'` to render existing `<TableView>`
+- Add a dropdown or second button for CSV export: "Export CSV (Paper)" calls new function, "Export CSV (Outcomes)" calls existing `downloadCSV`
 
-### C. Replace the filtering block (lines 101-110)
+### 3. Create `src/lib/csvPaperExport.ts` (new file)
 
-Current code filters only by outcome completeness. Replace with:
+New export function `downloadPaperCSV(studies, filename)` with columns matching the table:
+- Title, Authors, Year, DOI, Citation Count, Study Design, Sample Size, Population
+- Outcomes (semicolon-joined list of outcome_measured)
+- Results (semicolon-joined key_result values)
+- Effect Sizes (semicolon-joined)
+- P-values (semicolon-joined)
+- Review Type, Preprint Status
+- PDF URL (first available legal OA link)
+- Landing Page URL
+- OpenAlex ID
 
-1. Filter all studies through `isCompleteStudy()`
-2. Rank by `scoreStudy()` descending
-3. Slice to top 10
+One row per paper. Reuses `escapeCSV` and `extractAuthors` helpers (extracted to shared or duplicated).
 
-```typescript
-const allStudies = report.results as any[];
-const queryText = (report.normalized_query || report.question || "").toLowerCase();
+### 4. Update `src/lib/csvExport.ts`
 
-// Step 1: completeness filter
-const completeStudies = allStudies.filter(isCompleteStudy);
-const excludedCount = allStudies.length - completeStudies.length;
-console.log(`[Synthesis] ${excludedCount} of ${allStudies.length} excluded (incomplete)`);
+- Export the `escapeCSV` and `extractAuthors` helpers so they can be reused by `csvPaperExport.ts`
+- Keep existing `downloadCSV` function unchanged
 
-// Step 2: rank by relevance
-const ranked = completeStudies
-  .map(s => ({ ...s, _score: scoreStudy(s, queryText) }))
-  .sort((a, b) => b._score - a._score);
+## Files Changed
 
-// Step 3: top 10
-const studies = ranked.slice(0, 10).map(({ _score, ...s }) => s);
-console.log(`[Synthesis] Selected top ${studies.length} of ${completeStudies.length} complete studies`);
-```
-
-### D. Update warning for excluded studies
-
-The existing excluded-count warning (lines 138-143) will reflect both incomplete and rank-excluded studies:
-
-```typescript
-if (excludedCount > 0 || completeStudies.length > 10) {
-  const totalExcluded = allStudies.length - studies.length;
-  computedWarnings.push({
-    type: "quality",
-    text: `${totalExcluded} of ${allStudies.length} studies excluded from synthesis (${excludedCount} incomplete, ${completeStudies.length - studies.length} below relevance cutoff)`,
-  });
-}
-```
-
-### E. Fix duplicate variable declarations
-
-Lines 84-85 re-declare `supabaseUrl` and `supabaseKey` (already declared on lines 63-64). Remove the duplicates and reuse the existing `rlSupabase` client or rename to `supabase`.
-
-### F. Update system prompt study count
-
-The prompt already uses `studies.length` dynamically, so no change needed -- it will automatically say "You have 10 studies" (or fewer).
-
-## No other files change
-
-The `computeWarnings` function already operates on whatever `studies` array it receives, so it will naturally scope to the selected 10.
-
-## Summary of data flow after changes
-
-```text
-report.results (all studies)
-  -> isCompleteStudy() filter (title/year/design/abstract/outcomes/population)
-  -> scoreStudy() ranking (keyword + citationCount log + review_type)
-  -> top 10
-  -> computeWarnings() on those 10
-  -> LLM synthesis prompt with those 10
-  -> cache result
-```
+| File | Action |
+|------|--------|
+| `src/components/PaperResultsTable.tsx` | Create: new paper-level table component |
+| `src/lib/csvPaperExport.ts` | Create: paper-level CSV export function |
+| `src/lib/csvExport.ts` | Edit: export helper functions |
+| `src/components/ResultsTable.tsx` | Edit: add new tab, wire up new table and export |
