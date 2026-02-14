@@ -66,11 +66,28 @@ serve(async (req) => {
       );
     }
 
+    // Security: Input length validation to prevent abuse
+    if (doi.length > 500) {
+      return new Response(
+        JSON.stringify({ error: "DOI parameter is too long (maximum 500 characters)" }),
+        { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    }
+
     // Normalize the DOI
     const normalizedDoi = normalizeDoi(doi);
 
+    // Security: Validate DOI format (all DOIs start with 10.)
+    if (!normalizedDoi.startsWith("10.")) {
+      return new Response(
+        JSON.stringify({ error: "Invalid DOI format. DOIs must start with '10.'" }),
+        { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    }
+
     // Call OpenCitations COCI API
-    const cociUrl = `https://opencitations.net/index/coci/api/v1/citations/${normalizedDoi}`;
+    // Security: use encodeURIComponent to prevent path traversal/URL manipulation
+    const cociUrl = `https://opencitations.net/index/coci/api/v1/citations/${encodeURIComponent(normalizedDoi)}`;
     const cociResponse = await fetch(cociUrl);
 
     if (!cociResponse.ok) {
@@ -106,10 +123,12 @@ serve(async (req) => {
       headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
   } catch (error) {
+    // Security: Log detailed error internally, but return generic message to client
+    // to avoid leaking sensitive system information or stack traces
     console.error("COCI function error:", error);
     return new Response(
       JSON.stringify({
-        error: error instanceof Error ? error.message : "Internal server error",
+        error: "An unexpected error occurred while processing your citation request",
       }),
       {
         status: 500,

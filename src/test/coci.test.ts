@@ -42,10 +42,10 @@ describe('COCI Integration', () => {
         ],
       };
 
-      (global.fetch as any).mockResolvedValueOnce({
+      vi.mocked(global.fetch).mockResolvedValueOnce({
         ok: true,
         json: async () => mockResponse,
-      });
+      } as Response);
 
       const result = await fetchCociForDoi('10.1000/xyz');
 
@@ -66,10 +66,10 @@ describe('COCI Integration', () => {
     it('should include API key in headers if available', async () => {
       import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY = 'test-api-key';
 
-      (global.fetch as any).mockResolvedValueOnce({
+      vi.mocked(global.fetch).mockResolvedValueOnce({
         ok: true,
         json: async () => ({ doi: '10.1000/xyz', count: 0, citations: [] }),
-      });
+      } as Response);
 
       await fetchCociForDoi('10.1000/xyz');
 
@@ -87,11 +87,11 @@ describe('COCI Integration', () => {
     });
 
     it('should throw error on non-ok response', async () => {
-      (global.fetch as any).mockResolvedValueOnce({
+      vi.mocked(global.fetch).mockResolvedValueOnce({
         ok: false,
         status: 502,
         text: async () => 'COCI API returned 502',
-      });
+      } as Response);
 
       await expect(fetchCociForDoi('10.1000/xyz')).rejects.toThrow(
         'Failed to fetch COCI data (502)'
@@ -102,10 +102,10 @@ describe('COCI Integration', () => {
       const doi = '10.1000/xyz(2023)';
       const encodedDoi = encodeURIComponent(doi);
 
-      (global.fetch as any).mockResolvedValueOnce({
+      vi.mocked(global.fetch).mockResolvedValueOnce({
         ok: true,
         json: async () => ({ doi, count: 0, citations: [] }),
-      });
+      } as Response);
 
       await fetchCociForDoi(doi);
 
