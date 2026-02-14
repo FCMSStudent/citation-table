@@ -40,7 +40,7 @@ export function useStudyPdfs(reportId: string | undefined): UseStudyPdfsResult {
           // Index PDFs by DOI for easy lookup
           const pdfsByDoi: Record<string, StudyPdf> = {};
           data.forEach((pdf) => {
-            pdfsByDoi[pdf.doi] = pdf;
+            pdfsByDoi[pdf.doi] = pdf as unknown as StudyPdf;
           });
           setPdfs(pdfsByDoi);
           setIsLoading(false);

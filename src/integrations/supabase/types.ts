@@ -59,6 +59,44 @@ export type Database = {
         }
         Relationships: []
       }
+      study_pdfs: {
+        Row: {
+          created_at: string
+          doi: string
+          id: string
+          public_url: string | null
+          report_id: string
+          status: string
+          storage_path: string | null
+        }
+        Insert: {
+          created_at?: string
+          doi: string
+          id?: string
+          public_url?: string | null
+          report_id: string
+          status?: string
+          storage_path?: string | null
+        }
+        Update: {
+          created_at?: string
+          doi?: string
+          id?: string
+          public_url?: string | null
+          report_id?: string
+          status?: string
+          storage_path?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "study_pdfs_report_id_fkey"
+            columns: ["report_id"]
+            isOneToOne: false
+            referencedRelation: "research_reports"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
     }
     Views: {
       [_ in never]: never
