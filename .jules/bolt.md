@@ -11,3 +11,7 @@
 ## 2026-02-12 - [Combined String Replacement & Keyword Caching]
 **Learning:** Sequential .replace() calls on the same string can be optimized into a single pass using a mapping function. High-frequency keyword highlighting benefits significantly from caching the extracted keywords and the resulting RegExp pattern to avoid O(N) filtering and compilation on every render.
 **Action:** Use a single regex with a mapping callback for multiple replacements. Cache search-related computations (regexes, Sets) keyed by the query string.
+
+## 2026-02-13 - [Single-Pass Filtering & Memoized Outcome Processing]
+**Learning:** React component performance suffers when multiple `useMemo` hooks perform sequential `filter`/`sort` passes over the same large dataset (O(N) * passes). Combining these into a single O(N) `.forEach` loop reduces overhead. Additionally, repeated string map/join operations on nested objects (e.g., outcomes) should be memoized using a `WeakMap` to avoid redundant O(M) processing per item.
+**Action:** Merge sequential filter/category passes into a single `useMemo` block. Cache expensive nested property computations keyed by the item's object reference.
