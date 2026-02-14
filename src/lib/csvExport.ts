@@ -10,33 +10,43 @@ export function downloadCSV(studies: StudyResult[], filename: string) {
     'Study Design',
     'Sample Size',
     'Population',
+    'Intervention',
+    'Comparator',
+    'Outcome',
+    'Effect Size',
+    'P-value',
+    'Key Result',
     'Review Type',
     'Preprint Status',
-    'Outcomes',
-    'Key Results',
     'OpenAlex ID',
   ];
 
-  const rows = studies.map((study) => {
+  // One row per outcome (PICO grid)
+  const rows: string[][] = [];
+  for (const study of studies) {
     const authors = extractAuthors(study.citation.formatted);
-    const outcomes = study.outcomes?.map((o) => o.outcome_measured).join('; ') || '';
-    const results = study.outcomes?.map((o) => o.key_result || '').filter(Boolean).join('; ') || '';
-
-    return [
-      escapeCSV(study.title),
-      escapeCSV(authors),
-      study.year || '',
-      study.citation.doi || '',
-      study.study_design || '',
-      study.sample_size || '',
-      escapeCSV(study.population || ''),
-      study.review_type || '',
-      study.preprint_status || '',
-      escapeCSV(outcomes),
-      escapeCSV(results),
-      study.citation.openalex_id || '',
-    ];
-  });
+    const outcomes = study.outcomes?.length ? study.outcomes : [{ outcome_measured: '', key_result: null, citation_snippet: '', intervention: null, comparator: null, effect_size: null, p_value: null }];
+    for (const o of outcomes) {
+      rows.push([
+        escapeCSV(study.title),
+        escapeCSV(authors),
+        String(study.year || ''),
+        study.citation.doi || '',
+        study.study_design || '',
+        String(study.sample_size || ''),
+        escapeCSV(study.population || ''),
+        escapeCSV(o.intervention || ''),
+        escapeCSV(o.comparator || ''),
+        escapeCSV(o.outcome_measured || ''),
+        escapeCSV(o.effect_size || ''),
+        escapeCSV(o.p_value || ''),
+        escapeCSV(o.key_result || ''),
+        study.review_type || '',
+        study.preprint_status || '',
+        study.citation.openalex_id || '',
+      ]);
+    }
+  }
 
   const csv = [headers, ...rows].map((row) => row.join(',')).join('\n');
 

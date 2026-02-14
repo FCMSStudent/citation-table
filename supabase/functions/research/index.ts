@@ -10,6 +10,10 @@ interface Outcome {
   outcome_measured: string;
   key_result: string | null;
   citation_snippet: string;
+  intervention: string | null;
+  comparator: string | null;
+  effect_size: string | null;
+  p_value: string | null;
 }
 
 interface Citation {
@@ -574,6 +578,8 @@ CRITICAL EXTRACTION RULES (per meta prompt):
 7. Numerical values (CI, p-values, effect sizes) MUST be extracted verbatim - no rounding
 8. Terms like "significant" or association language allowed ONLY if quoted or explicitly used in source
 9. NO causal language unless the abstract explicitly states causation
+12. For each outcome, extract "intervention" (the treatment/exposure) and "comparator" (control group) verbatim. Return null if not stated.
+13. For each outcome, extract "effect_size" (verbatim: Cohen's d, OR, RR, HR, SMD, etc.) and "p_value" (verbatim p-value or CI). Return null if not stated.
 10. Classify preprint_status: "Preprint" if preprint/not peer-reviewed, else "Peer-reviewed"
 11. Classify review_type: "Meta-analysis" for meta-analyses (MUST flag), "Systematic review" for systematic reviews, else "None"
 
@@ -588,7 +594,11 @@ OUTPUT SCHEMA - return valid JSON array matching this exact structure:
   "outcomes": [{
     "outcome_measured": "string describing what was measured",
     "key_result": "verbatim finding with exact numbers/CI/p-values" | null,
-    "citation_snippet": "verbatim text from abstract supporting this result"
+    "citation_snippet": "verbatim text from abstract supporting this result",
+    "intervention": "treatment/exposure" | null,
+    "comparator": "control/comparison group" | null,
+    "effect_size": "verbatim effect size (e.g., Cohen's d, OR, RR, HR)" | null,
+    "p_value": "verbatim p-value or CI" | null
   }],
   "citation": {
     "doi": "string" | null,
@@ -612,9 +622,9 @@ ${JSON.stringify(papersContext, null, 2)}
 
 Extract structured data from each paper's abstract following the strict rules. Remember:
 - Multiple outcomes per study as separate objects in outcomes array
-- Each outcome needs its own citation_snippet
+- Each outcome needs its own citation_snippet, intervention, comparator, effect_size, and p_value
 - No inference - null for missing data
-- Verbatim extraction for populations and numerical results`;
+- Verbatim extraction for populations, numerical results, interventions, and comparators`;
 
   console.log(`[LLM] Sending ${papers.length} papers for extraction via Google Gemini`);
 
