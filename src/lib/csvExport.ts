@@ -57,14 +57,14 @@ export function downloadCSV(studies: StudyResult[], filename: string) {
   link.click();
 }
 
-function escapeCSV(value: string): string {
+export function escapeCSV(value: string): string {
   if (value.includes(',') || value.includes('"') || value.includes('\n')) {
     return `"${value.replace(/"/g, '""')}"`;
   }
   return value;
 }
 
-function extractAuthors(citation: string | null | undefined): string {
+export function extractAuthors(citation: string | null | undefined): string {
   if (!citation) return 'Unknown';
   // Extract everything before year (in parentheses)
   const match = citation.match(/^(.+?)\s*\(/);
