@@ -43,3 +43,14 @@ export interface ResearchResponse {
 
 export type SortField = keyof Pick<StudyResult, 'year' | 'sample_size' | 'study_design' | 'title'>;
 export type SortDirection = 'asc' | 'desc';
+
+// Study PDF download status and information
+export interface StudyPdf {
+  id: string;
+  report_id: string;
+  doi: string;
+  status: "pending" | "downloaded" | "not_found" | "failed";
+  storage_path: string | null;
+  public_url: string | null;
+  created_at: string;
+}

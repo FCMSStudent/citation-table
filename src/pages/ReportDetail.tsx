@@ -1,6 +1,7 @@
 import { useParams, Link } from 'react-router-dom';
 import { BookOpen, ArrowLeft, FileText } from 'lucide-react';
 import { useReport } from '@/hooks/useReport';
+import { useStudyPdfs } from '@/hooks/useStudyPdfs';
 import { SearchProgress } from '@/components/SearchProgress';
 import { ResultsTable } from '@/components/ResultsTable';
 import { MedicalDisclaimer } from '@/components/MedicalDisclaimer';
@@ -10,6 +11,7 @@ import { Skeleton } from '@/components/ui/skeleton';
 const ReportDetail = () => {
   const { id } = useParams<{ id: string }>();
   const { report, isLoading, error } = useReport(id);
+  const { pdfs: pdfsByDoi } = useStudyPdfs(id);
 
   return (
     <div className="min-h-screen bg-background">
@@ -110,6 +112,7 @@ const ReportDetail = () => {
                     openalexCount={report.openalex_count}
                     semanticScholarCount={report.semantic_scholar_count}
                     arxivCount={report.arxiv_count}
+                    pdfsByDoi={pdfsByDoi}
                   />
                 </section>
               </>

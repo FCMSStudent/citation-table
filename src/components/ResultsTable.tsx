@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react';
 import { Code, Download, Eye, EyeOff, FileText, Table2, List } from 'lucide-react';
-import type { StudyResult } from '@/types/research';
+import type { StudyResult, StudyPdf } from '@/types/research';
 import { StudyCard } from './StudyCard';
 import { SynthesisView } from './SynthesisView'; // NEW
 import { TableView } from './TableView'; // NEW
@@ -24,6 +24,7 @@ interface ResultsTableProps {
   openalexCount?: number;
   semanticScholarCount?: number;
   arxivCount?: number;
+  pdfsByDoi?: Record<string, StudyPdf>;
 }
 
 export function ResultsTable({
@@ -34,6 +35,7 @@ export function ResultsTable({
   openalexCount,
   semanticScholarCount,
   arxivCount,
+  pdfsByDoi = {},
 }: ResultsTableProps) {
   // View state
   const [viewMode, setViewMode] = useState<ViewMode>('synthesis');
@@ -281,6 +283,7 @@ export function ResultsTable({
               query={activeQuery}
               relevanceScore={study.relevanceScore}
               showScoreBreakdown={showScoreBreakdown}
+              pdfData={study.citation.doi ? pdfsByDoi[study.citation.doi] : undefined}
             />
           ))}
         </div>
@@ -301,6 +304,7 @@ export function ResultsTable({
                 relevanceScore={study.relevanceScore}
                 isLowValue
                 showScoreBreakdown={showScoreBreakdown}
+                pdfData={study.citation.doi ? pdfsByDoi[study.citation.doi] : undefined}
               />
             ))}
           </div>

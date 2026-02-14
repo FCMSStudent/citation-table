@@ -94,6 +94,28 @@ serve(async (req) => {
           console.error(`[research-async] Update error for ${reportId}:`, updateError);
         } else {
           console.log(`[research-async] Report ${reportId} completed with ${(data.results || []).length} results`);
+          
+          // Trigger PDF downloads for DOIs
+          const results = data.results || [];
+          const dois = results
+            .map((r: any) => r.citation?.doi)
+            .filter((doi: any) => doi && doi.trim());
+          
+          if (dois.length > 0) {
+            console.log(`[research-async] Triggering PDF download for ${dois.length} DOIs`);
+            
+            const scihubUrl = `${supabaseUrl}/functions/v1/scihub-download`;
+            fetch(scihubUrl, {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+                "Authorization": `Bearer ${Deno.env.get("SUPABASE_ANON_KEY")}`,
+              },
+              body: JSON.stringify({ report_id: reportId, dois }),
+            }).catch(err => {
+              console.error(`[research-async] Failed to trigger PDF downloads:`, err);
+            });
+          }
         }
       } catch (err) {
         console.error(`[research-async] Background processing failed for ${reportId}:`, err);
