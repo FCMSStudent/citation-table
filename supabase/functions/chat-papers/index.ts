@@ -7,6 +7,36 @@ const corsHeaders = {
     "authorization, x-client-info, apikey, content-type, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version",
 };
 
+function isCompleteStudy(study: any): boolean {
+  if (!study.title || !study.year) return false;
+  if (study.study_design === "unknown") return false;
+  if (!study.abstract_excerpt || study.abstract_excerpt.trim().length < 50) return false;
+  if (!study.outcomes || study.outcomes.length === 0) return false;
+  if (!study.population && !study.sample_size) return false;
+  return study.outcomes.some((o: any) =>
+    o.outcome_measured && (o.effect_size || o.p_value || o.intervention || o.comparator)
+  );
+}
+
+function scoreStudy(study: any, query: string): number {
+  let score = 0;
+  const keywords = query.toLowerCase().split(/\s+/).filter((w: string) => w.length > 2);
+  const outcomesText = (study.outcomes || [])
+    .map((o: any) => `${o.outcome_measured} ${o.key_result || ""}`.toLowerCase())
+    .join(" ");
+  const matches = keywords.filter((k: string) => outcomesText.includes(k)).length;
+  if (keywords.length >= 2 && matches >= 2) score += 2;
+  else if (matches >= 1) score += 1;
+
+  if (study.review_type === "Meta-analysis" || study.review_type === "Systematic review") score += 1;
+
+  if (study.citationCount && study.citationCount > 0) {
+    score += Math.min(3, Math.log2(study.citationCount));
+  }
+
+  return score;
+}
+
 async function checkRateLimit(
   supabase: any, functionName: string, clientIp: string, maxRequests: number, windowMinutes: number
 ): Promise<boolean> {
@@ -29,18 +59,41 @@ serve(async (req) => {
   }
 
   try {
-    // Rate limit: 30 chat messages per IP per hour
     const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
-    const supabaseKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
-    const rlSupabase = createClient(supabaseUrl, supabaseKey);
+    const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
+    const serviceClient = createClient(supabaseUrl, serviceRoleKey);
+
+    // Rate limit: 30 chat messages per IP per hour
     const clientIp = req.headers.get("x-forwarded-for")?.split(",")[0]?.trim() || "unknown";
-    const allowed = await checkRateLimit(rlSupabase, "chat-papers", clientIp, 30, 60);
+    const allowed = await checkRateLimit(serviceClient, "chat-papers", clientIp, 30, 60);
     if (!allowed) {
       return new Response(
         JSON.stringify({ error: "Rate limit exceeded. Please try again later." }),
         { status: 429, headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
     }
+
+    // --- Auth: validate JWT and extract userId ---
+    const authHeader = req.headers.get("Authorization");
+    if (!authHeader?.startsWith("Bearer ")) {
+      return new Response(
+        JSON.stringify({ error: "Authentication required" }),
+        { status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    }
+
+    const anonClient = createClient(supabaseUrl, Deno.env.get("SUPABASE_ANON_KEY")!, {
+      global: { headers: { Authorization: authHeader } },
+    });
+    const token = authHeader.replace("Bearer ", "");
+    const { data: claimsData, error: claimsError } = await anonClient.auth.getClaims(token);
+    if (claimsError || !claimsData?.claims?.sub) {
+      return new Response(
+        JSON.stringify({ error: "Invalid or expired token" }),
+        { status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    }
+    const userId = claimsData.claims.sub as string;
 
     const { report_id, messages } = await req.json();
 
@@ -51,26 +104,30 @@ serve(async (req) => {
       );
     }
 
-    // Fetch report data
-    const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
-    const supabaseKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
-    const supabase = createClient(supabaseUrl, supabaseKey);
-
-    const { data: report, error: dbError } = await supabase
+    // Fetch report data and verify ownership
+    const { data: report, error: dbError } = await serviceClient
       .from("research_reports")
-      .select("question, results, normalized_query")
+      .select("question, results, normalized_query, user_id")
       .eq("id", report_id)
       .single();
 
-    if (dbError || !report?.results) {
+    if (dbError || !report?.results || report.user_id !== userId) {
       return new Response(
-        JSON.stringify({ error: "Report not found or has no results" }),
+        JSON.stringify({ error: "Report not found" }),
         { status: 404, headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
     }
 
-    // Build context from study data
-    const studies = report.results as any[];
+    // Build context from top-10 complete studies (same as synthesize-papers)
+    const allStudies = report.results as any[];
+    const queryText = (report.normalized_query || report.question || "").toLowerCase();
+
+    const completeStudies = allStudies.filter(isCompleteStudy);
+    const ranked = completeStudies
+      .map(s => ({ ...s, _score: scoreStudy(s, queryText) }))
+      .sort((a, b) => b._score - a._score);
+    const studies = ranked.slice(0, 10).map(({ _score, ...s }) => s);
+
     const studyContext = studies
       .map((s: any, i: number) => {
         const outcomes = (s.outcomes || [])
@@ -88,15 +145,19 @@ ${outcomes}`;
 
     const systemPrompt = `You are a research assistant helping a user understand the findings from a systematic evidence review on the question: "${report.question}"${report.normalized_query ? ` (normalized: "${report.normalized_query}")` : ""}.
 
-Below are all ${studies.length} studies extracted from this review. You MUST only reference information present in these studies. Always cite studies by their title and year. If the user asks something not covered by the data, say so.
+Below are the top ${studies.length} studies (out of ${allStudies.length} total) selected for completeness and relevance. You MUST only reference information present in these studies.
 
 --- STUDY DATA ---
 ${studyContext}
 --- END STUDY DATA ---
 
+CRITICAL CITATION RULES:
+- You MUST cite every factual claim using the format (Title, Year) — e.g. ("Effect of X on Y", 2022).
+- If you cannot cite a specific study for a claim, DO NOT make that claim.
+- Do NOT invent findings, statistics, or data points not present in the study data above.
+
 Guidelines:
 - Ground every claim in specific study data above
-- Use citations like (Author/Title, Year) when referencing findings
 - If asked to compare studies, use the actual outcomes and sample sizes
 - Be concise but thorough
 - Format responses with markdown for readability`;
