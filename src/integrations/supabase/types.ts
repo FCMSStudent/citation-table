@@ -14,7 +14,51 @@ export type Database = {
   }
   public: {
     Tables: {
-      [_ in never]: never
+      research_reports: {
+        Row: {
+          arxiv_count: number | null
+          completed_at: string | null
+          created_at: string
+          error_message: string | null
+          id: string
+          normalized_query: string | null
+          openalex_count: number | null
+          question: string
+          results: Json | null
+          semantic_scholar_count: number | null
+          status: string
+          total_papers_searched: number | null
+        }
+        Insert: {
+          arxiv_count?: number | null
+          completed_at?: string | null
+          created_at?: string
+          error_message?: string | null
+          id?: string
+          normalized_query?: string | null
+          openalex_count?: number | null
+          question: string
+          results?: Json | null
+          semantic_scholar_count?: number | null
+          status?: string
+          total_papers_searched?: number | null
+        }
+        Update: {
+          arxiv_count?: number | null
+          completed_at?: string | null
+          created_at?: string
+          error_message?: string | null
+          id?: string
+          normalized_query?: string | null
+          openalex_count?: number | null
+          question?: string
+          results?: Json | null
+          semantic_scholar_count?: number | null
+          status?: string
+          total_papers_searched?: number | null
+        }
+        Relationships: []
+      }
     }
     Views: {
       [_ in never]: never
