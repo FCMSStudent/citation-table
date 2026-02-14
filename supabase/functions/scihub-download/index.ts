@@ -243,8 +243,8 @@ serve(async (req) => {
     })();
 
     // Use EdgeRuntime.waitUntil if available
-    if (typeof (globalThis as any).EdgeRuntime !== "undefined" && (globalThis as any).EdgeRuntime.waitUntil) {
-      (globalThis as any).EdgeRuntime.waitUntil(backgroundWork);
+    if (typeof (globalThis as Record<string, unknown>).EdgeRuntime !== "undefined" && (globalThis as { EdgeRuntime?: { waitUntil?: (p: Promise<void>) => void } }).EdgeRuntime?.waitUntil) {
+      (globalThis as { EdgeRuntime: { waitUntil: (p: Promise<void>) => void } }).EdgeRuntime.waitUntil(backgroundWork);
     } else {
       backgroundWork.catch(console.error);
     }

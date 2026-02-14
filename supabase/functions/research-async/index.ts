@@ -98,8 +98,8 @@ serve(async (req) => {
           // Trigger PDF downloads for DOIs
           const results = data.results || [];
           const dois = results
-            .map((r: any) => r.citation?.doi)
-            .filter((doi: any) => doi && doi.trim());
+            .map((r: { citation?: { doi?: string } }) => r.citation?.doi)
+            .filter((doi: string | undefined): doi is string => doi !== undefined && doi.trim() !== '');
           
           if (dois.length > 0) {
             console.log(`[research-async] Triggering PDF download for ${dois.length} DOIs`);
@@ -132,8 +132,8 @@ serve(async (req) => {
     })();
 
     // Use EdgeRuntime.waitUntil if available, otherwise just fire-and-forget
-    if (typeof (globalThis as any).EdgeRuntime !== "undefined" && (globalThis as any).EdgeRuntime.waitUntil) {
-      (globalThis as any).EdgeRuntime.waitUntil(backgroundWork);
+    if (typeof (globalThis as Record<string, unknown>).EdgeRuntime !== "undefined" && (globalThis as { EdgeRuntime?: { waitUntil?: (p: Promise<void>) => void } }).EdgeRuntime?.waitUntil) {
+      (globalThis as { EdgeRuntime: { waitUntil: (p: Promise<void>) => void } }).EdgeRuntime.waitUntil(backgroundWork);
     } else {
       // Fallback: don't await, let it run in background
       backgroundWork.catch(console.error);
