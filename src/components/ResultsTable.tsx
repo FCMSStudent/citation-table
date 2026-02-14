@@ -1,22 +1,25 @@
 import { useMemo, useState } from 'react';
-import { Code, Download, Eye, EyeOff, FileText, Table2, List, ChevronLeft, ChevronRight } from 'lucide-react';
+import { Code, Download, Eye, EyeOff, FileText, Table2, List, ChevronLeft, ChevronRight, Grid3X3 } from 'lucide-react';
 import type { StudyResult, StudyPdf } from '@/types/research';
 import { StudyCard } from './StudyCard';
 import { SynthesisView } from './SynthesisView';
 import { TableView } from './TableView';
+import { PaperResultsTable } from './PaperResultsTable';
 import { CompareDialog } from './CompareDialog';
 import { NarrativeSynthesis } from './NarrativeSynthesis';
 import { Button } from './ui/button';
 import { downloadRISFile } from '@/lib/risExport';
 import { downloadCSV } from '@/lib/csvExport';
+import { downloadPaperCSV } from '@/lib/csvPaperExport';
 import { sortByRelevance, isLowValueStudy, getOutcomeText } from '@/utils/relevanceScore';
 import { FilterBar, type SortOption, type StudyDesignFilter } from './FilterBar';
 import { Tabs, TabsList, TabsTrigger } from './ui/tabs';
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from './ui/dropdown-menu';
 
 const OUTCOME_NORM_REGEX = /\b(symptoms?|levels?|scores?)\b/g;
 const PAGE_SIZE = 25;
 
-type ViewMode = 'synthesis' | 'table' | 'cards';
+type ViewMode = 'synthesis' | 'table' | 'pico' | 'cards';
 
 interface ResultsTableProps {
   results: StudyResult[];
@@ -122,7 +125,8 @@ export function ResultsTable({
   }, [mainStudies]);
 
   const handleExportRIS = () => downloadRISFile(mainStudies, `research-${Date.now()}.ris`);
-  const handleExportCSV = () => downloadCSV(mainStudies, `research-${Date.now()}.csv`);
+  const handleExportCSVOutcomes = () => downloadCSV(mainStudies, `research-outcomes-${Date.now()}.csv`);
+  const handleExportCSVPapers = () => downloadPaperCSV(mainStudies, `research-papers-${Date.now()}.csv`);
   const handleExportSelected = (selected: StudyResult[]) => downloadCSV(selected, `selected-${Date.now()}.csv`);
   const handleCompare = (selected: StudyResult[]) => {
     setCompareStudies(selected);
@@ -184,6 +188,9 @@ export function ResultsTable({
               <TabsTrigger value="table" className="gap-2">
                 <Table2 className="h-4 w-4" />Table
               </TabsTrigger>
+              <TabsTrigger value="pico" className="gap-2">
+                <Grid3X3 className="h-4 w-4" />PICO Table
+              </TabsTrigger>
               <TabsTrigger value="cards" className="gap-2">
                 <List className="h-4 w-4" />Cards
               </TabsTrigger>
@@ -197,9 +204,17 @@ export function ResultsTable({
                 {showExcludedStudies ? 'Hide' : 'Show'} excluded ({excludedStudies.length})
               </Button>
             )}
-            <Button onClick={handleExportCSV} variant="outline" size="sm" className="gap-2">
-              <Download className="h-4 w-4" />Export CSV
-            </Button>
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button variant="outline" size="sm" className="gap-2">
+                  <Download className="h-4 w-4" />Export CSV
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end">
+                <DropdownMenuItem onClick={handleExportCSVPapers}>CSV (Paper-level)</DropdownMenuItem>
+                <DropdownMenuItem onClick={handleExportCSVOutcomes}>CSV (Outcomes)</DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
             <Button onClick={handleExportRIS} variant="outline" size="sm" className="gap-2">
               <Download className="h-4 w-4" />Export RIS
             </Button>
@@ -233,6 +248,16 @@ export function ResultsTable({
       )}
 
       {viewMode === 'table' && (
+        <PaperResultsTable
+          studies={paginatedStudies}
+          query={activeQuery}
+          pdfsByDoi={pdfsByDoi}
+          onExportSelected={handleExportSelected}
+          onCompare={handleCompare}
+        />
+      )}
+
+      {viewMode === 'pico' && (
         <TableView
           studies={paginatedStudies}
           query={activeQuery}
