@@ -1,6 +1,21 @@
 import { useState, useEffect, useCallback } from 'react';
 import { supabase } from '@/integrations/supabase/client';
-import type { User, Session } from '@supabase/supabase-js';
+import { createClient, type User, type Session, type SupabaseClient } from '@supabase/supabase-js';
+
+const FALLBACK_URL = 'https://amzlrrrhjsqjndbrdume.supabase.co';
+const FALLBACK_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImFtemxycnJoanNxam5kYnJkdW1lIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzA0MTQ1NDIsImV4cCI6MjA4NTk5MDU0Mn0.UbmXG7RfWAQjNX9HTkCp50m_wwSFB4P40gfuqCA-f2c';
+
+let fallbackClient: SupabaseClient | null = null;
+
+function getClient(): SupabaseClient {
+  if (supabase) return supabase;
+  if (!fallbackClient) {
+    fallbackClient = createClient(FALLBACK_URL, FALLBACK_KEY, {
+      auth: { storage: localStorage, persistSession: true, autoRefreshToken: true },
+    });
+  }
+  return fallbackClient;
+}
 
 interface UseAuthReturn {
   user: User | null;
@@ -17,19 +32,15 @@ export function useAuth(): UseAuthReturn {
   const [isLoading, setIsLoading] = useState(true);
 
   useEffect(() => {
-    if (!supabase) {
-      console.warn('Supabase client not initialized');
-      setIsLoading(false);
-      return;
-    }
+    const client = getClient();
 
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+    const { data: { subscription } } = client.auth.onAuthStateChange((_event, session) => {
       setSession(session);
       setUser(session?.user ?? null);
       setIsLoading(false);
     });
 
-    supabase.auth.getSession().then(({ data: { session } }) => {
+    client.auth.getSession().then(({ data: { session } }) => {
       setSession(session);
       setUser(session?.user ?? null);
       setIsLoading(false);
@@ -39,8 +50,8 @@ export function useAuth(): UseAuthReturn {
   }, []);
 
   const signUp = useCallback(async (email: string, password: string) => {
-    if (!supabase) return { error: 'Not configured' };
-    const { error } = await supabase.auth.signUp({
+    const client = getClient();
+    const { error } = await client.auth.signUp({
       email,
       password,
       options: { emailRedirectTo: window.location.origin },
@@ -49,14 +60,14 @@ export function useAuth(): UseAuthReturn {
   }, []);
 
   const signIn = useCallback(async (email: string, password: string) => {
-    if (!supabase) return { error: 'Not configured' };
-    const { error } = await supabase.auth.signInWithPassword({ email, password });
+    const client = getClient();
+    const { error } = await client.auth.signInWithPassword({ email, password });
     return { error: error?.message ?? null };
   }, []);
 
   const signOut = useCallback(async () => {
-    if (!supabase) return;
-    await supabase.auth.signOut();
+    const client = getClient();
+    await client.auth.signOut();
   }, []);
 
   return { user, session, isLoading, signUp, signIn, signOut };
