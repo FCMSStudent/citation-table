@@ -583,6 +583,13 @@ CRITICAL EXTRACTION RULES (per meta prompt):
 10. Classify preprint_status: "Preprint" if preprint/not peer-reviewed, else "Peer-reviewed"
 11. Classify review_type: "Meta-analysis" for meta-analyses (MUST flag), "Systematic review" for systematic reviews, else "None"
 
+STUDY DESIGN CLASSIFICATION:
+- "RCT": Randomized controlled trials, clinical trials with randomization
+- "cohort": Cohort studies, longitudinal studies, prospective/retrospective follow-up studies
+- "cross-sectional": Cross-sectional surveys, prevalence studies, single time-point observations
+- "review": Narrative reviews, literature reviews, systematic reviews, meta-analyses, scoping reviews
+- "unknown": Editorials, commentaries, case reports, case series, letters to the editor, opinion pieces, guidelines, conference abstracts, or any paper that does not clearly fit one of the above designs. When in doubt, classify as "unknown".
+
 OUTPUT SCHEMA - return valid JSON array matching this exact structure:
 [{
   "study_id": "string (paper ID)",
@@ -682,7 +689,12 @@ Extract structured data from each paper's abstract following the strict rules. R
   try {
     const results = JSON.parse(jsonStr.trim());
     console.log(`[LLM] Parsed ${results.length} study results`);
-    return results;
+
+    // Post-extraction filter: exclude studies with unknown/ineligible designs
+    const allowedDesigns = new Set(["RCT", "cohort", "cross-sectional", "review"]);
+    const filtered = results.filter((s: any) => allowedDesigns.has(s.study_design));
+    console.log(`[LLM] Filtered: ${results.length} -> ${filtered.length} (removed ${results.length - filtered.length} unknown/ineligible)`);
+    return filtered;
   } catch (parseError) {
     console.error(`[LLM] JSON parse error:`, parseError);
     console.error(`[LLM] Content was:`, jsonStr.slice(0, 500));
