@@ -21,6 +21,10 @@ from scidownl import scihub_download
 STORAGE_DIR = Path(__file__).parent.parent / "storage"
 STORAGE_DIR.mkdir(exist_ok=True)
 
+# Security & Resource limits
+MAX_CONCURRENT_TASKS = 5
+MAX_TASKS_IN_MEMORY = 100
+
 # Task storage (in-memory for lightweight implementation)
 # In production, consider Redis/database for persistence
 tasks: Dict[str, dict] = {}
@@ -44,7 +48,12 @@ app.add_middleware(
 
 class DownloadRequest(BaseModel):
     """Request model for paper download."""
-    keyword: str = Field(..., description="DOI, PMID, or paper title")
+    keyword: str = Field(
+        ...,
+        min_length=3,
+        max_length=500,
+        description="DOI, PMID, or paper title"
+    )
     paper_type: str = Field(..., description="Type: 'doi', 'pmid', or 'title'")
 
 
@@ -75,56 +84,68 @@ def download_paper_task(task_id: str, keyword: str, paper_type: str):
         keyword: DOI, PMID, or paper title
         paper_type: Type of keyword ('doi', 'pmid', or 'title')
     """
+    # Create a unique directory for this task to prevent race conditions
+    task_dir = STORAGE_DIR / task_id
+
     try:
         # Update task status to processing
         with tasks_lock:
-            tasks[task_id]["status"] = "processing"
+            if task_id in tasks:
+                tasks[task_id]["status"] = "processing"
+
+        task_dir.mkdir(exist_ok=True)
         
         # Download the paper using SciDownl
         # scihub_download returns the output filename
-        output_path = str(STORAGE_DIR)
+        output_path = str(task_dir)
         
         # Download based on paper_type
-        result = scihub_download(
+        # Security: scihub_download handles its own internal security/requests
+        scihub_download(
             keyword,
             paper_type=paper_type,
             out=output_path
         )
         
-        # Find the downloaded file
-        # SciDownl creates files with sanitized names
-        downloaded_files = list(STORAGE_DIR.glob("*.pdf"))
+        # Find the downloaded file in the task-specific directory
+        downloaded_files = list(task_dir.glob("*.pdf"))
         if downloaded_files:
-            # Get the most recently modified file
+            # Get the most recently modified file in the task dir
             latest_file = max(downloaded_files, key=lambda p: p.stat().st_mtime)
             filename = latest_file.name
+
+            # Move file to STORAGE_DIR to allow access (if needed) or keep in task_dir
+            # For now, we'll keep it in task_dir but return its relative path
             filepath = str(latest_file.relative_to(STORAGE_DIR.parent))
             
             # Update task with success
             with tasks_lock:
-                tasks[task_id].update({
-                    "status": "completed",
-                    "completed_at": datetime.utcnow().isoformat(),
-                    "filename": filename,
-                    "filepath": filepath,
-                })
+                if task_id in tasks:
+                    tasks[task_id].update({
+                        "status": "completed",
+                        "completed_at": datetime.utcnow().isoformat(),
+                        "filename": filename,
+                        "filepath": filepath,
+                    })
         else:
             # No file was downloaded
             with tasks_lock:
-                tasks[task_id].update({
-                    "status": "failed",
-                    "completed_at": datetime.utcnow().isoformat(),
-                    "error": "No PDF file was downloaded. The paper may not be available.",
-                })
+                if task_id in tasks:
+                    tasks[task_id].update({
+                        "status": "failed",
+                        "completed_at": datetime.utcnow().isoformat(),
+                        "error": "No PDF file was downloaded. The paper may not be available.",
+                    })
     
     except Exception as e:
         # Handle any errors during download
         with tasks_lock:
-            tasks[task_id].update({
-                "status": "failed",
-                "completed_at": datetime.utcnow().isoformat(),
-                "error": str(e),
-            })
+            if task_id in tasks:
+                tasks[task_id].update({
+                    "status": "failed",
+                    "completed_at": datetime.utcnow().isoformat(),
+                    "error": str(e),
+                })
 
 
 @app.get("/")
@@ -173,6 +194,31 @@ async def download_paper(request: DownloadRequest):
             detail=f"Invalid paper_type. Must be one of: {', '.join(valid_types)}"
         )
     
+    # Resource limit: check concurrent tasks
+    with tasks_lock:
+        active_tasks = [t for t in tasks.values() if t["status"] in ["pending", "processing"]]
+        if len(active_tasks) >= MAX_CONCURRENT_TASKS:
+            raise HTTPException(
+                status_code=429,
+                detail="Too many concurrent download tasks. Please try again later."
+            )
+
+        # Security: Cleanup old tasks to prevent memory exhaustion
+        if len(tasks) >= MAX_TASKS_IN_MEMORY:
+            # Remove oldest 20% of tasks
+            sorted_tasks = sorted(tasks.values(), key=lambda x: x["created_at"])
+            num_to_remove = int(MAX_TASKS_IN_MEMORY * 0.2)
+            removed_count = 0
+            for i in range(len(sorted_tasks)):
+                if removed_count >= num_to_remove:
+                    break
+
+                task_to_remove = sorted_tasks[i]["task_id"]
+                # Don't remove currently processing tasks if possible
+                if sorted_tasks[i]["status"] not in ["pending", "processing"]:
+                    tasks.pop(task_to_remove, None)
+                    removed_count += 1
+
     # Generate unique task ID
     task_id = str(uuid.uuid4())
     
