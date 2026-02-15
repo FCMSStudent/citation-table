@@ -19,6 +19,39 @@ interface DownloadRequest {
   user_id?: string;
 }
 
+interface StudyOutcome {
+  outcome_measured: string;
+  key_result: string | null;
+  citation_snippet: string;
+  intervention: string | null;
+  comparator: string | null;
+  effect_size: string | null;
+  p_value: string | null;
+}
+
+interface ReportStudy {
+  study_id: string;
+  title: string;
+  year: number;
+  study_design: "RCT" | "cohort" | "cross-sectional" | "review" | "unknown";
+  sample_size: number | null;
+  population: string | null;
+  outcomes: StudyOutcome[];
+  citation: {
+    doi: string | null;
+    pubmed_id: string | null;
+    openalex_id: string | null;
+    formatted: string;
+  };
+  abstract_excerpt: string;
+  preprint_status: "Preprint" | "Peer-reviewed";
+  review_type: "None" | "Systematic review" | "Meta-analysis";
+  source: "openalex" | "semantic_scholar" | "arxiv" | "pubmed";
+  citationCount?: number;
+  pdf_url?: string | null;
+  landing_page_url?: string | null;
+}
+
 /**
  * Helper to use EdgeRuntime.waitUntil if available, otherwise use fire-and-forget
  */
@@ -39,6 +72,175 @@ function normalizeDoi(doi: string): string {
     .replace(/^https?:\/\/(dx\.)?doi\.org\//i, "")
     .replace(/^doi:\s*/i, "")
     .trim();
+}
+
+function arrayBufferToBase64(data: ArrayBuffer): string {
+  const bytes = new Uint8Array(data);
+  const chunkSize = 0x8000;
+  let binary = "";
+  for (let i = 0; i < bytes.length; i += chunkSize) {
+    const chunk = bytes.subarray(i, i + chunkSize);
+    binary += String.fromCharCode(...chunk);
+  }
+  return btoa(binary);
+}
+
+function findStudiesByDoi(results: unknown, doi: string): Array<{ index: number; study: ReportStudy }> {
+  if (!Array.isArray(results)) return [];
+
+  const normalizedTarget = normalizeDoi(doi).toLowerCase();
+  return results
+    .map((item, index) => ({ item, index }))
+    .filter(({ item }) => {
+      if (!item || typeof item !== "object") return false;
+      const candidateDoi = (item as ReportStudy)?.citation?.doi;
+      return typeof candidateDoi === "string" && normalizeDoi(candidateDoi).toLowerCase() === normalizedTarget;
+    })
+    .map(({ item, index }) => ({ index, study: item as ReportStudy }));
+}
+
+async function reExtractStudyFromPdf(
+  supabase: ReturnType<typeof createClient>,
+  reportId: string,
+  doi: string,
+  pdfData: ArrayBuffer,
+): Promise<void> {
+  const geminiApiKey = Deno.env.get("GOOGLE_GEMINI_API_KEY");
+  if (!geminiApiKey) {
+    console.log("[scihub-download] GOOGLE_GEMINI_API_KEY not set; skipping PDF re-extraction");
+    return;
+  }
+
+  if (pdfData.byteLength > 18 * 1024 * 1024) {
+    console.log(`[scihub-download] PDF too large (${pdfData.byteLength} bytes); skipping re-extraction`);
+    return;
+  }
+
+  const { data: report, error: reportError } = await supabase
+    .from("research_reports")
+    .select("question, results")
+    .eq("id", reportId)
+    .single();
+
+  if (reportError || !report?.results) {
+    console.error("[scihub-download] Could not load report results for re-extraction:", reportError);
+    return;
+  }
+
+  const matchingStudies = findStudiesByDoi(report.results, doi);
+  if (matchingStudies.length === 0) {
+    console.log(`[scihub-download] No matching study with DOI ${doi} in report results`);
+    return;
+  }
+
+  const geminiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${geminiApiKey}`;
+  const pdfBase64 = arrayBufferToBase64(pdfData);
+  const updatedResults = Array.isArray(report.results) ? [...report.results] : [];
+
+  for (const { index, study } of matchingStudies) {
+    const systemPrompt = `You are an evidence extraction assistant.
+
+Given a single research study and its full-text PDF, improve extraction quality using PDF evidence.
+Rules:
+- Prefer explicit data from the PDF full text over the previous abstract-only extraction.
+- Never infer unavailable values.
+- Preserve identifiers (study_id, DOI, source).
+- Return ONLY a valid JSON object for this study with this exact schema:
+{
+  "study_id": "string",
+  "title": "string",
+  "year": number,
+  "study_design": "RCT" | "cohort" | "cross-sectional" | "review" | "unknown",
+  "sample_size": number | null,
+  "population": "string" | null,
+  "outcomes": [{
+    "outcome_measured": "string",
+    "key_result": "string" | null,
+    "citation_snippet": "string",
+    "intervention": "string" | null,
+    "comparator": "string" | null,
+    "effect_size": "string" | null,
+    "p_value": "string" | null
+  }],
+  "citation": {
+    "doi": "string" | null,
+    "pubmed_id": "string" | null,
+    "openalex_id": "string" | null,
+    "formatted": "string"
+  },
+  "abstract_excerpt": "string",
+  "preprint_status": "Preprint" | "Peer-reviewed",
+  "review_type": "None" | "Systematic review" | "Meta-analysis",
+  "source": "openalex" | "semantic_scholar" | "arxiv" | "pubmed",
+  "citationCount": number | null
+}`;
+
+    const userPrompt = `Research question: ${report.question || "Not provided"}
+
+Current extracted study JSON (update this with PDF evidence):
+${JSON.stringify(study, null, 2)}`;
+
+    try {
+      const response = await fetch(geminiUrl, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          contents: [{
+            role: "user",
+            parts: [
+              { text: `${systemPrompt}\n\n${userPrompt}` },
+              { inlineData: { mimeType: "application/pdf", data: pdfBase64 } },
+            ],
+          }],
+          generationConfig: { temperature: 0.1, responseMimeType: "application/json" },
+        }),
+      });
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        console.error(`[scihub-download] Gemini PDF re-extraction failed (${response.status}):`, errorText);
+        continue;
+      }
+
+      const payload = await response.json();
+      const raw = payload?.candidates?.[0]?.content?.parts?.[0]?.text;
+      if (!raw || typeof raw !== "string") {
+        console.error("[scihub-download] Gemini returned no text for PDF re-extraction");
+        continue;
+      }
+
+      let jsonStr = raw.trim();
+      if (jsonStr.startsWith("```json")) jsonStr = jsonStr.slice(7);
+      if (jsonStr.startsWith("```")) jsonStr = jsonStr.slice(3);
+      if (jsonStr.endsWith("```")) jsonStr = jsonStr.slice(0, -3);
+
+      const parsedStudy = JSON.parse(jsonStr.trim()) as ReportStudy;
+      updatedResults[index] = {
+        ...updatedResults[index],
+        ...parsedStudy,
+        citation: {
+          ...(study.citation || {}),
+          ...(parsedStudy.citation || {}),
+          doi: parsedStudy.citation?.doi || study.citation?.doi || doi,
+        },
+        source: study.source,
+        study_id: study.study_id,
+      };
+
+      console.log(`[scihub-download] Re-extracted study ${study.study_id} from PDF`);
+    } catch (err) {
+      console.error(`[scihub-download] Failed to re-extract study ${study.study_id}:`, err);
+    }
+  }
+
+  const { error: updateError } = await supabase
+    .from("research_reports")
+    .update({ results: updatedResults })
+    .eq("id", reportId);
+
+  if (updateError) {
+    console.error("[scihub-download] Failed to persist PDF re-extracted studies:", updateError);
+  }
 }
 
 /**
@@ -138,7 +340,7 @@ async function downloadPdfFromScihub(doi: string): Promise<{ success: boolean; p
 }
 
 async function checkRateLimit(
-  supabase: any, functionName: string, clientIp: string, maxRequests: number, windowMinutes: number
+  supabase: ReturnType<typeof createClient>, functionName: string, clientIp: string, maxRequests: number, windowMinutes: number
 ): Promise<boolean> {
   const windowStart = new Date(Date.now() - windowMinutes * 60_000).toISOString();
   const { count, error } = await supabase
@@ -289,6 +491,8 @@ serve(async (req) => {
               })
               .eq("report_id", report_id)
               .eq("doi", normalizedDoi);
+
+            await reExtractStudyFromPdf(supabase, report_id, normalizedDoi, result.pdfData);
 
             console.log(`[scihub-download] Successfully processed ${normalizedDoi}`);
 
