@@ -36,7 +36,7 @@ interface StudyResult {
   abstract_excerpt: string;
   preprint_status: "Preprint" | "Peer-reviewed";
   review_type: "None" | "Systematic review" | "Meta-analysis";
-  source: "openalex" | "semantic_scholar" | "arxiv";
+  source: "openalex" | "semantic_scholar" | "arxiv" | "pubmed";
   citationCount?: number;
 }
 
@@ -81,7 +81,7 @@ interface UnifiedPaper {
   doi: string | null;
   pubmed_id: string | null;
   openalex_id: string | null;
-  source: "openalex" | "semantic_scholar" | "arxiv";
+  source: "openalex" | "semantic_scholar" | "arxiv" | "pubmed";
   citationCount?: number;
   publicationTypes?: string[];
   journal?: string;
@@ -175,7 +175,7 @@ const BIOMEDICAL_SYNONYMS: Record<string, string[]> = {
 };
 
 type ExpansionMode = "balanced" | "broad";
-type SearchSource = "semantic_scholar" | "openalex" | "arxiv";
+type SearchSource = "semantic_scholar" | "openalex" | "arxiv" | "pubmed";
 
 interface PreparedSourceQuery {
   source: SearchSource;
@@ -454,6 +454,114 @@ async function searchArxiv(query: string, mode: ExpansionMode = "balanced"): Pro
   }
 }
 
+// ─── PubMed Search ──────────────────────────────────────────────────────────
+
+async function searchPubMed(query: string, mode: ExpansionMode = "balanced"): Promise<UnifiedPaper[]> {
+  const prepared = buildSourceQuery(query, "pubmed", mode);
+  if (!prepared.apiQuery) return [];
+  const encodedQuery = encodeURIComponent(prepared.apiQuery);
+
+  console.log(`[PubMed] Searching original="${prepared.originalKeywordQuery}" expanded="${prepared.expandedKeywordQuery}" api="${prepared.apiQuery}"`);
+
+  try {
+    const esearchUrl = `https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esearch.fcgi?db=pubmed&term=${encodedQuery}&retmax=25&retmode=json`;
+    const esearchRes = await fetch(esearchUrl);
+    if (!esearchRes.ok) {
+      console.error(`[PubMed] ESearch error: ${esearchRes.status}`);
+      return [];
+    }
+    const esearchData = await esearchRes.json();
+    const pmids: string[] = esearchData?.esearchresult?.idlist || [];
+    if (pmids.length === 0) {
+      console.log(`[PubMed] No results found`);
+      return [];
+    }
+    console.log(`[PubMed] ESearch returned ${pmids.length} PMIDs`);
+
+    await new Promise(resolve => setTimeout(resolve, 350));
+
+    const efetchUrl = `https://eutils.ncbi.nlm.nih.gov/entrez/eutils/efetch.fcgi?db=pubmed&id=${pmids.join(",")}&rettype=xml`;
+    const efetchRes = await fetch(efetchUrl);
+    if (!efetchRes.ok) {
+      console.error(`[PubMed] EFetch error: ${efetchRes.status}`);
+      return [];
+    }
+    const xmlText = await efetchRes.text();
+
+    const articleRegex = /<PubmedArticle>([\s\S]*?)<\/PubmedArticle>/g;
+    const papers: UnifiedPaper[] = [];
+    let match;
+
+    while ((match = articleRegex.exec(xmlText)) !== null) {
+      const article = match[1];
+      const getTag = (tag: string, context: string = article): string => {
+        const m = context.match(new RegExp(`<${tag}[^>]*>([\\s\\S]*?)<\\/${tag}>`));
+        return m ? m[1].trim().replace(/\s+/g, " ") : "";
+      };
+
+      const pmid = getTag("PMID");
+      let title = getTag("ArticleTitle").replace(/<[^>]+>/g, "");
+      if (!title) continue;
+
+      let abstract = "";
+      const abstractSection = article.match(/<Abstract>([\s\S]*?)<\/Abstract>/);
+      if (abstractSection) {
+        const abstractTextRegex = /<AbstractText[^>]*>([\s\S]*?)<\/AbstractText>/g;
+        const parts: string[] = [];
+        let atMatch;
+        while ((atMatch = abstractTextRegex.exec(abstractSection[1])) !== null) {
+          parts.push(atMatch[1].trim().replace(/<[^>]+>/g, ""));
+        }
+        abstract = parts.join(" ").replace(/\s+/g, " ").trim();
+      }
+      if (abstract.length < 50) continue;
+
+      let year = new Date().getFullYear();
+      const pubDateMatch = article.match(/<PubDate[^>]*>[\s\S]*?<Year>(\d{4})<\/Year>/);
+      if (pubDateMatch) year = parseInt(pubDateMatch[1]);
+      else {
+        const articleDateMatch = article.match(/<ArticleDate[^>]*>[\s\S]*?<Year>(\d{4})<\/Year>/);
+        if (articleDateMatch) year = parseInt(articleDateMatch[1]);
+      }
+
+      const authorRegex2 = /<Author[^>]*>[\s\S]*?<LastName>([^<]+)<\/LastName>[\s\S]*?<ForeName>([^<]*)<\/ForeName>/g;
+      const authors: string[] = [];
+      let authorMatch;
+      while ((authorMatch = authorRegex2.exec(article)) !== null) {
+        authors.push(`${authorMatch[2].trim()} ${authorMatch[1].trim()}`);
+      }
+
+      let doi: string | null = null;
+      const doiMatch = article.match(/<ArticleId IdType="doi">([^<]+)<\/ArticleId>/);
+      if (doiMatch) doi = doiMatch[1].trim();
+
+      const journal = getTag("Title");
+
+      papers.push({
+        id: pmid,
+        title,
+        year,
+        abstract,
+        authors: authors.length > 0 ? authors : ["Unknown"],
+        venue: journal,
+        doi,
+        pubmed_id: pmid,
+        openalex_id: null,
+        source: "pubmed" as const,
+        citationCount: undefined,
+        publicationTypes: undefined,
+        journal,
+      });
+    }
+
+    console.log(`[PubMed] Found ${papers.length} papers`);
+    return papers;
+  } catch (error) {
+    console.error(`[PubMed] Error:`, error);
+    return [];
+  }
+}
+
 // Deduplicate and merge papers from both sources (Semantic Scholar preferred)
 function normalizeTitleForDedup(title: string): string {
   return title
@@ -512,11 +620,11 @@ function mergePaperMetadata(existingPaper: UnifiedPaper, incomingPaper: UnifiedP
   if (incomingPaper.landingPageUrl && !existingPaper.landingPageUrl) existingPaper.landingPageUrl = incomingPaper.landingPageUrl;
 }
 
-function deduplicateAndMerge(s2Papers: UnifiedPaper[], openAlexPapers: UnifiedPaper[], arxivPapers: UnifiedPaper[]): UnifiedPaper[] {
+function deduplicateAndMerge(s2Papers: UnifiedPaper[], openAlexPapers: UnifiedPaper[], arxivPapers: UnifiedPaper[], pubmedPapers: UnifiedPaper[] = []): UnifiedPaper[] {
   const doiMap = new Map<string, UnifiedPaper>();
   const titleMap = new Map<string, UnifiedPaper>();
   const uniquePapers = new Set<UnifiedPaper>();
-  const allPapers = [...s2Papers, ...openAlexPapers, ...arxivPapers];
+  const allPapers = [...s2Papers, ...openAlexPapers, ...arxivPapers, ...pubmedPapers];
 
   for (const paper of allPapers) {
     const normalizedTitle = normalizeTitleForDedup(paper.title);
@@ -812,7 +920,7 @@ OUTPUT SCHEMA - return valid JSON array matching this exact structure:
   "abstract_excerpt": "representative excerpt from abstract",
   "preprint_status": "Preprint" | "Peer-reviewed",
   "review_type": "None" | "Systematic review" | "Meta-analysis",
-  "source": "openalex" | "semantic_scholar" | "arxiv",
+  "source": "openalex" | "semantic_scholar" | "arxiv" | "pubmed",
   "citationCount": number | null
 }]
 
@@ -964,11 +1072,12 @@ serve(async (req) => {
     const s2Papers = await searchSemanticScholar(searchQuery);
     const openAlexPapers = await searchOpenAlex(searchQuery);
     const arxivPapers = await searchArxiv(searchQuery);
-    const totalFetched = s2Papers.length + openAlexPapers.length + arxivPapers.length;
-    console.log(`[Research] Stage stats: fetched=${totalFetched} (s2=${s2Papers.length}, openalex=${openAlexPapers.length}, arxiv=${arxivPapers.length})`);
+    const pubmedPapers = await searchPubMed(searchQuery);
+    const totalFetched = s2Papers.length + openAlexPapers.length + arxivPapers.length + pubmedPapers.length;
+    console.log(`[Research] Stage stats: fetched=${totalFetched} (s2=${s2Papers.length}, openalex=${openAlexPapers.length}, arxiv=${arxivPapers.length}, pubmed=${pubmedPapers.length})`);
 
     // Step 3: Deduplicate and merge (Semantic Scholar results prioritized)
-    const allPapers = deduplicateAndMerge(s2Papers, openAlexPapers, arxivPapers);
+    const allPapers = deduplicateAndMerge(s2Papers, openAlexPapers, arxivPapers, pubmedPapers);
     console.log(`[Research] Stage stats: deduped=${allPapers.length}`);
     
     if (allPapers.length === 0) {
@@ -981,6 +1090,7 @@ serve(async (req) => {
           openalex_count: 0,
           semantic_scholar_count: 0,
           arxiv_count: 0,
+          pubmed_count: 0,
           message: "No eligible studies matching the query were identified in the searched sources." 
         }),
         { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } }
@@ -1001,9 +1111,10 @@ serve(async (req) => {
           query: question,
           normalized_query: wasNormalized ? normalized : undefined,
           total_papers_searched: allPapers.length,
-          openalex_count: combinedOpenAlex.length,
-          semantic_scholar_count: combinedS2.length,
-          arxiv_count: combinedArxiv.length,
+          openalex_count: openAlexPapers.length,
+          semantic_scholar_count: s2Papers.length,
+          arxiv_count: arxivPapers.length,
+          pubmed_count: pubmedPapers.length,
           message: "No eligible studies matching the query were identified in the searched sources." 
         }),
         { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } }
@@ -1040,9 +1151,10 @@ serve(async (req) => {
         query: question,
         normalized_query: wasNormalized ? normalized : undefined,
         total_papers_searched: allPapers.length,
-        openalex_count: combinedOpenAlex.length,
-        semantic_scholar_count: combinedS2.length,
-        arxiv_count: combinedArxiv.length,
+        openalex_count: openAlexPapers.length,
+        semantic_scholar_count: s2Papers.length,
+        arxiv_count: arxivPapers.length,
+        pubmed_count: pubmedPapers.length,
       }),
       { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } }
     );

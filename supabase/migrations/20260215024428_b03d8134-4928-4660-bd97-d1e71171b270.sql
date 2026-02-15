@@ -1,0 +1,1 @@
+ALTER TABLE public.research_reports ADD COLUMN pubmed_count integer DEFAULT 0;

@@ -29,7 +29,7 @@ export interface StudyResult {
   abstract_excerpt: string;
   preprint_status: "Preprint" | "Peer-reviewed";
   review_type: "None" | "Systematic review" | "Meta-analysis";
-  source: "openalex" | "semantic_scholar" | "arxiv"; // Track data source
+  source: "openalex" | "semantic_scholar" | "arxiv" | "pubmed"; // Track data source
   citationCount?: number; // Available from Semantic Scholar
   pdf_url?: string | null; // Open-access PDF URL
   landing_page_url?: string | null; // Publisher or S2 landing page URL
@@ -43,6 +43,7 @@ export interface ResearchResponse {
   openalex_count?: number; // Breakdown by source
   semantic_scholar_count?: number;
   arxiv_count?: number;
+  pubmed_count?: number;
   message?: string;
   error?: string;
 }
