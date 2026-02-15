@@ -1,6 +1,41 @@
-# Eureka
+# Eureka: Federated Literature Search with AI-Powered Evidence Synthesis
 
 Evidence-focused literature search app built with React + Supabase Edge Functions.
+
+## 📚 Proof of Concept Documentation
+
+This repository contains a production-ready implementation of Eureka, a federated literature search system with AI-powered evidence extraction and citation anchoring. For comprehensive documentation:
+
+- **[Proof of Concept Overview](./PROOF_OF_CONCEPT.md)** - Complete system documentation, evaluation results, and academic context
+- **[System Architecture](./ARCHITECTURE.md)** - Detailed architecture diagrams and data flow documentation
+- **[Examples & Demonstrations](./EXAMPLES.md)** - Real-world examples across different query types and domains
+
+## 🎯 Quick Start Demo
+
+Try these example queries to see Eureka in action:
+
+```bash
+# Biomedical query with quality filtering
+POST /v1/lit/search
+{
+  "query": "metformin for type 2 diabetes",
+  "filters": { "year_min": 2020, "min_citations": 10 }
+}
+
+# Comparative query (automatically normalized)
+POST /v1/lit/search
+{
+  "query": "What is better than statins for cholesterol?",
+  "filters": { "include_preprints": true }
+}
+
+# Cross-domain interdisciplinary query
+POST /v1/lit/search
+{
+  "query": "machine learning for drug discovery",
+  "filters": { "year_min": 2020 }
+}
+```
 
 ## What this implementation provides
 
