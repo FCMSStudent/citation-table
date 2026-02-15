@@ -4,11 +4,17 @@ Evidence-focused literature search app built with React + Supabase Edge Function
 
 ## 📚 Proof of Concept Documentation
 
-This repository contains a production-ready implementation of Eureka, a federated literature search system with AI-powered evidence extraction and citation anchoring. For comprehensive documentation:
+**🔍 [START HERE: Complete Documentation Index](./INDEX.md)**
 
+This repository contains a production-ready implementation of Eureka, a federated literature search system with AI-powered evidence extraction and citation anchoring. 
+
+### Key Documentation:
+- **[INDEX.md](./INDEX.md)** - Navigation guide to all documentation
 - **[Proof of Concept Overview](./PROOF_OF_CONCEPT.md)** - Complete system documentation, evaluation results, and academic context
 - **[System Architecture](./ARCHITECTURE.md)** - Detailed architecture diagrams and data flow documentation
 - **[Examples & Demonstrations](./EXAMPLES.md)** - Real-world examples across different query types and domains
+- **[Demo Script](./DEMO_SCRIPT.md)** - Step-by-step demonstration guide for presentations
+- **[Evaluation Framework](./EVALUATION.md)** - Comprehensive testing methodology and validation results
 
 ## 🎯 Quick Start Demo
 
