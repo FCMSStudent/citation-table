@@ -12,6 +12,7 @@ import { downloadRISFile } from '@/lib/risExport';
 import { downloadCSV } from '@/lib/csvExport';
 import { downloadPaperCSV } from '@/lib/csvPaperExport';
 import { sortByRelevance, isLowValueStudy, getOutcomeText } from '@/utils/relevanceScore';
+import { isCompleteStudy } from '@/utils/isCompleteStudy';
 import { FilterBar, type SortOption, type StudyDesignFilter } from './FilterBar';
 import { Tabs, TabsList, TabsTrigger } from './ui/tabs';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from './ui/dropdown-menu';
@@ -59,12 +60,12 @@ export function ResultsTable({
 
   const activeQuery = normalizedQuery || query;
 
-  const filteredByAbstract = useMemo(() =>
-    results.filter(s => s.abstract_excerpt && s.abstract_excerpt.trim().length >= 50),
+  const completeStudies = useMemo(() =>
+    results.filter(isCompleteStudy),
     [results]
   );
 
-  const scoredResults = useMemo(() => sortByRelevance(filteredByAbstract, activeQuery), [filteredByAbstract, activeQuery]);
+  const scoredResults = useMemo(() => sortByRelevance(completeStudies, activeQuery), [completeStudies, activeQuery]);
 
   const { mainStudies, excludedStudies } = useMemo(() => {
     const main: typeof scoredResults = [];

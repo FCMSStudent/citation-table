@@ -121,7 +121,7 @@ export function PaperResultsTable({ studies, query, pdfsByDoi = {}, onExportSele
               .filter(o => o.key_result && /limit/i.test(o.key_result))
               .map(o => o.key_result!);
 
-            const conclusion = outcomes.find(o => o.key_result)?.key_result || study.abstract_excerpt || '';
+            const conclusion = study.abstract_excerpt ? truncate(study.abstract_excerpt, 120) : '—';
 
             return (
               <DataTableRow key={study.study_id} isSelected={isSelected}>
@@ -134,7 +134,7 @@ export function PaperResultsTable({ studies, query, pdfsByDoi = {}, onExportSele
                     title={study.title}
                     citation={study.citation.formatted}
                     year={study.year}
-                    citationCount={study.citationCount}
+                    citationCount={study.citationCount ?? 0}
                     preprintStatus={study.preprint_status}
                     doi={study.citation.doi}
                   />
@@ -182,11 +182,11 @@ export function PaperResultsTable({ studies, query, pdfsByDoi = {}, onExportSele
                     <ul className="list-disc pl-3.5 space-y-0.5">
                       {limitations.map((l, i) => <li key={i}>{truncate(l, 80)}</li>)}
                     </ul>
-                  ) : <span className="text-xs italic">Not reported</span>}
+                  ) : <span className="text-xs italic">Not explicitly reported</span>}
                 </td>
 
                 <td className="p-2.5 align-top text-muted-foreground">
-                  {truncate(conclusion, 120) || '—'}
+                  {conclusion}
                 </td>
 
                 <td className="p-2.5 align-top">
