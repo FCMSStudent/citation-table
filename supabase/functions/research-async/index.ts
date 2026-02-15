@@ -1383,7 +1383,7 @@ function scheduleBackgroundWork(work: Promise<void>): void {
 
 // ─── Rate Limiting ───────────────────────────────────────────────────────────
 
-type SupabaseClientLike = ReturnType<typeof createClient>;
+type SupabaseClientLike = any;
 
 async function checkRateLimit(
   supabase: SupabaseClientLike,
@@ -1517,7 +1517,7 @@ async function readCachedSearch(
     return null;
   }
 
-  return data?.response_payload || null;
+  return (data?.response_payload as SearchResponsePayload) || null;
 }
 
 async function writeSearchCache(

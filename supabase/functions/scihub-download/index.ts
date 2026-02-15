@@ -340,7 +340,7 @@ async function downloadPdfFromScihub(doi: string): Promise<{ success: boolean; p
 }
 
 async function checkRateLimit(
-  supabase: ReturnType<typeof createClient>, functionName: string, clientIp: string, maxRequests: number, windowMinutes: number
+  supabase: any, functionName: string, clientIp: string, maxRequests: number, windowMinutes: number
 ): Promise<boolean> {
   const windowStart = new Date(Date.now() - windowMinutes * 60_000).toISOString();
   const { count, error } = await supabase
