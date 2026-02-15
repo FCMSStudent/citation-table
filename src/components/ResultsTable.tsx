@@ -1,6 +1,6 @@
 import { useMemo, useState, useEffect } from 'react';
 import { Code, Download, Eye, EyeOff, FileText, Table2, List, ChevronLeft, ChevronRight, Grid3X3 } from 'lucide-react';
-import type { StudyResult, StudyPdf } from '@/types/research';
+import type { ClaimSentence, CoverageReport, EvidenceRow, SearchStats, StudyResult, StudyPdf } from '@/types/research';
 import { StudyCard } from './StudyCard';
 import { SynthesisView } from './SynthesisView';
 import { TableView } from './TableView';
@@ -30,9 +30,14 @@ interface ResultsTableProps {
   openalexCount?: number;
   semanticScholarCount?: number;
   arxivCount?: number;
+  pubmedCount?: number;
   pdfsByDoi?: Record<string, StudyPdf>;
   reportId?: string;
   cachedSynthesis?: string | null;
+  evidenceTable?: EvidenceRow[] | null;
+  briefSentences?: ClaimSentence[] | null;
+  coverageReport?: CoverageReport | null;
+  searchStats?: SearchStats | null;
 }
 
 export function ResultsTable({
@@ -43,9 +48,14 @@ export function ResultsTable({
   openalexCount,
   semanticScholarCount,
   arxivCount,
+  pubmedCount,
   pdfsByDoi = {},
   reportId,
   cachedSynthesis,
+  evidenceTable,
+  briefSentences,
+  coverageReport,
+  searchStats,
 }: ResultsTableProps) {
   const [viewMode, setViewMode] = useState<ViewMode>('synthesis');
   const [showExcludedStudies, setShowExcludedStudies] = useState(false);
@@ -160,13 +170,36 @@ export function ResultsTable({
           <div>
             Found <strong>{mainStudies.length}</strong> relevant {mainStudies.length === 1 ? 'study' : 'studies'} from{' '}
             <strong>{totalPapersSearched}</strong> papers
-            {(openalexCount !== undefined || semanticScholarCount !== undefined || arxivCount !== undefined) && (
+            {(openalexCount !== undefined || semanticScholarCount !== undefined || arxivCount !== undefined || pubmedCount !== undefined) && (
               <span className="ml-2 text-xs">
-                ({openalexCount || 0} OpenAlex, {semanticScholarCount || 0} Semantic Scholar, {arxivCount || 0} arXiv)
+                ({openalexCount || 0} OpenAlex, {semanticScholarCount || 0} Semantic Scholar, {arxivCount || 0} arXiv, {pubmedCount || 0} PubMed)
               </span>
             )}
           </div>
         </div>
+
+        {(briefSentences?.length || evidenceTable?.length || coverageReport || searchStats) && (
+          <div className="rounded-lg border border-primary/20 bg-primary/5 p-4">
+            <h3 className="mb-2 text-sm font-semibold text-foreground">Multi-source Brief</h3>
+            {briefSentences?.slice(0, 3).map((sentence, idx) => (
+              <p key={`${idx}-${sentence.text.slice(0, 32)}`} className="mb-2 text-sm text-muted-foreground last:mb-0">
+                {sentence.text}{" "}
+                <span className="text-xs">
+                  ({sentence.citations.length} citation{sentence.citations.length === 1 ? "" : "s"})
+                </span>
+              </p>
+            ))}
+            <div className="mt-3 flex flex-wrap gap-3 text-xs text-muted-foreground">
+              {coverageReport && (
+                <span>
+                  Coverage: {coverageReport.providers_queried - coverageReport.providers_failed}/{coverageReport.providers_queried} providers healthy
+                </span>
+              )}
+              {evidenceTable && <span>Evidence rows: {evidenceTable.length}</span>}
+              {searchStats && <span>Pipeline latency: {Math.round(searchStats.latency_ms / 1000)}s</span>}
+            </div>
+          </div>
+        )}
 
         {reportId ? (
           <NarrativeSynthesis

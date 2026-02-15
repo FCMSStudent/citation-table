@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import { getSupabase } from '@/integrations/supabase/fallback';
-import type { QueryProcessingMeta, StudyResult } from '@/types/research';
+import type { CoverageReport, EvidenceRow, QueryProcessingMeta, SearchStats, StudyResult, ClaimSentence } from '@/types/research';
 
 interface Report {
   id: string;
@@ -18,6 +18,11 @@ interface Report {
   completed_at: string | null;
   narrative_synthesis?: string | null;
   query_processing_meta?: QueryProcessingMeta | null;
+  coverage_report?: CoverageReport | null;
+  evidence_table?: EvidenceRow[] | null;
+  brief_json?: { sentences: ClaimSentence[] } | null;
+  search_stats?: SearchStats | null;
+  lit_response?: unknown;
 }
 
 interface UseReportReturn {
