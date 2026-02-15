@@ -7,12 +7,20 @@ const corsHeaders = {
     "authorization, x-client-info, apikey, content-type, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version",
 };
 
+const SYNTHESIS_MAX_CONTEXT_STUDIES = 15;
+const SYNTHESIS_STRICT_TARGET = 10;
+const SYNTHESIS_PARTIAL_TARGET = 5;
+
+type TieredStudy = Record<string, any> & {
+  _score: number;
+  _tier: "strict" | "partial";
+};
+
 function isCompleteStudy(study: any): boolean {
   if (!study.title || !study.year) return false;
   if (study.study_design === "unknown") return false;
   if (!study.abstract_excerpt || study.abstract_excerpt.trim().length < 50) return false;
   if (!study.outcomes || study.outcomes.length === 0) return false;
-  if (!study.population && !study.sample_size) return false;
   return study.outcomes.some((o: any) =>
     o.outcome_measured && (o.effect_size || o.p_value || o.intervention || o.comparator)
   );
@@ -35,6 +43,58 @@ function scoreStudy(study: any, query: string): number {
   }
 
   return score;
+}
+
+function dedupeByStudyId(studies: any[]): any[] {
+  const byId = new Map<string, any>();
+  for (const study of studies || []) {
+    const studyId = typeof study?.study_id === "string" ? study.study_id : null;
+    if (!studyId || byId.has(studyId)) continue;
+    byId.set(studyId, study);
+  }
+  return Array.from(byId.values());
+}
+
+function selectMixedContextStudies(
+  strictStudies: any[],
+  partialStudies: any[],
+  query: string,
+): { selected: TieredStudy[]; strict_total: number; partial_total: number } {
+  const strictRanked = dedupeByStudyId(strictStudies)
+    .map((study) => ({ ...study, _score: scoreStudy(study, query), _tier: "strict" as const }))
+    .sort((a, b) => b._score - a._score);
+
+  const strictIds = new Set(strictRanked.map((study) => study.study_id));
+  const partialRanked = dedupeByStudyId(partialStudies)
+    .filter((study) => !strictIds.has(study.study_id))
+    .map((study) => ({ ...study, _score: scoreStudy(study, query), _tier: "partial" as const }))
+    .sort((a, b) => b._score - a._score);
+
+  const selectedStrict = strictRanked.slice(0, SYNTHESIS_STRICT_TARGET);
+  const selectedPartial = partialRanked.slice(0, SYNTHESIS_PARTIAL_TARGET);
+  const selected: TieredStudy[] = [...selectedStrict, ...selectedPartial];
+
+  let strictCursor = selectedStrict.length;
+  let partialCursor = selectedPartial.length;
+  while (selected.length < SYNTHESIS_MAX_CONTEXT_STUDIES && (strictCursor < strictRanked.length || partialCursor < partialRanked.length)) {
+    const strictRemaining = strictRanked.length - strictCursor;
+    const partialRemaining = partialRanked.length - partialCursor;
+    if (strictRemaining >= partialRemaining && strictCursor < strictRanked.length) {
+      selected.push(strictRanked[strictCursor++]);
+      continue;
+    }
+    if (partialCursor < partialRanked.length) {
+      selected.push(partialRanked[partialCursor++]);
+      continue;
+    }
+    if (strictCursor < strictRanked.length) selected.push(strictRanked[strictCursor++]);
+  }
+
+  return {
+    selected: selected.slice(0, SYNTHESIS_MAX_CONTEXT_STUDIES),
+    strict_total: strictRanked.length,
+    partial_total: partialRanked.length,
+  };
 }
 
 function computeWarnings(studies: any[]): { type: string; text: string }[] {
@@ -134,7 +194,7 @@ serve(async (req) => {
 
     const { data: report, error: dbError } = await rlSupabase
       .from("research_reports")
-      .select("question, results, normalized_query, narrative_synthesis, user_id")
+      .select("question, results, partial_results, normalized_query, narrative_synthesis, user_id")
       .eq("id", report_id)
       .single();
 
@@ -146,21 +206,18 @@ serve(async (req) => {
     }
 
     const allStudies = report.results as any[];
+    const allPartialStudies = Array.isArray(report.partial_results) ? (report.partial_results as any[]) : [];
     const queryText = (report.normalized_query || report.question || "").toLowerCase();
 
-    // Step 1: completeness filter
-    const completeStudies = allStudies.filter(isCompleteStudy);
-    const excludedCount = allStudies.length - completeStudies.length;
-    console.log(`[Synthesis] ${excludedCount} of ${allStudies.length} excluded (incomplete)`);
-
-    // Step 2: rank by relevance
-    const ranked = completeStudies
-      .map(s => ({ ...s, _score: scoreStudy(s, queryText) }))
-      .sort((a, b) => b._score - a._score);
-
-    // Step 3: top 10
-    const studies = ranked.slice(0, 10).map(({ _score, ...s }) => s);
-    console.log(`[Synthesis] Selected top ${studies.length} of ${completeStudies.length} complete studies`);
+    const strictStudies = allStudies.filter(isCompleteStudy);
+    const selection = selectMixedContextStudies(strictStudies, allPartialStudies, queryText);
+    const studies = selection.selected;
+    const strictIncluded = studies.filter((study) => study._tier === "strict").length;
+    const partialIncluded = studies.filter((study) => study._tier === "partial").length;
+    console.log(
+      `[Synthesis] Selected ${studies.length} studies (${strictIncluded} strict, ${partialIncluded} partial) from ` +
+      `${selection.strict_total + selection.partial_total} candidates`,
+    );
 
     // Build numbered study context
     const studyContext = studies
@@ -177,7 +234,8 @@ serve(async (req) => {
             return parts.join("\n");
           })
           .join("\n");
-        return `[Study ${i}] "${s.title}" (${s.year})
+        return `[Study ${i + 1}] "${s.title}" (${s.year})
+  Evidence tier: ${s._tier === "strict" ? "Strict (high confidence)" : "Partial (lower confidence)"}
   Design: ${s.study_design} | Sample: ${s.sample_size ?? "NR"} | Population: ${s.population ?? "NR"}
   DOI: ${s.citation?.doi || "N/A"}
   Preprint: ${s.preprint_status} | Review type: ${s.review_type}
@@ -188,15 +246,25 @@ ${outcomes}`;
 
     // Compute deterministic warnings
     const computedWarnings = computeWarnings(studies);
-    if (excludedCount > 0 || completeStudies.length > 10) {
-      const totalExcluded = allStudies.length - studies.length;
+    if (partialIncluded > 0) {
       computedWarnings.push({
         type: "quality",
-        text: `${totalExcluded} of ${allStudies.length} studies excluded from synthesis (${excludedCount} incomplete, ${completeStudies.length - studies.length} below relevance cutoff)`,
+        text: `${partialIncluded} partial-tier studies were included; interpret claims from these studies as lower confidence.`,
+      });
+    }
+    const totalCandidates = selection.strict_total + selection.partial_total;
+    const strictExcluded = Math.max(0, selection.strict_total - strictIncluded);
+    const partialExcluded = Math.max(0, selection.partial_total - partialIncluded);
+    if (totalCandidates > studies.length) {
+      const totalExcluded = totalCandidates - studies.length;
+      computedWarnings.push({
+        type: "quality",
+        text: `${totalExcluded} of ${totalCandidates} studies excluded from synthesis context (${strictExcluded} strict, ${partialExcluded} partial below relevance cutoff).`,
       });
     }
 
     const systemPrompt = `You are a research synthesis assistant. You have ${studies.length} studies from a systematic search on: "${report.question}"${report.normalized_query ? ` (normalized: "${report.normalized_query}")` : ""}.
+The context includes ${strictIncluded} strict-tier studies and ${partialIncluded} partial-tier studies.
 
 --- STUDY DATA ---
 ${studyContext}
@@ -218,6 +286,7 @@ NARRATIVE FIELD RULES:
 - Do NOT use markdown headers, bullet points, or numbered lists
 - Do NOT invent findings or data points not present in the study data above
 - Do NOT use causal language unless the study is an RCT
+- Treat partial-tier studies as lower confidence: use conditional language ("may", "suggests", "possibly") and never base definitive conclusions only on partial-tier evidence
 - Keep the narrative concise and evidence-dense
 
 WARNING FIELD RULES:

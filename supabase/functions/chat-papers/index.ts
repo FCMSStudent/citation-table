@@ -7,12 +7,20 @@ const corsHeaders = {
     "authorization, x-client-info, apikey, content-type, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version",
 };
 
+const CHAT_MAX_CONTEXT_STUDIES = 15;
+const CHAT_STRICT_TARGET = 10;
+const CHAT_PARTIAL_TARGET = 5;
+
+type TieredStudy = Record<string, any> & {
+  _score: number;
+  _tier: "strict" | "partial";
+};
+
 function isCompleteStudy(study: any): boolean {
   if (!study.title || !study.year) return false;
   if (study.study_design === "unknown") return false;
   if (!study.abstract_excerpt || study.abstract_excerpt.trim().length < 50) return false;
   if (!study.outcomes || study.outcomes.length === 0) return false;
-  if (!study.population && !study.sample_size) return false;
   return study.outcomes.some((o: any) =>
     o.outcome_measured && (o.effect_size || o.p_value || o.intervention || o.comparator)
   );
@@ -35,6 +43,58 @@ function scoreStudy(study: any, query: string): number {
   }
 
   return score;
+}
+
+function dedupeByStudyId(studies: any[]): any[] {
+  const byId = new Map<string, any>();
+  for (const study of studies || []) {
+    const studyId = typeof study?.study_id === "string" ? study.study_id : null;
+    if (!studyId || byId.has(studyId)) continue;
+    byId.set(studyId, study);
+  }
+  return Array.from(byId.values());
+}
+
+function selectMixedContextStudies(
+  strictStudies: any[],
+  partialStudies: any[],
+  query: string,
+): { selected: TieredStudy[]; strict_total: number; partial_total: number } {
+  const strictRanked = dedupeByStudyId(strictStudies)
+    .map((study) => ({ ...study, _score: scoreStudy(study, query), _tier: "strict" as const }))
+    .sort((a, b) => b._score - a._score);
+
+  const strictIds = new Set(strictRanked.map((study) => study.study_id));
+  const partialRanked = dedupeByStudyId(partialStudies)
+    .filter((study) => !strictIds.has(study.study_id))
+    .map((study) => ({ ...study, _score: scoreStudy(study, query), _tier: "partial" as const }))
+    .sort((a, b) => b._score - a._score);
+
+  const selectedStrict = strictRanked.slice(0, CHAT_STRICT_TARGET);
+  const selectedPartial = partialRanked.slice(0, CHAT_PARTIAL_TARGET);
+  const selected: TieredStudy[] = [...selectedStrict, ...selectedPartial];
+
+  let strictCursor = selectedStrict.length;
+  let partialCursor = selectedPartial.length;
+  while (selected.length < CHAT_MAX_CONTEXT_STUDIES && (strictCursor < strictRanked.length || partialCursor < partialRanked.length)) {
+    const strictRemaining = strictRanked.length - strictCursor;
+    const partialRemaining = partialRanked.length - partialCursor;
+    if (strictRemaining >= partialRemaining && strictCursor < strictRanked.length) {
+      selected.push(strictRanked[strictCursor++]);
+      continue;
+    }
+    if (partialCursor < partialRanked.length) {
+      selected.push(partialRanked[partialCursor++]);
+      continue;
+    }
+    if (strictCursor < strictRanked.length) selected.push(strictRanked[strictCursor++]);
+  }
+
+  return {
+    selected: selected.slice(0, CHAT_MAX_CONTEXT_STUDIES),
+    strict_total: strictRanked.length,
+    partial_total: partialRanked.length,
+  };
 }
 
 async function checkRateLimit(
@@ -107,7 +167,7 @@ serve(async (req) => {
     // Fetch report data and verify ownership
     const { data: report, error: dbError } = await serviceClient
       .from("research_reports")
-      .select("question, results, normalized_query, user_id")
+      .select("question, results, partial_results, normalized_query, user_id")
       .eq("id", report_id)
       .single();
 
@@ -118,15 +178,15 @@ serve(async (req) => {
       );
     }
 
-    // Build context from top-10 complete studies (same as synthesize-papers)
     const allStudies = report.results as any[];
+    const allPartialStudies = Array.isArray(report.partial_results) ? (report.partial_results as any[]) : [];
     const queryText = (report.normalized_query || report.question || "").toLowerCase();
 
-    const completeStudies = allStudies.filter(isCompleteStudy);
-    const ranked = completeStudies
-      .map(s => ({ ...s, _score: scoreStudy(s, queryText) }))
-      .sort((a, b) => b._score - a._score);
-    const studies = ranked.slice(0, 10).map(({ _score, ...s }) => s);
+    const strictStudies = allStudies.filter(isCompleteStudy);
+    const selection = selectMixedContextStudies(strictStudies, allPartialStudies, queryText);
+    const studies = selection.selected;
+    const strictIncluded = studies.filter((study) => study._tier === "strict").length;
+    const partialIncluded = studies.filter((study) => study._tier === "partial").length;
 
     const studyContext = studies
       .map((s: any, i: number) => {
@@ -134,6 +194,7 @@ serve(async (req) => {
           .map((o: any) => `  - ${o.outcome_measured}: ${o.key_result || "Not reported"} [Citation: "${o.citation_snippet || ""}"]`)
           .join("\n");
         return `[Study ${i + 1}] "${s.title}" (${s.year})
+  Evidence tier: ${s._tier === "strict" ? "Strict (high confidence)" : "Partial (lower confidence)"}
   Design: ${s.study_design} | Sample: ${s.sample_size ?? "Not reported"} | Population: ${s.population ?? "Not reported"}
   DOI: ${s.citation?.doi || "N/A"}
   Preprint: ${s.preprint_status} | Review type: ${s.review_type}
@@ -145,7 +206,7 @@ ${outcomes}`;
 
     const systemPrompt = `You are a research assistant helping a user understand the findings from a systematic evidence review on the question: "${report.question}"${report.normalized_query ? ` (normalized: "${report.normalized_query}")` : ""}.
 
-Below are the top ${studies.length} studies (out of ${allStudies.length} total) selected for completeness and relevance. You MUST only reference information present in these studies.
+Below are ${studies.length} studies selected for response context (${strictIncluded} strict-tier, ${partialIncluded} partial-tier) from ${selection.strict_total + selection.partial_total} candidates. You MUST only reference information present in these studies.
 
 --- STUDY DATA ---
 ${studyContext}
@@ -159,6 +220,7 @@ CRITICAL CITATION RULES:
 Guidelines:
 - Ground every claim in specific study data above
 - If asked to compare studies, use the actual outcomes and sample sizes
+- Treat partial-tier studies as lower confidence; use conditional language and avoid definitive conclusions based solely on partial-tier evidence
 - Be concise but thorough
 - Format responses with markdown for readability`;
 

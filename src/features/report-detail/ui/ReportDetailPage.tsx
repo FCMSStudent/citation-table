@@ -130,6 +130,8 @@ const ReportDetail = () => {
                     briefSentences={report.brief_json?.sentences || undefined}
                     coverageReport={report.coverage_report || undefined}
                     searchStats={report.search_stats || undefined}
+                    partialResults={report.partial_results || undefined}
+                    extractionStats={report.extraction_stats || undefined}
                   />
                 </section>
 

@@ -12,7 +12,15 @@ import {
   Loader2,
   RotateCcw,
 } from 'lucide-react';
-import type { ClaimSentence, CoverageReport, EvidenceRow, SearchStats, StudyPdf, StudyResult } from '@/shared/types/research';
+import type {
+  ClaimSentence,
+  CoverageReport,
+  EvidenceRow,
+  ExtractionStats,
+  SearchStats,
+  StudyPdf,
+  StudyResult,
+} from '@/shared/types/research';
 import { NarrativeSynthesis } from './NarrativeSynthesis';
 import { Button } from '@/shared/ui/button';
 import { Badge } from '@/shared/ui/badge';
@@ -26,7 +34,6 @@ import { downloadRISFile } from '@/shared/lib/risExport';
 import { downloadCSV } from '@/shared/lib/csvExport';
 import { downloadPaperCSV } from '@/shared/lib/csvPaperExport';
 import { calculateRelevanceScore, getOutcomeText, isLowValueStudy } from '@/utils/relevanceScore';
-import { isCompleteStudy } from '@/utils/isCompleteStudy';
 import { cn, sanitizeUrl } from '@/shared/lib/utils';
 
 type ViewMode = 'summary' | 'studies';
@@ -35,6 +42,7 @@ type StudyDesignFilter = 'all' | 'meta' | 'review' | 'rct' | 'cohort' | 'cross-s
 
 interface ResultsTableProps {
   results: StudyResult[];
+  partialResults?: StudyResult[] | null;
   query: string;
   normalizedQuery?: string;
   totalPapersSearched: number;
@@ -49,6 +57,7 @@ interface ResultsTableProps {
   briefSentences?: ClaimSentence[] | null;
   coverageReport?: CoverageReport | null;
   searchStats?: SearchStats | null;
+  extractionStats?: ExtractionStats | null;
 }
 
 interface ReportViewPreferences {
@@ -61,6 +70,7 @@ interface ReportViewPreferences {
 
 interface ScoredStudy extends StudyResult {
   relevanceScore: number;
+  completenessTier: 'strict' | 'partial';
 }
 
 interface SummaryClaim {
@@ -176,6 +186,7 @@ function buildPageWindow(current: number, total: number, windowSize = 5): number
 
 export function ResultsTable({
   results,
+  partialResults = [],
   query,
   normalizedQuery,
   totalPapersSearched,
@@ -190,6 +201,7 @@ export function ResultsTable({
   briefSentences,
   coverageReport,
   searchStats,
+  extractionStats,
 }: ResultsTableProps) {
   const [viewMode, setViewMode] = useState<ViewMode>('summary');
   const [sortBy, setSortBy] = useState<SortOption>('relevance');
@@ -206,14 +218,15 @@ export function ResultsTable({
   const [referenceListOpen, setReferenceListOpen] = useState(false);
   const [prefsLoaded, setPrefsLoaded] = useState(false);
   const [firstInteractionTracked, setFirstInteractionTracked] = useState(false);
+  const totalInputStudies = results.length + (partialResults?.length || 0);
 
   useEffect(() => {
-    if (results.length === 0) return;
+    if (totalInputStudies === 0) return;
     trackReportEvent('report_results_loaded', {
       reportId: reportId || null,
-      totalStudies: results.length,
+      totalStudies: totalInputStudies,
     });
-  }, [results.length, reportId]);
+  }, [totalInputStudies, reportId]);
 
   useEffect(() => {
     const prefs = loadPreferences(reportId);
@@ -252,16 +265,29 @@ export function ResultsTable({
   }, [firstInteractionTracked]);
 
   const { mainStudies, excludedStudies } = useMemo(() => {
-    const scored: ScoredStudy[] = [];
+    const scoredById = new Map<string, ScoredStudy>();
     for (const study of results) {
-      if (!isCompleteStudy(study)) continue;
-      scored.push({
+      if (!study?.study_id) continue;
+      scoredById.set(study.study_id, {
         ...study,
         relevanceScore: calculateRelevanceScore(study, query),
+        completenessTier: 'strict',
       });
     }
+    for (const study of partialResults || []) {
+      if (!study?.study_id || scoredById.has(study.study_id)) continue;
+      scoredById.set(study.study_id, {
+        ...study,
+        relevanceScore: calculateRelevanceScore(study, query),
+        completenessTier: 'partial',
+      });
+    }
+    const scored = Array.from(scoredById.values());
 
     scored.sort((a, b) => {
+      if (a.completenessTier !== b.completenessTier) {
+        return a.completenessTier === 'strict' ? -1 : 1;
+      }
       if (sortBy === 'year') return b.year - a.year;
       return b.relevanceScore - a.relevanceScore;
     });
@@ -290,7 +316,7 @@ export function ResultsTable({
     }
 
     return { mainStudies: main, excludedStudies: excluded };
-  }, [results, query, sortBy, studyDesign, explicitOnly, debouncedFind]);
+  }, [results, partialResults, query, sortBy, studyDesign, explicitOnly, debouncedFind]);
 
   const totalPages = Math.max(1, Math.ceil(mainStudies.length / PAGE_SIZE));
 
@@ -451,7 +477,7 @@ export function ResultsTable({
     });
   };
 
-  if (results.length === 0) return null;
+  if (totalInputStudies === 0) return null;
 
   const pageWindow = buildPageWindow(currentPage, totalPages, 5);
 
@@ -500,6 +526,30 @@ export function ResultsTable({
                   <tr>
                     <th className="py-1 pr-3 font-medium text-muted-foreground">Pipeline latency</th>
                     <td className="py-1">{searchStats ? `${Math.round(searchStats.latency_ms / 1000)}s` : '—'}</td>
+                  </tr>
+                  <tr>
+                    <th className="py-1 pr-3 font-medium text-muted-foreground">Retrieved total</th>
+                    <td className="py-1">{searchStats?.retrieved_total ?? '—'}</td>
+                  </tr>
+                  <tr>
+                    <th className="py-1 pr-3 font-medium text-muted-foreground">Abstract-eligible</th>
+                    <td className="py-1">{searchStats?.abstract_eligible_total ?? '—'}</td>
+                  </tr>
+                  <tr>
+                    <th className="py-1 pr-3 font-medium text-muted-foreground">Quality-kept</th>
+                    <td className="py-1">{searchStats?.quality_kept_total ?? '—'}</td>
+                  </tr>
+                  <tr>
+                    <th className="py-1 pr-3 font-medium text-muted-foreground">Extraction inputs</th>
+                    <td className="py-1">{searchStats?.extraction_input_total ?? extractionStats?.total_inputs ?? '—'}</td>
+                  </tr>
+                  <tr>
+                    <th className="py-1 pr-3 font-medium text-muted-foreground">Strict complete</th>
+                    <td className="py-1">{searchStats?.strict_complete_total ?? extractionStats?.complete_total ?? '—'}</td>
+                  </tr>
+                  <tr>
+                    <th className="py-1 pr-3 font-medium text-muted-foreground">Partial complete</th>
+                    <td className="py-1">{searchStats?.partial_total ?? extractionStats?.partial_total ?? '—'}</td>
                   </tr>
                   <tr>
                     <th className="py-1 pr-3 font-medium text-muted-foreground">Evidence rows</th>
@@ -738,6 +788,9 @@ export function ResultsTable({
                         </td>
                         <td className="px-3 py-2 align-top text-muted-foreground">
                           <div className="space-y-1">
+                            <Badge variant={study.completenessTier === 'strict' ? 'secondary' : 'outline'} className="w-fit text-[10px]">
+                              {study.completenessTier === 'strict' ? 'Strict' : 'Partial'}
+                            </Badge>
                             <span className="inline-flex rounded-full bg-muted px-2 py-0.5 text-xs font-medium text-foreground">
                               {study.review_type === 'Meta-analysis' ? 'Meta-analysis' : study.study_design || 'Unknown'}
                             </span>
@@ -948,7 +1001,7 @@ export function ResultsTable({
                   <ul className="space-y-2">
                     {excludedStudies.map((study) => (
                       <li key={`excluded-${study.study_id}`} className="rounded border bg-muted/20 p-2 text-xs text-muted-foreground">
-                        <span className="font-medium text-foreground">{study.title}</span> ({study.year}) • Score {study.relevanceScore}
+                        <span className="font-medium text-foreground">{study.title}</span> ({study.year}) • {study.completenessTier === 'strict' ? 'Strict' : 'Partial'} • Score {study.relevanceScore}
                       </li>
                     ))}
                   </ul>

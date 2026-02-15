@@ -96,6 +96,12 @@ export interface SearchStats {
   latency_ms: number;
   candidates_total: number;
   candidates_filtered: number;
+  retrieved_total?: number;
+  abstract_eligible_total?: number;
+  quality_kept_total?: number;
+  extraction_input_total?: number;
+  strict_complete_total?: number;
+  partial_total?: number;
 }
 
 export interface LiteratureSearchResponse {

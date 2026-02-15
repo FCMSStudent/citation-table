@@ -298,8 +298,8 @@ function getPdfParseTimeoutMs(): number {
 }
 
 function getExtractionMaxCandidates(): number {
-  const raw = Number(Deno.env.get("EXTRACTION_MAX_CANDIDATES") || 30);
-  if (!Number.isFinite(raw)) return 30;
+  const raw = Number(Deno.env.get("EXTRACTION_MAX_CANDIDATES") || 45);
+  if (!Number.isFinite(raw)) return 45;
   return Math.min(60, Math.max(5, Math.trunc(raw)));
 }
 
@@ -1385,6 +1385,7 @@ async function runResearchPipeline(
   let results: StudyResult[] = [];
   let partial_results: StudyResult[] = [];
   let extraction_stats: Record<string, unknown> = {};
+  let extraction_input_total = 0;
   if (keptCapped.length > 0) {
     const extractionCandidates = keptCapped.slice(0, extractionMaxCandidates).map((paper) => {
       const base = canonicalToUnifiedPaper(paper);
@@ -1393,6 +1394,7 @@ async function runResearchPipeline(
       if (providerMatch?.landingPageUrl) base.landingPageUrl = providerMatch.landingPageUrl;
       return base;
     });
+    extraction_input_total = extractionCandidates.length;
     const extractionStartedAt = Date.now();
 
     if (extractionEngine === "llm") {
@@ -1486,6 +1488,12 @@ async function runResearchPipeline(
     latency_ms: Date.now() - pipelineStartedAt,
     candidates_total: canonicalCandidates.length,
     candidates_filtered: filtered_count,
+    retrieved_total: providerCandidates.length,
+    abstract_eligible_total: papersWithAbstracts.length,
+    quality_kept_total: keptCapped.length,
+    extraction_input_total,
+    strict_complete_total: results.length,
+    partial_total: partial_results.length,
   };
 
   return {
@@ -1921,6 +1929,12 @@ serve(async (req) => {
           .from("research_reports")
           .update({
             status: "completed",
+            lit_request: litRequest,
+            lit_response: replayed,
+            coverage_report: replayed.coverage,
+            evidence_table: replayed.evidence_table,
+            brief_json: replayed.brief,
+            search_stats: replayed.stats,
             completed_at: new Date().toISOString(),
           })
           .eq("id", reportId);
@@ -1958,12 +1972,20 @@ serve(async (req) => {
           .update({
             status: "completed",
             results: data.results || [],
+            partial_results: data.partial_results || [],
+            extraction_stats: data.extraction_stats || {},
             normalized_query: data.normalized_query || null,
             total_papers_searched: data.total_papers_searched || 0,
             openalex_count: data.openalex_count || 0,
             semantic_scholar_count: data.semantic_scholar_count || 0,
             arxiv_count: data.arxiv_count || 0,
             pubmed_count: data.pubmed_count || 0,
+            coverage_report: data.coverage,
+            evidence_table: data.evidence_table,
+            brief_json: data.brief,
+            search_stats: data.stats,
+            lit_request: litRequest,
+            lit_response: litResponse,
             completed_at: new Date().toISOString(),
           })
           .eq("id", reportId);
