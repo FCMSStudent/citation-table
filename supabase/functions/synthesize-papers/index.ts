@@ -276,12 +276,42 @@ Return ONLY valid JSON, no markdown fences or extra text`;
     // Parse and validate the narrative output
     let synthesisData: any;
     try {
-      synthesisData = JSON.parse(rawText);
+      // Strip markdown code fences if present
+      let cleaned = rawText
+        .replace(/```json\s*/gi, "")
+        .replace(/```\s*/g, "")
+        .trim();
+
+      // Remove control characters that break JSON.parse
+      cleaned = cleaned.replace(/[\x00-\x1F\x7F]/g, (ch: string) => {
+        // Keep newlines/tabs as spaces, strip the rest
+        if (ch === "\n" || ch === "\r" || ch === "\t") return " ";
+        return "";
+      });
+
+      // Find JSON boundaries
+      const jsonStart = cleaned.search(/[\{\[]/);
+      const startChar = jsonStart !== -1 ? cleaned[jsonStart] : "{";
+      const endChar = startChar === "[" ? "]" : "}";
+      const jsonEnd = cleaned.lastIndexOf(endChar);
+
+      if (jsonStart === -1 || jsonEnd === -1 || jsonEnd <= jsonStart) {
+        throw new Error("No JSON object found in response");
+      }
+
+      let jsonString = cleaned.substring(jsonStart, jsonEnd + 1);
+
+      // Fix trailing commas
+      jsonString = jsonString.replace(/,\s*}/g, "}").replace(/,\s*]/g, "]");
+
+      synthesisData = JSON.parse(jsonString);
+
       if (!synthesisData.narrative || typeof synthesisData.narrative !== "string") {
         throw new Error("Missing narrative string");
       }
     } catch (parseErr) {
       console.error("Failed to parse/validate synthesis JSON:", parseErr);
+      console.error("Raw text (first 500 chars):", rawText.substring(0, 500));
       return new Response(
         JSON.stringify({ error: "AI returned invalid synthesis. Please try again." }),
         { status: 502, headers: { ...corsHeaders, "Content-Type": "application/json" } }

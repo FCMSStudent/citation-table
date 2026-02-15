@@ -620,8 +620,8 @@ function mergePaperMetadata(existingPaper: UnifiedPaper, incomingPaper: UnifiedP
   if (incomingPaper.pubmed_id && !existingPaper.pubmed_id) existingPaper.pubmed_id = incomingPaper.pubmed_id;
   if (incomingPaper.openalex_id && !existingPaper.openalex_id) existingPaper.openalex_id = incomingPaper.openalex_id;
   if (incomingPaper.doi && !existingPaper.doi) existingPaper.doi = incomingPaper.doi;
-  if (incomingPaper.pdfUrl && !existingPaper.pdfUrl) existingPaper.pdfUrl = incomingPaper.pdfUrl;
-  if (incomingPaper.landingPageUrl && !existingPaper.landingPageUrl) existingPaper.landingPageUrl = incomingPaper.landingPageUrl;
+  if ((incomingPaper as any).pdfUrl && !(existingPaper as any).pdfUrl) (existingPaper as any).pdfUrl = (incomingPaper as any).pdfUrl;
+  if ((incomingPaper as any).landingPageUrl && !(existingPaper as any).landingPageUrl) (existingPaper as any).landingPageUrl = (incomingPaper as any).landingPageUrl;
 }
 
 function deduplicateAndMerge(s2Papers: UnifiedPaper[], openAlexPapers: UnifiedPaper[], arxivPapers: UnifiedPaper[], pubmedPapers: UnifiedPaper[] = []): UnifiedPaper[] {
