@@ -1,5 +1,13 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.49.1";
+import { prepareQueryProcessingV2, type QueryProcessingMeta, type SearchSource } from "../_shared/query-processing.ts";
+import {
+  getMetadataEnrichmentRuntimeConfig,
+  runMetadataEnrichment,
+  selectEffectiveEnrichmentMode,
+  type EnrichmentInputPaper,
+} from "../_shared/metadata-enrichment.ts";
+import { MetadataEnrichmentStore, type MetadataEnrichmentMode } from "../_shared/metadata-enrichment-store.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -175,7 +183,7 @@ const BIOMEDICAL_SYNONYMS: Record<string, string[]> = {
 };
 
 type ExpansionMode = "balanced" | "broad";
-type SearchSource = "semantic_scholar" | "openalex" | "arxiv" | "pubmed";
+type QueryPipelineMode = "v1" | "v2" | "shadow";
 
 interface PreparedSourceQuery {
   source: SearchSource;
@@ -239,9 +247,34 @@ function buildSourceQuery(query: string, source: SearchSource, mode: ExpansionMo
   return { source, originalKeywordQuery, expandedKeywordQuery, apiQuery: apiQuery.trim() };
 }
 
+function resolvePreparedQuery(
+  query: string,
+  source: SearchSource,
+  mode: ExpansionMode,
+  precompiledQuery?: string,
+): PreparedSourceQuery {
+  if (!precompiledQuery?.trim()) return buildSourceQuery(query, source, mode);
+  return {
+    source,
+    originalKeywordQuery: query,
+    expandedKeywordQuery: precompiledQuery.trim(),
+    apiQuery: precompiledQuery.trim(),
+  };
+}
+
+function getQueryPipelineMode(): QueryPipelineMode {
+  const raw = (Deno.env.get("QUERY_PIPELINE_MODE") || "shadow").toLowerCase();
+  if (raw === "v1" || raw === "v2" || raw === "shadow") return raw;
+  return "shadow";
+}
+
 // Query OpenAlex API
-async function searchOpenAlex(query: string, mode: ExpansionMode = "balanced"): Promise<UnifiedPaper[]> {
-  const prepared = buildSourceQuery(query, "openalex", mode);
+async function searchOpenAlex(
+  query: string,
+  mode: ExpansionMode = "balanced",
+  precompiledQuery?: string,
+): Promise<UnifiedPaper[]> {
+  const prepared = resolvePreparedQuery(query, "openalex", mode, precompiledQuery);
   const encodedQuery = encodeURIComponent(prepared.apiQuery);
   const apiKey = Deno.env.get("OPENALEX_API_KEY");
   
@@ -306,8 +339,12 @@ async function s2RateLimit() {
 }
 
 // Query Semantic Scholar API
-async function searchSemanticScholar(query: string, mode: ExpansionMode = "balanced"): Promise<UnifiedPaper[]> {
-  const prepared = buildSourceQuery(query, "semantic_scholar", mode);
+async function searchSemanticScholar(
+  query: string,
+  mode: ExpansionMode = "balanced",
+  precompiledQuery?: string,
+): Promise<UnifiedPaper[]> {
+  const prepared = resolvePreparedQuery(query, "semantic_scholar", mode, precompiledQuery);
   if (!prepared.apiQuery) {
     console.warn("[SemanticScholar] No keywords extracted, skipping search");
     return [];
@@ -372,8 +409,12 @@ interface ArxivEntry {
 }
 
 // Query arXiv API
-async function searchArxiv(query: string, mode: ExpansionMode = "balanced"): Promise<UnifiedPaper[]> {
-  const prepared = buildSourceQuery(query, "arxiv", mode);
+async function searchArxiv(
+  query: string,
+  mode: ExpansionMode = "balanced",
+  precompiledQuery?: string,
+): Promise<UnifiedPaper[]> {
+  const prepared = resolvePreparedQuery(query, "arxiv", mode, precompiledQuery);
   if (!prepared.apiQuery) {
     console.warn("[ArXiv] No keywords extracted, skipping search");
     return [];
@@ -456,8 +497,12 @@ async function searchArxiv(query: string, mode: ExpansionMode = "balanced"): Pro
 
 // ─── PubMed Search ──────────────────────────────────────────────────────────
 
-async function searchPubMed(query: string, mode: ExpansionMode = "balanced"): Promise<UnifiedPaper[]> {
-  const prepared = buildSourceQuery(query, "pubmed", mode);
+async function searchPubMed(
+  query: string,
+  mode: ExpansionMode = "balanced",
+  precompiledQuery?: string,
+): Promise<UnifiedPaper[]> {
+  const prepared = resolvePreparedQuery(query, "pubmed", mode, precompiledQuery);
   if (!prepared.apiQuery) return [];
   const encodedQuery = encodeURIComponent(prepared.apiQuery);
 
@@ -683,105 +728,69 @@ function deduplicateAndMerge(s2Papers: UnifiedPaper[], openAlexPapers: UnifiedPa
 }
 
 
-// Enrich papers with Crossref metadata
-async function enrichWithCrossref(papers: UnifiedPaper[]): Promise<UnifiedPaper[]> {
-  const enrichedPapers = [...papers];
-  
-  for (const paper of enrichedPapers) {
-    try {
-      let crossrefData = null;
-      
-      // Try fetching by DOI first
-      if (paper.doi) {
-        const encodedDoi = encodeURIComponent(paper.doi);
-        const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 5000); // 5 second timeout
-        
-        try {
-          const response = await fetch(`https://api.crossref.org/works/${encodedDoi}`, {
-            headers: {
-              'User-Agent': 'CitationTable/1.0 (https://github.com/FCMSStudent/citation-table)'
-            },
-            signal: controller.signal
-          });
-          clearTimeout(timeoutId);
-          
-          if (response.ok) {
-            const data = await response.json();
-            crossrefData = data.message;
-          } else if (response.status === 404) {
-            console.log(`[Crossref] DOI not found: ${paper.doi}`);
-          } else if (response.status === 429) {
-            console.warn(`[Crossref] Rate limit hit for DOI: ${paper.doi}`);
-          }
-        } catch (error) {
-          clearTimeout(timeoutId);
-          if ((error as Error).name === 'AbortError') {
-            console.warn(`[Crossref] Request timeout for DOI: ${paper.doi}`);
-          } else {
-            throw error;
-          }
-        }
-      } 
-      // Fallback: search by title if no DOI
-      else if (paper.title) {
-        const encodedTitle = encodeURIComponent(paper.title);
-        const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 5000);
-        
-        try {
-          const response = await fetch(
-            `https://api.crossref.org/works?query.bibliographic=${encodedTitle}&rows=1`,
-            {
-              headers: {
-                'User-Agent': 'CitationTable/1.0 (https://github.com/FCMSStudent/citation-table)'
-              },
-              signal: controller.signal
-            }
-          );
-          clearTimeout(timeoutId);
-          
-          if (response.ok) {
-            const data = await response.json();
-            if (data.message.items && data.message.items.length > 0) {
-              crossrefData = data.message.items[0];
-            }
-          }
-        } catch (error) {
-          clearTimeout(timeoutId);
-          if ((error as Error).name === 'AbortError') {
-            console.warn(`[Crossref] Request timeout for title search: ${paper.title}`);
-          } else {
-            throw error;
-          }
-        }
-      }
-      
-      // Merge Crossref data into paper
-      if (crossrefData) {
-        paper.doi = crossrefData.DOI || paper.doi;
-        paper.year = crossrefData.issued?.['date-parts']?.[0]?.[0] || paper.year;
-        paper.citationCount = crossrefData['is-referenced-by-count'] ?? paper.citationCount;
-        
-        // Add journal/publisher metadata
-        if (crossrefData['container-title']?.[0]) {
-          paper.journal = crossrefData['container-title'][0];
-        }
-        
-        console.log(`[Crossref] Enriched "${paper.title}" with citation count: ${crossrefData['is-referenced-by-count']}`);
-      }
-      
-      // Rate limiting: small delay between requests
-      await new Promise(resolve => setTimeout(resolve, 100));
-      
-    } catch (error) {
-      console.error(`[Crossref] Enrichment failed for paper "${paper.title}":`, error);
-      // Continue without enrichment
-    }
-  }
-  
-  console.log(`[Crossref] Enrichment complete for ${enrichedPapers.length} papers`);
-  return enrichedPapers;
+interface MetadataEnrichmentContext {
+  mode: MetadataEnrichmentMode;
+  store?: MetadataEnrichmentStore;
+  sourceTrust?: Record<string, number>;
+  userId?: string;
+  reportId?: string;
+  searchId?: string;
+  retryMax?: number;
+  maxLatencyMs?: number;
+}
+
+function toEnrichmentInputPaper(paper: UnifiedPaper): EnrichmentInputPaper {
+  return {
+    id: paper.id,
+    title: paper.title,
+    year: paper.year,
+    abstract: paper.abstract,
+    authors: paper.authors,
+    venue: paper.venue,
+    doi: paper.doi,
+    source: paper.source,
+    citationCount: paper.citationCount ?? null,
+    journal: paper.journal ?? null,
+  };
+}
+
+function mergeEnrichmentPaper(basePaper: UnifiedPaper, enrichedPaper: EnrichmentInputPaper): UnifiedPaper {
+  return {
+    ...basePaper,
+    doi: enrichedPaper.doi ?? basePaper.doi,
+    year: enrichedPaper.year ?? basePaper.year,
+    citationCount: enrichedPaper.citationCount ?? basePaper.citationCount,
+    journal: enrichedPaper.journal ?? basePaper.journal,
+  };
+}
+
+async function enrichWithMetadata(
+  papers: UnifiedPaper[],
+  context: MetadataEnrichmentContext,
+): Promise<UnifiedPaper[]> {
+  const input = papers.map(toEnrichmentInputPaper);
+  const { papers: enrichedPapers, decisions } = await runMetadataEnrichment(input, {
+    mode: context.mode,
+    functionName: "research",
+    stack: "supabase_edge",
+    store: context.store,
+    sourceTrust: context.sourceTrust,
+    reportId: context.reportId,
+    searchId: context.searchId,
+    userId: context.userId,
+    retryMax: context.retryMax,
+    maxLatencyMs: context.maxLatencyMs,
+  });
+
+  const merged = papers.map((paper, idx) => mergeEnrichmentPaper(paper, enrichedPapers[idx] || input[idx]));
+  const acceptedCount = decisions.filter((decision) => decision.outcome === "accepted").length;
+  const deferredCount = decisions.filter((decision) => decision.outcome === "deferred").length;
+  const rejectedCount = decisions.filter((decision) => decision.outcome === "rejected").length;
+  const cacheHitCount = decisions.filter((decision) => decision.used_cache).length;
+  console.log(
+    `[MetadataEnrichment] mode=${context.mode} total=${decisions.length} accepted=${acceptedCount} deferred=${deferredCount} rejected=${rejectedCount} cache_hits=${cacheHitCount}`,
+  );
+  return merged;
 }
 
 function isCompleteStudy(study: any): boolean {
@@ -796,7 +805,10 @@ function isCompleteStudy(study: any): boolean {
   return hasCompleteOutcome;
 }
 
-function getQueryKeywordSet(query: string): Set<string> {
+function getQueryKeywordSet(query: string, precomputedTerms?: string[]): Set<string> {
+  if (precomputedTerms && precomputedTerms.length > 0) {
+    return new Set(precomputedTerms.map((k) => k.trim().toLowerCase()).filter(Boolean));
+  }
   const { originalTerms, expandedTerms } = extractSearchKeywords(query);
   const keywords = [...originalTerms, ...expandedTerms]
     .map(k => k.trim())
@@ -1006,6 +1018,39 @@ Extract structured data from each paper's abstract following the strict rules. R
   }
 }
 
+async function recordQueryProcessingEvent(
+  client: any,
+  params: {
+    mode: QueryPipelineMode;
+    originalQuery: string;
+    servedQuery: string;
+    normalizedQuery?: string;
+    queryProcessing?: QueryProcessingMeta;
+    userId?: string;
+  },
+): Promise<void> {
+  if (!params.queryProcessing) return;
+
+  const payload = {
+    function_name: "research",
+    mode: params.mode,
+    user_id: params.userId ?? null,
+    original_query: params.originalQuery,
+    served_query: params.servedQuery,
+    normalized_query: params.normalizedQuery ?? null,
+    deterministic_confidence: params.queryProcessing.deterministic_confidence,
+    used_llm_fallback: params.queryProcessing.used_llm_fallback,
+    processing_ms: params.queryProcessing.processing_ms,
+    reason_codes: params.queryProcessing.reason_codes,
+    source_queries: params.queryProcessing.source_queries,
+  };
+
+  const { error } = await client.from("query_processing_events").insert(payload);
+  if (error) {
+    console.warn("[query-processing] Failed to record event:", error.message);
+  }
+}
+
 serve(async (req) => {
   // Handle CORS preflight
   if (req.method === "OPTIONS") {
@@ -1024,9 +1069,11 @@ serve(async (req) => {
 
     const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
     const anonKey = Deno.env.get("SUPABASE_ANON_KEY")!;
+    const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
     const anonClient = createClient(supabaseUrl, anonKey, {
       global: { headers: { Authorization: authHeader } },
     });
+    const serviceClient = serviceRoleKey ? createClient(supabaseUrl, serviceRoleKey) : null;
     const { data: userData, error: userError } = await anonClient.auth.getUser();
     if (userError || !userData?.user?.id) {
       return new Response(
@@ -1036,6 +1083,11 @@ serve(async (req) => {
     }
 
     const { question } = await req.json();
+
+    const metadataRuntime = getMetadataEnrichmentRuntimeConfig();
+    const metadataMode = selectEffectiveEnrichmentMode(metadataRuntime);
+    const metadataStore = serviceClient ? new MetadataEnrichmentStore(serviceClient) : undefined;
+    const sourceTrust = metadataStore ? await metadataStore.getSourceTrustMap() : undefined;
     
     // Security: Input validation
     if (!question || typeof question !== "string" || question.trim().length < 5) {
@@ -1064,19 +1116,53 @@ serve(async (req) => {
 
     console.log(`[Research] Processing question: "${question}"`);
 
-    // Step 1: Normalize query if needed
-    const { normalized, wasNormalized } = normalizeQuery(question);
-    const searchQuery = wasNormalized ? normalized : question;
-    
-    if (wasNormalized) {
-      console.log(`[Research] Query normalized: "${question}" -> "${normalized}"`);
+    const queryPipelineMode = getQueryPipelineMode();
+    const { normalized: v1Normalized, wasNormalized: v1WasNormalized } = normalizeQuery(question);
+    let normalizedQueryForResponse = v1WasNormalized ? v1Normalized : undefined;
+    let searchQuery = v1WasNormalized ? v1Normalized : question;
+    let queryProcessingMeta: QueryProcessingMeta | undefined;
+    let queryTermsForRanking: string[] | undefined;
+    const sourceQueryOverrides: Partial<Record<SearchSource, string>> = {};
+    let shadowPreparedPromise: Promise<Awaited<ReturnType<typeof prepareQueryProcessingV2>>> | null = null;
+
+    if (queryPipelineMode === "v2") {
+      const prepared = await prepareQueryProcessingV2(question, {
+        llmApiKey: GOOGLE_GEMINI_API_KEY,
+        fallbackTimeoutMs: 350,
+      });
+      searchQuery = prepared.search_query;
+      normalizedQueryForResponse = prepared.was_normalized ? prepared.normalized_query : undefined;
+      queryTermsForRanking = prepared.query_terms;
+      queryProcessingMeta = prepared.query_processing;
+      sourceQueryOverrides.semantic_scholar = prepared.query_processing.source_queries.semantic_scholar;
+      sourceQueryOverrides.openalex = prepared.query_processing.source_queries.openalex;
+      sourceQueryOverrides.pubmed = prepared.query_processing.source_queries.pubmed;
+      sourceQueryOverrides.arxiv = prepared.query_processing.source_queries.arxiv;
+    } else if (queryPipelineMode === "shadow") {
+      shadowPreparedPromise = prepareQueryProcessingV2(question, {
+        llmApiKey: GOOGLE_GEMINI_API_KEY,
+        fallbackTimeoutMs: 350,
+      });
+    }
+
+    if (normalizedQueryForResponse) {
+      console.log(`[Research] Query normalized: "${question}" -> "${normalizedQueryForResponse}"`);
     }
 
     // Step 2: Search Semantic Scholar first (primary), then OpenAlex (secondary)
-    const s2Papers = await searchSemanticScholar(searchQuery);
-    const openAlexPapers = await searchOpenAlex(searchQuery);
-    const arxivPapers = await searchArxiv(searchQuery);
-    const pubmedPapers = await searchPubMed(searchQuery);
+    const s2Papers = await searchSemanticScholar(searchQuery, "balanced", sourceQueryOverrides.semantic_scholar);
+    const openAlexPapers = await searchOpenAlex(searchQuery, "balanced", sourceQueryOverrides.openalex);
+    const arxivPapers = await searchArxiv(searchQuery, "balanced", sourceQueryOverrides.arxiv);
+    const pubmedPapers = await searchPubMed(searchQuery, "balanced", sourceQueryOverrides.pubmed);
+    if (queryPipelineMode === "shadow" && shadowPreparedPromise) {
+      try {
+        const prepared = await shadowPreparedPromise;
+        queryProcessingMeta = prepared.query_processing;
+      } catch (error) {
+        console.warn("[Research] Shadow query processing failed:", error);
+      }
+    }
+
     const totalFetched = s2Papers.length + openAlexPapers.length + arxivPapers.length + pubmedPapers.length;
     console.log(`[Research] Stage stats: fetched=${totalFetched} (s2=${s2Papers.length}, openalex=${openAlexPapers.length}, arxiv=${arxivPapers.length}, pubmed=${pubmedPapers.length})`);
 
@@ -1085,47 +1171,72 @@ serve(async (req) => {
     console.log(`[Research] Stage stats: deduped=${allPapers.length}`);
     
     if (allPapers.length === 0) {
+      await recordQueryProcessingEvent(anonClient, {
+        mode: queryPipelineMode,
+        originalQuery: question,
+        servedQuery: normalizedQueryForResponse || question,
+        normalizedQuery: normalizedQueryForResponse,
+        queryProcessing: queryProcessingMeta,
+        userId: userData.user.id,
+      });
       return new Response(
         JSON.stringify({ 
           results: [], 
           query: question,
-          normalized_query: wasNormalized ? normalized : undefined,
+          normalized_query: normalizedQueryForResponse,
           total_papers_searched: 0,
           openalex_count: 0,
           semantic_scholar_count: 0,
           arxiv_count: 0,
           pubmed_count: 0,
+          query_processing: queryProcessingMeta,
           message: "No eligible studies matching the query were identified in the searched sources." 
         }),
         { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
     }
 
-    // Step 3.5: Enrich with Crossref data
-    const enrichedPapers = await enrichWithCrossref(allPapers);
+    // Step 3.5: Enrich with deterministic metadata policy.
+    const enrichedPapers = await enrichWithMetadata(allPapers, {
+      mode: metadataMode,
+      store: metadataStore,
+      sourceTrust,
+      userId: userData.user.id,
+      retryMax: metadataRuntime.retryMax,
+      maxLatencyMs: metadataRuntime.maxLatencyMs,
+    });
 
     // Filter papers with sufficient abstracts
     const papersWithAbstracts = enrichedPapers.filter(p => p.abstract.length > 50);
     console.log(`[Research] Stage stats: abstract-qualified=${papersWithAbstracts.length}`);
 
     if (papersWithAbstracts.length === 0) {
+      await recordQueryProcessingEvent(anonClient, {
+        mode: queryPipelineMode,
+        originalQuery: question,
+        servedQuery: normalizedQueryForResponse || question,
+        normalizedQuery: normalizedQueryForResponse,
+        queryProcessing: queryProcessingMeta,
+        userId: userData.user.id,
+      });
       return new Response(
         JSON.stringify({ 
           results: [], 
           query: question,
-          normalized_query: wasNormalized ? normalized : undefined,
+          normalized_query: normalizedQueryForResponse,
           total_papers_searched: allPapers.length,
           openalex_count: openAlexPapers.length,
           semantic_scholar_count: s2Papers.length,
           arxiv_count: arxivPapers.length,
           pubmed_count: pubmedPapers.length,
+          query_processing: queryProcessingMeta,
           message: "No eligible studies matching the query were identified in the searched sources." 
         }),
         { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
     }
 
-    const queryKeywords = getQueryKeywordSet(searchQuery);
+    const queryKeywords = getQueryKeywordSet(searchQuery, queryPipelineMode === "v2" ? queryTermsForRanking : undefined);
     const rankedCandidates = [...papersWithAbstracts].sort(
       (a, b) => scorePaperCandidate(b, queryKeywords) - scorePaperCandidate(a, queryKeywords)
     );
@@ -1148,17 +1259,26 @@ serve(async (req) => {
     console.log(`[Research] Stage stats: extracted_total=${extractedAcrossBatches.length}, merged_unique=${mergedByStudy.length}, post-filter=${results.length}`);
 
     console.log(`[Research] Returning ${results.length} structured results`);
+    await recordQueryProcessingEvent(anonClient, {
+      mode: queryPipelineMode,
+      originalQuery: question,
+      servedQuery: normalizedQueryForResponse || question,
+      normalizedQuery: normalizedQueryForResponse,
+      queryProcessing: queryProcessingMeta,
+      userId: userData.user.id,
+    });
 
     return new Response(
       JSON.stringify({ 
         results, 
         query: question,
-        normalized_query: wasNormalized ? normalized : undefined,
+        normalized_query: normalizedQueryForResponse,
         total_papers_searched: allPapers.length,
         openalex_count: openAlexPapers.length,
         semantic_scholar_count: s2Papers.length,
         arxiv_count: arxivPapers.length,
         pubmed_count: pubmedPapers.length,
+        query_processing: queryProcessingMeta,
       }),
       { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } }
     );

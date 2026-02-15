@@ -1,5 +1,26 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.49.1";
+import { prepareQueryProcessingV2, type QueryProcessingMeta, type SearchSource } from "../_shared/query-processing.ts";
+import {
+  applyQualityFilter,
+  buildEvidenceAndBrief,
+  canonicalizePapers,
+  defaultSearchRequestFromQuestion,
+  sanitizeSearchRequest,
+  type CanonicalPaper,
+  type CoverageReport,
+  type InputPaper,
+  type SearchRequestPayload,
+  type SearchResponsePayload,
+  type SearchStats,
+} from "../_shared/lit-search.ts";
+import {
+  getMetadataEnrichmentRuntimeConfig,
+  runMetadataEnrichment,
+  selectEffectiveEnrichmentMode,
+  type EnrichmentInputPaper,
+} from "../_shared/metadata-enrichment.ts";
+import { MetadataEnrichmentStore, type MetadataEnrichmentMode } from "../_shared/metadata-enrichment-store.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -54,6 +75,8 @@ interface OpenAlexWork {
   doi?: string;
   type?: string;
   cited_by_count?: number;
+  referenced_works?: string[];
+  is_retracted?: boolean;
 }
 
 interface SemanticScholarPaper {
@@ -68,6 +91,8 @@ interface SemanticScholarPaper {
   externalIds: { DOI?: string; PubMed?: string };
   openAccessPdf?: { url: string } | null;
   url?: string;
+  isRetracted?: boolean;
+  references?: Array<{ paperId: string }>;
 }
 
 interface UnifiedPaper {
@@ -86,6 +111,10 @@ interface UnifiedPaper {
   journal?: string;
   pdfUrl?: string | null;
   landingPageUrl?: string | null;
+  referenced_ids?: string[];
+  is_retracted?: boolean;
+  preprint_status?: "Preprint" | "Peer-reviewed";
+  rank_signal?: number;
 }
 
 // ─── Helpers (copied from research/index.ts) ─────────────────────────────────
@@ -164,7 +193,7 @@ const BIOMEDICAL_SYNONYMS: Record<string, string[]> = {
 };
 
 type ExpansionMode = "balanced" | "broad";
-type SearchSource = "semantic_scholar" | "openalex" | "arxiv" | "pubmed";
+type QueryPipelineMode = "v1" | "v2" | "shadow";
 
 interface PreparedSourceQuery {
   source: SearchSource;
@@ -228,10 +257,120 @@ function buildSourceQuery(query: string, source: SearchSource, mode: ExpansionMo
   return { source, originalKeywordQuery, expandedKeywordQuery, apiQuery: apiQuery.trim() };
 }
 
+function resolvePreparedQuery(
+  query: string,
+  source: SearchSource,
+  mode: ExpansionMode,
+  precompiledQuery?: string,
+): PreparedSourceQuery {
+  if (!precompiledQuery?.trim()) return buildSourceQuery(query, source, mode);
+  return {
+    source,
+    originalKeywordQuery: query,
+    expandedKeywordQuery: precompiledQuery.trim(),
+    apiQuery: precompiledQuery.trim(),
+  };
+}
+
+function getQueryPipelineMode(): QueryPipelineMode {
+  const raw = (Deno.env.get("QUERY_PIPELINE_MODE") || "shadow").toLowerCase();
+  if (raw === "v1" || raw === "v2" || raw === "shadow") return raw;
+  return "shadow";
+}
+
+const PROVIDER_TIMEOUT_MS = 8_000;
+const PROVIDER_RETRIES = 2;
+const RETRIEVAL_BUDGET_MS = 26_000;
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function withTimeout<T>(promise: Promise<T>, timeoutMs: number, label: string): Promise<T> {
+  let timeoutHandle: number | null = null;
+  const timeoutPromise = new Promise<never>((_, reject) => {
+    timeoutHandle = setTimeout(() => reject(new Error(`${label} timed out after ${timeoutMs}ms`)), timeoutMs);
+  });
+
+  try {
+    return await Promise.race([promise, timeoutPromise]);
+  } finally {
+    if (timeoutHandle !== null) clearTimeout(timeoutHandle);
+  }
+}
+
+async function retryProviderSearch(
+  provider: SearchSource,
+  fn: () => Promise<UnifiedPaper[]>,
+): Promise<{ papers: UnifiedPaper[]; failed: boolean; error?: string; latencyMs: number }> {
+  const started = Date.now();
+  let lastError: Error | null = null;
+
+  for (let attempt = 0; attempt <= PROVIDER_RETRIES; attempt += 1) {
+    try {
+      const papers = await withTimeout(fn(), PROVIDER_TIMEOUT_MS, provider);
+      return { papers, failed: false, latencyMs: Date.now() - started };
+    } catch (error) {
+      lastError = error instanceof Error ? error : new Error(String(error));
+      if (attempt < PROVIDER_RETRIES) {
+        await sleep(250 * (attempt + 1));
+      }
+    }
+  }
+
+  return {
+    papers: [],
+    failed: true,
+    error: lastError?.message || `${provider} failed`,
+    latencyMs: Date.now() - started,
+  };
+}
+
+function normalizeDoi(raw: string | null | undefined): string | null {
+  if (!raw) return null;
+  return raw.toLowerCase().trim().replace(/^https?:\/\/(dx\.)?doi\.org\//, "");
+}
+
+function hashKey(raw: string): string {
+  let hash = 2166136261;
+  for (let i = 0; i < raw.length; i += 1) {
+    hash ^= raw.charCodeAt(i);
+    hash += (hash << 1) + (hash << 4) + (hash << 7) + (hash << 8) + (hash << 24);
+  }
+  return (hash >>> 0).toString(16).padStart(8, "0");
+}
+
 // ─── API Search Functions ────────────────────────────────────────────────────
 
-async function searchOpenAlex(query: string, mode: ExpansionMode = "balanced"): Promise<UnifiedPaper[]> {
-  const prepared = buildSourceQuery(query, "openalex", mode);
+function toUnifiedFromOpenAlex(work: OpenAlexWork, rankSignal: number): UnifiedPaper {
+  return {
+    id: work.id,
+    title: work.title || "Untitled",
+    year: work.publication_year || new Date().getFullYear(),
+    abstract: reconstructAbstract(work.abstract_inverted_index),
+    authors: work.authorships?.map((author) => author.author.display_name) || ["Unknown"],
+    venue: work.primary_location?.source?.display_name || "",
+    doi: normalizeDoi(work.doi),
+    pubmed_id: null,
+    openalex_id: work.id,
+    source: "openalex",
+    citationCount: work.cited_by_count,
+    publicationTypes: work.type ? [work.type] : undefined,
+    pdfUrl: work.best_oa_location?.pdf_url || null,
+    landingPageUrl: work.best_oa_location?.landing_page_url || null,
+    referenced_ids: work.referenced_works || [],
+    is_retracted: Boolean(work.is_retracted),
+    preprint_status: work.type === "preprint" ? "Preprint" : "Peer-reviewed",
+    rank_signal: rankSignal,
+  };
+}
+
+async function searchOpenAlex(
+  query: string,
+  mode: ExpansionMode = "balanced",
+  precompiledQuery?: string,
+): Promise<UnifiedPaper[]> {
+  const prepared = resolvePreparedQuery(query, "openalex", mode, precompiledQuery);
   const encodedQuery = encodeURIComponent(prepared.apiQuery);
   const apiKey = Deno.env.get("OPENALEX_API_KEY");
   let url = `https://api.openalex.org/works?search=${encodedQuery}&filter=has_abstract:true&per_page=25&sort=relevance_score:desc`;
@@ -254,26 +393,69 @@ async function searchOpenAlex(query: string, mode: ExpansionMode = "balanced"): 
     const data = await response.json();
     const works: OpenAlexWork[] = data.results || [];
     console.log(`[OpenAlex] Found ${works.length} papers`);
-    return works.map(work => ({
-      id: work.id,
-      title: work.title || "Untitled",
-      year: work.publication_year || new Date().getFullYear(),
-      abstract: reconstructAbstract(work.abstract_inverted_index),
-      authors: work.authorships?.map(a => a.author.display_name) || ["Unknown"],
-      venue: work.primary_location?.source?.display_name || "",
-      doi: work.doi || null,
-      pubmed_id: null,
-      openalex_id: work.id,
-      source: "openalex" as const,
-      citationCount: work.cited_by_count,
-      publicationTypes: work.type ? [work.type] : undefined,
-      pdfUrl: work.best_oa_location?.pdf_url || null,
-      landingPageUrl: work.best_oa_location?.landing_page_url || null,
-    }));
+    return works.map((work, idx) => toUnifiedFromOpenAlex(work, 1 / (idx + 1)));
   } catch (error) {
     console.error(`[OpenAlex] Error:`, error);
     return [];
   }
+}
+
+async function expandOpenAlexCitationGraph(
+  seedPapers: UnifiedPaper[],
+  maxAdditional: number,
+): Promise<UnifiedPaper[]> {
+  if (maxAdditional <= 0) return [];
+
+  const openAlexSeeds = seedPapers
+    .filter((paper) => paper.source === "openalex")
+    .filter((paper) => (paper.referenced_ids || []).length > 0)
+    .slice(0, 20);
+
+  if (openAlexSeeds.length === 0) return [];
+
+  const references: string[] = [];
+  for (const seed of openAlexSeeds) {
+    for (const ref of seed.referenced_ids || []) {
+      if (!ref) continue;
+      references.push(ref);
+      if (references.length >= maxAdditional) break;
+    }
+    if (references.length >= maxAdditional) break;
+  }
+
+  const uniqueRefs = Array.from(new Set(references)).slice(0, maxAdditional);
+  const apiKey = Deno.env.get("OPENALEX_API_KEY");
+
+  const batches: UnifiedPaper[] = [];
+  const concurrency = 12;
+  for (let i = 0; i < uniqueRefs.length; i += concurrency) {
+    const chunk = uniqueRefs.slice(i, i + concurrency);
+    const fetched = await Promise.all(
+      chunk.map(async (rawRef, index) => {
+        const refId = rawRef.replace(/^https?:\/\/openalex\.org\//, "");
+        if (!refId) return null;
+        const baseUrl = `https://api.openalex.org/works/${encodeURIComponent(refId)}`;
+        const url = apiKey ? `${baseUrl}?api_key=${apiKey}` : baseUrl;
+        try {
+          const response = await withTimeout(fetch(url, { headers: { Accept: "application/json" } }), PROVIDER_TIMEOUT_MS, "openalex-expand");
+          if (!response.ok) return null;
+          const work = (await response.json()) as OpenAlexWork;
+          return toUnifiedFromOpenAlex(work, 0.2 / (index + 1));
+        } catch (_) {
+          return null;
+        }
+      }),
+    );
+
+    for (const paper of fetched) {
+      if (!paper || !paper.abstract || paper.abstract.length < 50) continue;
+      batches.push(paper);
+      if (batches.length >= maxAdditional) break;
+    }
+    if (batches.length >= maxAdditional) break;
+  }
+
+  return batches.slice(0, maxAdditional);
 }
 
 let lastS2RequestTime = 0;
@@ -286,11 +468,15 @@ async function s2RateLimit() {
   lastS2RequestTime = Date.now();
 }
 
-async function searchSemanticScholar(query: string, mode: ExpansionMode = "balanced"): Promise<UnifiedPaper[]> {
-  const prepared = buildSourceQuery(query, "semantic_scholar", mode);
+async function searchSemanticScholar(
+  query: string,
+  mode: ExpansionMode = "balanced",
+  precompiledQuery?: string,
+): Promise<UnifiedPaper[]> {
+  const prepared = resolvePreparedQuery(query, "semantic_scholar", mode, precompiledQuery);
   if (!prepared.apiQuery) return [];
   const encodedQuery = encodeURIComponent(prepared.apiQuery);
-  const fields = "paperId,title,abstract,year,authors,venue,citationCount,publicationTypes,externalIds,openAccessPdf,url";
+  const fields = "paperId,title,abstract,year,authors,venue,citationCount,publicationTypes,externalIds,openAccessPdf,url,isRetracted,references.paperId";
   const url = `https://api.semanticscholar.org/graph/v1/paper/search/bulk?query=${encodedQuery}&fields=${fields}`;
   const apiKey = Deno.env.get("SEMANTIC_SCHOLAR_API_KEY");
   console.log(`[SemanticScholar] Searching original="${prepared.originalKeywordQuery}" expanded="${prepared.expandedKeywordQuery}" api="${prepared.apiQuery}"${apiKey ? ' (with API key)' : ' (public tier)'}`);
@@ -309,7 +495,7 @@ async function searchSemanticScholar(query: string, mode: ExpansionMode = "balan
     return papers
       .filter(paper => paper.abstract && paper.abstract.length > 50)
       .slice(0, 50)
-      .map(paper => ({
+      .map((paper, idx) => ({
         id: paper.paperId,
         title: paper.title || "Untitled",
         year: paper.year || new Date().getFullYear(),
@@ -324,6 +510,10 @@ async function searchSemanticScholar(query: string, mode: ExpansionMode = "balan
         publicationTypes: paper.publicationTypes ?? undefined,
         pdfUrl: paper.openAccessPdf?.url || null,
         landingPageUrl: paper.url || null,
+        referenced_ids: (paper.references || []).map((ref) => ref.paperId).filter(Boolean),
+        is_retracted: Boolean(paper.isRetracted),
+        preprint_status: (paper.publicationTypes || []).some((ptype) => /preprint/i.test(ptype)) ? "Preprint" : "Peer-reviewed",
+        rank_signal: 1 / (idx + 1),
       }));
   } catch (error) {
     console.error(`[SemanticScholar] Error:`, error);
@@ -331,8 +521,12 @@ async function searchSemanticScholar(query: string, mode: ExpansionMode = "balan
   }
 }
 
-async function searchArxiv(query: string, mode: ExpansionMode = "balanced"): Promise<UnifiedPaper[]> {
-  const prepared = buildSourceQuery(query, "arxiv", mode);
+async function searchArxiv(
+  query: string,
+  mode: ExpansionMode = "balanced",
+  precompiledQuery?: string,
+): Promise<UnifiedPaper[]> {
+  const prepared = resolvePreparedQuery(query, "arxiv", mode, precompiledQuery);
   if (!prepared.apiQuery) return [];
   const encodedQuery = encodeURIComponent(prepared.apiQuery);
   const url = `https://export.arxiv.org/api/query?search_query=all:${encodedQuery}&max_results=25&sortBy=relevance&sortOrder=descending`;
@@ -382,6 +576,8 @@ async function searchArxiv(query: string, mode: ExpansionMode = "balanced"): Pro
         source: "arxiv" as const,
         citationCount: undefined,
         publicationTypes: ["Preprint"],
+        preprint_status: "Preprint",
+        rank_signal: 1 / (papers.length + 1),
       });
     }
     console.log(`[ArXiv] Found ${papers.length} papers`);
@@ -394,8 +590,12 @@ async function searchArxiv(query: string, mode: ExpansionMode = "balanced"): Pro
 
 // ─── PubMed Search ──────────────────────────────────────────────────────────
 
-async function searchPubMed(query: string, mode: ExpansionMode = "balanced"): Promise<UnifiedPaper[]> {
-  const prepared = buildSourceQuery(query, "pubmed", mode);
+async function searchPubMed(
+  query: string,
+  mode: ExpansionMode = "balanced",
+  precompiledQuery?: string,
+): Promise<UnifiedPaper[]> {
+  const prepared = resolvePreparedQuery(query, "pubmed", mode, precompiledQuery);
   if (!prepared.apiQuery) return [];
   const encodedQuery = encodeURIComponent(prepared.apiQuery);
 
@@ -506,6 +706,8 @@ async function searchPubMed(query: string, mode: ExpansionMode = "balanced"): Pr
         citationCount: undefined,
         publicationTypes: undefined,
         journal,
+        preprint_status: "Peer-reviewed",
+        rank_signal: 1 / (papers.length + 1),
       });
     }
 
@@ -635,90 +837,91 @@ function deduplicateAndMerge(s2Papers: UnifiedPaper[], openAlexPapers: UnifiedPa
 }
 
 
-// ─── Crossref Enrichment ─────────────────────────────────────────────────────
+// ─── Metadata Enrichment ─────────────────────────────────────────────────────
 
-async function enrichSinglePaper(paper: UnifiedPaper): Promise<void> {
-  try {
-    let crossrefData = null;
-    if (paper.doi) {
-      const encodedDoi = encodeURIComponent(paper.doi);
-      const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 5000);
-      try {
-        const response = await fetch(`https://api.crossref.org/works/${encodedDoi}`, {
-          headers: { 'User-Agent': 'EurekaSearch/1.0 (mailto:research@eureka.app)' },
-          signal: controller.signal
-        });
-        clearTimeout(timeoutId);
-        if (response.ok) {
-          crossrefData = (await response.json()).message;
-        }
-      } catch (error) {
-        clearTimeout(timeoutId);
-      }
-    } else if (paper.title) {
-      const encodedTitle = encodeURIComponent(paper.title);
-      const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 5000);
-      try {
-        const response = await fetch(
-          `https://api.crossref.org/works?query.bibliographic=${encodedTitle}&rows=1`,
-          {
-            headers: { 'User-Agent': 'EurekaSearch/1.0 (mailto:research@eureka.app)' },
-            signal: controller.signal
-          }
-        );
-        clearTimeout(timeoutId);
-        if (response.ok) {
-          const data = await response.json();
-          if (data.message.items?.length > 0) {
-            crossrefData = data.message.items[0];
-          }
-        }
-      } catch (error) {
-        clearTimeout(timeoutId);
-      }
-    }
-    if (crossrefData) {
-      paper.doi = crossrefData.DOI || paper.doi;
-      paper.year = crossrefData.issued?.['date-parts']?.[0]?.[0] || paper.year;
-      paper.citationCount = crossrefData['is-referenced-by-count'] ?? paper.citationCount;
-      if (crossrefData['container-title']?.[0]) {
-        paper.journal = crossrefData['container-title'][0];
-      }
-    }
-  } catch (_) {
-    // silently skip
-  }
+interface MetadataEnrichmentContext {
+  mode: MetadataEnrichmentMode;
+  store?: MetadataEnrichmentStore;
+  sourceTrust?: Record<string, number>;
+  userId?: string;
+  reportId?: string;
+  searchId?: string;
+  retryMax?: number;
+  maxLatencyMs?: number;
 }
 
-async function enrichWithCrossref(papers: UnifiedPaper[]): Promise<UnifiedPaper[]> {
-  const enrichedPapers = [...papers];
-  // Process in parallel batches of 10 to avoid rate limits
-  const CONCURRENCY = 10;
-  for (let i = 0; i < enrichedPapers.length; i += CONCURRENCY) {
-    const batch = enrichedPapers.slice(i, i + CONCURRENCY);
-    await Promise.all(batch.map(enrichSinglePaper));
-  }
-  console.log(`[Crossref] Enrichment complete for ${enrichedPapers.length} papers`);
-  return enrichedPapers;
+function toEnrichmentInputPaper(paper: UnifiedPaper): EnrichmentInputPaper {
+  return {
+    id: paper.id,
+    title: paper.title,
+    year: paper.year,
+    abstract: paper.abstract,
+    authors: paper.authors,
+    venue: paper.venue,
+    doi: paper.doi,
+    source: paper.source,
+    citationCount: paper.citationCount ?? null,
+    journal: paper.journal ?? null,
+  };
+}
+
+function mergeEnrichmentPaper(basePaper: UnifiedPaper, enrichedPaper: EnrichmentInputPaper): UnifiedPaper {
+  return {
+    ...basePaper,
+    doi: enrichedPaper.doi ?? basePaper.doi,
+    year: enrichedPaper.year ?? basePaper.year,
+    citationCount: enrichedPaper.citationCount ?? basePaper.citationCount,
+    journal: enrichedPaper.journal ?? basePaper.journal,
+  };
+}
+
+async function enrichWithMetadata(
+  papers: UnifiedPaper[],
+  context: MetadataEnrichmentContext,
+  functionName: string,
+): Promise<UnifiedPaper[]> {
+  const input = papers.map(toEnrichmentInputPaper);
+  const { papers: enriched, decisions } = await runMetadataEnrichment(input, {
+    mode: context.mode,
+    functionName,
+    stack: "supabase_edge",
+    store: context.store,
+    sourceTrust: context.sourceTrust,
+    reportId: context.reportId,
+    searchId: context.searchId,
+    userId: context.userId,
+    retryMax: context.retryMax,
+    maxLatencyMs: context.maxLatencyMs,
+  });
+
+  const merged = papers.map((paper, idx) => mergeEnrichmentPaper(paper, enriched[idx] || input[idx]));
+  const accepted = decisions.filter((decision) => decision.outcome === "accepted").length;
+  const deferred = decisions.filter((decision) => decision.outcome === "deferred").length;
+  const rejected = decisions.filter((decision) => decision.outcome === "rejected").length;
+  console.log(
+    `[MetadataEnrichment] mode=${context.mode} fn=${functionName} total=${decisions.length} accepted=${accepted} deferred=${deferred} rejected=${rejected}`,
+  );
+  return merged;
 }
 
 // ─── Study Completeness Filter ──────────────────────────────────────────────
 
-function isCompleteStudy(study: any): boolean {
+function isCompleteStudy(study: StudyResult): boolean {
   if (!study.title || !study.year) return false;
   if (study.study_design === "unknown") return false;
   if (!study.abstract_excerpt || study.abstract_excerpt.trim().length < 50) return false;
   if (!study.outcomes || study.outcomes.length === 0) return false;
-  const hasCompleteOutcome = study.outcomes.some((o: any) =>
+  const hasCompleteOutcome = study.outcomes.some((o: Outcome) =>
     o.outcome_measured &&
     (o.effect_size || o.p_value || o.intervention || o.comparator)
   );
   return hasCompleteOutcome;
 }
 
-function getQueryKeywordSet(query: string): Set<string> {
+function getQueryKeywordSet(query: string, precomputedTerms?: string[]): Set<string> {
+  if (precomputedTerms && precomputedTerms.length > 0) {
+    return new Set(precomputedTerms.map((k) => k.trim().toLowerCase()).filter(Boolean));
+  }
   const { originalTerms, expandedTerms } = extractSearchKeywords(query);
   const keywords = [...originalTerms, ...expandedTerms]
     .map(k => k.trim())
@@ -756,7 +959,7 @@ function mergeExtractedStudies(studies: StudyResult[]): StudyResult[] {
 
     const combinedOutcomes = [...(existing.outcomes || []), ...(study.outcomes || [])];
     const seenOutcomes = new Set<string>();
-    const dedupedOutcomes = combinedOutcomes.filter((outcome: any) => {
+    const dedupedOutcomes = combinedOutcomes.filter((outcome: Outcome) => {
       const key = `${outcome?.outcome_measured || ""}|${outcome?.citation_snippet || ""}|${outcome?.key_result || ""}`;
       if (seenOutcomes.has(key)) return false;
       seenOutcomes.add(key);
@@ -916,109 +1119,254 @@ Extract structured data from each paper's abstract following the strict rules. R
   }
 }
 
+function canonicalToUnifiedPaper(paper: CanonicalPaper): UnifiedPaper {
+  const primarySource = paper.provenance[0]?.provider;
+  const normalizedSource: UnifiedPaper["source"] =
+    primarySource === "pubmed" || primarySource === "arxiv" || primarySource === "semantic_scholar"
+      ? primarySource
+      : "openalex";
+
+  return {
+    id: paper.paper_id,
+    title: paper.title,
+    year: paper.year || new Date().getUTCFullYear(),
+    abstract: paper.abstract,
+    authors: paper.authors,
+    venue: paper.venue,
+    doi: paper.doi,
+    pubmed_id: paper.pubmed_id,
+    openalex_id: paper.openalex_id,
+    source: normalizedSource,
+    citationCount: paper.citation_count,
+    publicationTypes: paper.study_design_hint ? [paper.study_design_hint] : undefined,
+    journal: paper.venue || undefined,
+    pdfUrl: null,
+    landingPageUrl: null,
+    referenced_ids: paper.referenced_ids,
+    is_retracted: paper.is_retracted,
+    preprint_status: paper.is_preprint ? "Preprint" : "Peer-reviewed",
+    rank_signal: paper.relevance_score,
+  };
+}
+
+function canonicalToFallbackStudy(paper: CanonicalPaper): StudyResult {
+  const unified = canonicalToUnifiedPaper(paper);
+  const abstractSentence = (paper.abstract || "").split(/(?<=[.!?])\s+/).map((s) => s.trim()).find(Boolean) || null;
+  const studyDesignText = (paper.study_design_hint || "").toLowerCase();
+  let studyDesign: StudyResult["study_design"] = "unknown";
+  if (studyDesignText.includes("rct") || studyDesignText.includes("randomized") || studyDesignText.includes("randomised")) studyDesign = "RCT";
+  else if (studyDesignText.includes("cohort")) studyDesign = "cohort";
+  else if (studyDesignText.includes("cross")) studyDesign = "cross-sectional";
+  else if (studyDesignText.includes("review")) studyDesign = "review";
+
+  return {
+    study_id: paper.paper_id,
+    title: paper.title,
+    year: paper.year || new Date().getUTCFullYear(),
+    study_design: studyDesign,
+    sample_size: null,
+    population: null,
+    outcomes: [{
+      outcome_measured: "Reported outcome",
+      key_result: abstractSentence,
+      citation_snippet: abstractSentence || paper.title,
+      intervention: null,
+      comparator: null,
+      effect_size: null,
+      p_value: null,
+    }],
+    citation: {
+      doi: paper.doi,
+      pubmed_id: paper.pubmed_id,
+      openalex_id: paper.openalex_id,
+      formatted: formatCitation(unified),
+    },
+    abstract_excerpt: abstractSentence || paper.abstract || paper.title,
+    preprint_status: paper.is_preprint ? "Preprint" : "Peer-reviewed",
+    review_type: studyDesignText.includes("meta-analysis")
+      ? "Meta-analysis"
+      : studyDesignText.includes("systematic review")
+        ? "Systematic review"
+        : "None",
+    source: unified.source,
+    citationCount: paper.citation_count || 0,
+    pdf_url: null,
+    landing_page_url: null,
+  };
+}
+
 // ─── Full Research Pipeline ──────────────────────────────────────────────────
 
 interface PipelineResult {
   results: StudyResult[];
+  evidence_table: SearchResponsePayload["evidence_table"];
+  brief: SearchResponsePayload["brief"];
+  coverage: CoverageReport;
+  stats: SearchStats;
+  canonical_papers: CanonicalPaper[];
   normalized_query?: string;
   total_papers_searched: number;
   openalex_count: number;
   semantic_scholar_count: number;
   arxiv_count: number;
   pubmed_count: number;
+  query_processing?: QueryProcessingMeta;
+  query_pipeline_mode: QueryPipelineMode;
 }
 
-async function runResearchPipeline(question: string): Promise<PipelineResult> {
-  const GOOGLE_GEMINI_API_KEY = Deno.env.get("GOOGLE_GEMINI_API_KEY");
-  if (!GOOGLE_GEMINI_API_KEY) {
-    throw new Error("AI service not configured. Please add your Google Gemini API key.");
+async function runResearchPipeline(
+  question: string,
+  requestPayload: SearchRequestPayload,
+  enrichmentContext: MetadataEnrichmentContext,
+): Promise<PipelineResult> {
+  const pipelineStartedAt = Date.now();
+  const GOOGLE_GEMINI_API_KEY = Deno.env.get("GOOGLE_GEMINI_API_KEY") || "";
+
+  console.log(`[Pipeline] Processing query="${question}" max_candidates=${requestPayload.max_candidates}`);
+
+  const queryPipelineMode = getQueryPipelineMode();
+  const { normalized: v1Normalized, wasNormalized: v1WasNormalized } = normalizeQuery(question);
+  let normalizedQueryForResponse = v1WasNormalized ? v1Normalized : undefined;
+  let searchQuery = v1WasNormalized ? v1Normalized : question;
+  let queryProcessingMeta: QueryProcessingMeta | undefined;
+  let queryTermsForRanking: string[] | undefined;
+  const sourceQueryOverrides: Partial<Record<SearchSource, string>> = {};
+  let shadowPreparedPromise: Promise<Awaited<ReturnType<typeof prepareQueryProcessingV2>>> | null = null;
+
+  if (queryPipelineMode === "v2") {
+    const prepared = await prepareQueryProcessingV2(question, {
+      llmApiKey: GOOGLE_GEMINI_API_KEY,
+      fallbackTimeoutMs: 350,
+    });
+    searchQuery = prepared.search_query;
+    normalizedQueryForResponse = prepared.was_normalized ? prepared.normalized_query : undefined;
+    queryTermsForRanking = prepared.query_terms;
+    queryProcessingMeta = prepared.query_processing;
+    sourceQueryOverrides.semantic_scholar = prepared.query_processing.source_queries.semantic_scholar;
+    sourceQueryOverrides.openalex = prepared.query_processing.source_queries.openalex;
+    sourceQueryOverrides.pubmed = prepared.query_processing.source_queries.pubmed;
+    sourceQueryOverrides.arxiv = prepared.query_processing.source_queries.arxiv;
+  } else if (queryPipelineMode === "shadow") {
+    shadowPreparedPromise = prepareQueryProcessingV2(question, {
+      llmApiKey: GOOGLE_GEMINI_API_KEY,
+      fallbackTimeoutMs: 350,
+    });
   }
 
-  console.log(`[Pipeline] Processing question: "${question}"`);
-
-  const { normalized, wasNormalized } = normalizeQuery(question);
-  const searchQuery = wasNormalized ? normalized : question;
-  if (wasNormalized) console.log(`[Pipeline] Query normalized: "${question}" -> "${normalized}"`);
-
-  // Run all API searches in parallel
-  const [s2Papers, openAlexPapers, arxivPapers, pubmedPapers] = await Promise.all([
-    searchSemanticScholar(searchQuery).catch(e => { console.error("[Pipeline] S2 failed:", e); return [] as UnifiedPaper[]; }),
-    searchOpenAlex(searchQuery).catch(e => { console.error("[Pipeline] OpenAlex failed:", e); return [] as UnifiedPaper[]; }),
-    searchArxiv(searchQuery).catch(e => { console.error("[Pipeline] ArXiv failed:", e); return [] as UnifiedPaper[]; }),
-    searchPubMed(searchQuery).catch(e => { console.error("[Pipeline] PubMed failed:", e); return [] as UnifiedPaper[]; }),
+  const retrievalStartedAt = Date.now();
+  const providerRuns = await Promise.all([
+    retryProviderSearch("semantic_scholar", () => searchSemanticScholar(searchQuery, "balanced", sourceQueryOverrides.semantic_scholar)),
+    retryProviderSearch("openalex", () => searchOpenAlex(searchQuery, "balanced", sourceQueryOverrides.openalex)),
+    retryProviderSearch("arxiv", () => searchArxiv(searchQuery, "balanced", sourceQueryOverrides.arxiv)),
+    retryProviderSearch("pubmed", () => searchPubMed(searchQuery, "balanced", sourceQueryOverrides.pubmed)),
   ]);
-  const totalFetched = s2Papers.length + openAlexPapers.length + arxivPapers.length + pubmedPapers.length;
-  console.log(`[Pipeline] Stage stats: fetched=${totalFetched} (s2=${s2Papers.length}, openalex=${openAlexPapers.length}, arxiv=${arxivPapers.length}, pubmed=${pubmedPapers.length})`);
 
-  const allPapers = deduplicateAndMerge(s2Papers, openAlexPapers, arxivPapers, pubmedPapers);
-  console.log(`[Pipeline] Stage stats: deduped=${allPapers.length}`);
-
-  if (allPapers.length === 0) {
-    return {
-      results: [],
-      normalized_query: wasNormalized ? normalized : undefined,
-      total_papers_searched: 0,
-      openalex_count: 0,
-      semantic_scholar_count: 0,
-      arxiv_count: 0,
-      pubmed_count: 0,
-    };
+  if (queryPipelineMode === "shadow" && shadowPreparedPromise) {
+    try {
+      const prepared = await shadowPreparedPromise;
+      queryProcessingMeta = prepared.query_processing;
+    } catch (error) {
+      console.warn("[Pipeline] Shadow query processing failed:", error);
+    }
   }
 
-  const enrichedPapers = await enrichWithCrossref(allPapers);
-  const papersWithAbstracts = enrichedPapers.filter(p => p.abstract.length > 50);
-  console.log(`[Pipeline] Stage stats: abstract-qualified=${papersWithAbstracts.length}`);
+  const s2Papers = providerRuns[0].papers;
+  const openAlexPapers = providerRuns[1].papers;
+  const arxivPapers = providerRuns[2].papers;
+  const pubmedPapers = providerRuns[3].papers;
+  const failedProviders = providerRuns
+    .map((run, idx) => ({ run, name: (["semantic_scholar", "openalex", "arxiv", "pubmed"] as const)[idx] }))
+    .filter((entry) => entry.run.failed)
+    .map((entry) => entry.name);
 
-  if (papersWithAbstracts.length === 0) {
-    return {
-      results: [],
-      normalized_query: wasNormalized ? normalized : undefined,
-      total_papers_searched: allPapers.length,
-      openalex_count: openAlexPapers.length,
-      semantic_scholar_count: s2Papers.length,
-      arxiv_count: arxivPapers.length,
-      pubmed_count: pubmedPapers.length,
-    };
+  const coverage: CoverageReport = {
+    providers_queried: 4,
+    providers_failed: failedProviders.length,
+    failed_provider_names: failedProviders,
+    degraded: failedProviders.length > 0,
+  };
+
+  let providerCandidates = [...s2Papers, ...openAlexPapers, ...arxivPapers, ...pubmedPapers];
+  const retrievalElapsed = Date.now() - retrievalStartedAt;
+  const remainingBudgetMs = RETRIEVAL_BUDGET_MS - retrievalElapsed;
+
+  if (remainingBudgetMs > 1_000 && providerCandidates.length < requestPayload.max_candidates) {
+    const expansionCap = Math.min(400, requestPayload.max_candidates - providerCandidates.length);
+    if (expansionCap > 0) {
+      try {
+        const expansion = await withTimeout(
+          expandOpenAlexCitationGraph(openAlexPapers, expansionCap),
+          remainingBudgetMs,
+          "openalex-expansion",
+        );
+        providerCandidates = [...providerCandidates, ...expansion];
+      } catch (error) {
+        console.warn("[Pipeline] OpenAlex expansion skipped:", error);
+      }
+    }
   }
 
-  const queryKeywords = getQueryKeywordSet(searchQuery);
-  const rankedCandidates = [...papersWithAbstracts].sort(
-    (a, b) => scorePaperCandidate(b, queryKeywords) - scorePaperCandidate(a, queryKeywords)
+  const dedupedForLegacyFlow = deduplicateAndMerge(s2Papers, openAlexPapers, arxivPapers, pubmedPapers);
+  const enrichedLegacyPapers = await enrichWithMetadata(dedupedForLegacyFlow, enrichmentContext, "research-async");
+  const enrichedProviderCandidates = await enrichWithMetadata(providerCandidates, enrichmentContext, "research-async");
+  const papersWithAbstracts = enrichedProviderCandidates.filter((paper) => paper.abstract && paper.abstract.length > 50);
+
+  const queryKeywords = getQueryKeywordSet(searchQuery, queryPipelineMode === "v2" ? queryTermsForRanking : undefined);
+  const rankedByQuery = [...papersWithAbstracts].sort(
+    (left, right) => scorePaperCandidate(right, queryKeywords) - scorePaperCandidate(left, queryKeywords),
   );
+  const cappedCandidates = rankedByQuery.slice(0, requestPayload.max_candidates);
 
-  // Reduce to top 30 candidates, process in 2 parallel LLM batches
-  const stagedCandidateCount = Math.min(30, rankedCandidates.length);
-  const stagedCandidates = rankedCandidates.slice(0, stagedCandidateCount);
-  const batchSize = 15;
+  const canonicalCandidates = canonicalizePapers(cappedCandidates as InputPaper[]);
+  const timeframe: [number, number] = [requestPayload.filters.from_year, requestPayload.filters.to_year];
+  const { kept, filtered_count } = applyQualityFilter(canonicalCandidates, requestPayload.filters, timeframe);
+  const keptCapped = kept.slice(0, requestPayload.max_candidates);
+  const { evidence_table, brief } = buildEvidenceAndBrief(keptCapped, requestPayload.max_evidence_rows);
 
-  const batchPromises: Promise<StudyResult[]>[] = [];
-  for (let i = 0; i < stagedCandidates.length; i += batchSize) {
-    const batch = stagedCandidates.slice(i, i + batchSize);
-    const batchNumber = Math.floor(i / batchSize) + 1;
-    batchPromises.push(
-      extractStudyData(batch, question, GOOGLE_GEMINI_API_KEY).then(results => {
-        console.log(`[Pipeline] Stage stats: batch=${batchNumber} candidates=${batch.length} extracted=${results.length}`);
-        return results;
-      })
-    );
+  let results: StudyResult[] = [];
+  if (keptCapped.length > 0) {
+    const llmCandidates = keptCapped.slice(0, 30).map(canonicalToUnifiedPaper);
+    if (GOOGLE_GEMINI_API_KEY) {
+      try {
+        const batchSize = 15;
+        const extractionBatches: Promise<StudyResult[]>[] = [];
+        for (let i = 0; i < llmCandidates.length; i += batchSize) {
+          const batch = llmCandidates.slice(i, i + batchSize);
+          extractionBatches.push(extractStudyData(batch, question, GOOGLE_GEMINI_API_KEY));
+        }
+        const extracted = (await Promise.all(extractionBatches)).flat();
+        const mergedByStudy = mergeExtractedStudies(extracted);
+        results = mergedByStudy.filter((study: StudyResult) => isCompleteStudy(study));
+      } catch (error) {
+        console.warn("[Pipeline] LLM extraction fallback triggered:", error);
+        results = keptCapped.slice(0, 50).map(canonicalToFallbackStudy);
+      }
+    } else {
+      results = keptCapped.slice(0, 50).map(canonicalToFallbackStudy);
+    }
   }
-  const batchResults = await Promise.all(batchPromises);
-  const extractedAcrossBatches = batchResults.flat();
 
-  const mergedByStudy = mergeExtractedStudies(extractedAcrossBatches);
-  const results = mergedByStudy.filter((s: any) => isCompleteStudy(s));
-  console.log(`[Pipeline] Stage stats: extracted_total=${extractedAcrossBatches.length}, merged_unique=${mergedByStudy.length}, post-filter=${results.length}`);
-
-  console.log(`[Pipeline] Returning ${results.length} structured results`);
+  const stats: SearchStats = {
+    latency_ms: Date.now() - pipelineStartedAt,
+    candidates_total: canonicalCandidates.length,
+    candidates_filtered: filtered_count,
+  };
 
   return {
     results,
-    normalized_query: wasNormalized ? normalized : undefined,
-    total_papers_searched: allPapers.length,
+    evidence_table,
+    brief,
+    coverage,
+    stats,
+    canonical_papers: keptCapped,
+    normalized_query: normalizedQueryForResponse,
+    total_papers_searched: enrichedLegacyPapers.length,
     openalex_count: openAlexPapers.length,
     semantic_scholar_count: s2Papers.length,
     arxiv_count: arxivPapers.length,
     pubmed_count: pubmedPapers.length,
+    query_processing: queryProcessingMeta,
+    query_pipeline_mode: queryPipelineMode,
   };
 }
 
@@ -1035,8 +1383,10 @@ function scheduleBackgroundWork(work: Promise<void>): void {
 
 // ─── Rate Limiting ───────────────────────────────────────────────────────────
 
+type SupabaseClientLike = ReturnType<typeof createClient>;
+
 async function checkRateLimit(
-  supabase: any,
+  supabase: SupabaseClientLike,
   functionName: string,
   clientIp: string,
   maxRequests: number,
@@ -1061,6 +1411,205 @@ async function checkRateLimit(
   return true;
 }
 
+async function recordQueryProcessingEvent(
+  supabase: SupabaseClientLike,
+  params: {
+    functionName: string;
+    mode: QueryPipelineMode;
+    reportId?: string;
+    originalQuery: string;
+    servedQuery: string;
+    normalizedQuery?: string;
+    queryProcessing?: QueryProcessingMeta;
+    userId?: string;
+  },
+): Promise<void> {
+  if (!params.queryProcessing) return;
+
+  const payload = {
+    function_name: params.functionName,
+    mode: params.mode,
+    user_id: params.userId ?? null,
+    report_id: params.reportId ?? null,
+    original_query: params.originalQuery,
+    served_query: params.servedQuery,
+    normalized_query: params.normalizedQuery ?? null,
+    deterministic_confidence: params.queryProcessing.deterministic_confidence,
+    used_llm_fallback: params.queryProcessing.used_llm_fallback,
+    processing_ms: params.queryProcessing.processing_ms,
+    reason_codes: params.queryProcessing.reason_codes,
+    source_queries: params.queryProcessing.source_queries,
+  };
+
+  const { error } = await supabase.from("query_processing_events").insert(payload);
+  if (error) {
+    console.warn("[query-processing] Failed to record event:", error.message);
+  }
+}
+
+function runningSearchResponse(searchId: string): SearchResponsePayload {
+  return {
+    search_id: searchId,
+    status: "running",
+    coverage: {
+      providers_queried: 0,
+      providers_failed: 0,
+      failed_provider_names: [],
+      degraded: false,
+    },
+    evidence_table: [],
+    brief: { sentences: [] },
+    stats: {
+      latency_ms: 0,
+      candidates_total: 0,
+      candidates_filtered: 0,
+    },
+  };
+}
+
+function mapReportToSearchResponse(report: {
+  id?: string;
+  status?: string;
+  error_message?: string | null;
+  lit_response?: Partial<SearchResponsePayload> & { error?: string };
+}): SearchResponsePayload {
+  const payload = report?.lit_response || {};
+  const status = report?.status === "failed"
+    ? "failed"
+    : report?.status === "completed"
+      ? "completed"
+      : "running";
+
+  return {
+    search_id: String(report?.id || payload.search_id || ""),
+    status,
+    coverage: payload.coverage || {
+      providers_queried: 0,
+      providers_failed: 0,
+      failed_provider_names: [],
+      degraded: false,
+    },
+    evidence_table: payload.evidence_table || [],
+    brief: payload.brief || { sentences: [] },
+    stats: payload.stats || {
+      latency_ms: 0,
+      candidates_total: 0,
+      candidates_filtered: 0,
+    },
+    error: report?.error_message || payload.error || undefined,
+  };
+}
+
+async function readCachedSearch(
+  supabase: SupabaseClientLike,
+  cacheKey: string,
+): Promise<SearchResponsePayload | null> {
+  const nowIso = new Date().toISOString();
+  const { data, error } = await supabase
+    .from("lit_query_cache")
+    .select("response_payload")
+    .eq("cache_key", cacheKey)
+    .gt("expires_at", nowIso)
+    .maybeSingle();
+
+  if (error) {
+    console.warn("[cache] read failed:", error.message);
+    return null;
+  }
+
+  return data?.response_payload || null;
+}
+
+async function writeSearchCache(
+  supabase: SupabaseClientLike,
+  cacheKey: string,
+  requestPayload: SearchRequestPayload,
+  responsePayload: SearchResponsePayload,
+): Promise<void> {
+  const expiresAt = new Date(Date.now() + 6 * 60 * 60_000).toISOString();
+  const { error } = await supabase.from("lit_query_cache").upsert({
+    cache_key: cacheKey,
+    request_payload: requestPayload,
+    response_payload: responsePayload,
+    expires_at: expiresAt,
+    updated_at: new Date().toISOString(),
+  }, { onConflict: "cache_key" });
+
+  if (error) {
+    console.warn("[cache] write failed:", error.message);
+  }
+}
+
+async function upsertPaperCache(supabase: SupabaseClientLike, papers: CanonicalPaper[]): Promise<void> {
+  if (papers.length === 0) return;
+  const expiresAt = new Date(Date.now() + 30 * 24 * 60 * 60_000).toISOString();
+  const payload = papers.slice(0, 500).map((paper) => ({
+    paper_id: paper.paper_id,
+    paper_payload: paper,
+    expires_at: expiresAt,
+    updated_at: new Date().toISOString(),
+  }));
+
+  const { error } = await supabase.from("lit_paper_cache").upsert(payload, { onConflict: "paper_id" });
+  if (error) {
+    console.warn("[paper-cache] upsert failed:", error.message);
+  }
+}
+
+function getPathParts(req: Request): string[] {
+  const path = new URL(req.url).pathname.replace(/^\/functions\/v1\/research-async/, "");
+  return path.split("/").filter(Boolean);
+}
+
+async function providerHealthSnapshot() {
+  const checks = [
+    {
+      provider: "openalex",
+      url: "https://api.openalex.org/works?search=health&per-page=1",
+    },
+    {
+      provider: "semantic_scholar",
+      url: "https://api.semanticscholar.org/graph/v1/paper/search?query=health&limit=1&fields=paperId",
+    },
+    {
+      provider: "pubmed",
+      url: "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esearch.fcgi?db=pubmed&term=health&retmax=1&retmode=json",
+    },
+    {
+      provider: "arxiv",
+      url: "https://export.arxiv.org/api/query?search_query=all:health&max_results=1",
+    },
+  ] as const;
+
+  const status = await Promise.all(checks.map(async (check) => {
+    const started = Date.now();
+    try {
+      const response = await withTimeout(fetch(check.url), 4_000, `health-${check.provider}`);
+      return {
+        provider: check.provider,
+        healthy: response.ok,
+        latency_ms: Date.now() - started,
+        error_rate: response.ok ? 0 : 1,
+        last_error: response.ok ? null : `HTTP ${response.status}`,
+      };
+    } catch (error) {
+      return {
+        provider: check.provider,
+        healthy: false,
+        latency_ms: Date.now() - started,
+        error_rate: 1,
+        last_error: error instanceof Error ? error.message : String(error),
+      };
+    }
+  }));
+
+  return {
+    providers: status,
+    providers_queried: status.length,
+    providers_failed: status.filter((item) => !item.healthy).length,
+  };
+}
+
 // ─── Main Handler ────────────────────────────────────────────────────────────
 
 serve(async (req) => {
@@ -1073,17 +1622,9 @@ serve(async (req) => {
   const supabase = createClient(supabaseUrl, supabaseKey);
 
   try {
-    // Rate limit: 10 research requests per IP per hour
-    const clientIp = req.headers.get("x-forwarded-for")?.split(",")[0]?.trim() || "unknown";
-    const allowed = await checkRateLimit(supabase, "research-async", clientIp, 10, 60);
-    if (!allowed) {
-      return new Response(
-        JSON.stringify({ error: "Rate limit exceeded. Please try again later." }),
-        { status: 429, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-      );
-    }
+    const pathParts = getPathParts(req);
+    const isLitRoute = pathParts[0] === "v1" && pathParts[1] === "lit";
 
-    // Authenticate user
     const authHeader = req.headers.get("Authorization");
     if (!authHeader?.startsWith("Bearer ")) {
       return new Response(
@@ -1103,26 +1644,125 @@ serve(async (req) => {
       );
     }
     const userId = userData.user.id;
+    const metadataRuntime = getMetadataEnrichmentRuntimeConfig();
+    const metadataMode = selectEffectiveEnrichmentMode(metadataRuntime);
+    const metadataStore = new MetadataEnrichmentStore(supabase);
+    const metadataSourceTrust = await metadataStore.getSourceTrustMap();
 
-    const { question } = await req.json();
+    if (req.method === "GET" && isLitRoute && pathParts[2] === "providers" && pathParts[3] === "health") {
+      const health = await providerHealthSnapshot();
+      return new Response(JSON.stringify(health), {
+        status: 200,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
 
-    if (!question || typeof question !== "string" || question.trim().length < 5) {
+    if (req.method === "GET" && isLitRoute && pathParts[2] === "search" && pathParts[3]) {
+      const searchId = pathParts[3];
+      const { data: report, error } = await supabase
+        .from("research_reports")
+        .select("id,status,error_message,lit_response,user_id")
+        .eq("id", searchId)
+        .eq("user_id", userId)
+        .maybeSingle();
+
+      if (error) {
+        return new Response(JSON.stringify({ error: "Failed to load search" }), {
+          status: 500,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+      if (!report) {
+        return new Response(JSON.stringify({ error: "search_id not found" }), {
+          status: 404,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+
+      return new Response(JSON.stringify(mapReportToSearchResponse(report)), {
+        status: 200,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
+    if (req.method === "GET" && isLitRoute && pathParts[2] === "paper" && pathParts[3]) {
+      const paperId = decodeURIComponent(pathParts[3]);
+      const nowIso = new Date().toISOString();
+      const { data: paperCache, error } = await supabase
+        .from("lit_paper_cache")
+        .select("paper_payload")
+        .eq("paper_id", paperId)
+        .gt("expires_at", nowIso)
+        .maybeSingle();
+
+      if (error) {
+        return new Response(JSON.stringify({ error: "Failed to load paper" }), {
+          status: 500,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+      if (!paperCache) {
+        return new Response(JSON.stringify({ error: "paper_id not found" }), {
+          status: 404,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+
+      return new Response(JSON.stringify(paperCache.paper_payload), {
+        status: 200,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
+    const isStartRequest =
+      req.method === "POST" &&
+      ((isLitRoute && pathParts[2] === "search") || pathParts.length === 0);
+
+    if (!isStartRequest) {
+      return new Response(JSON.stringify({ error: "Unsupported route" }), {
+        status: 404,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
+    const clientIp = req.headers.get("x-forwarded-for")?.split(",")[0]?.trim() || "unknown";
+    const allowed = await checkRateLimit(supabase, "research-async", clientIp, 10, 60);
+    if (!allowed) {
       return new Response(
-        JSON.stringify({ error: "Please provide a valid research question (at least 5 characters)" }),
-        { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        JSON.stringify({ error: "Rate limit exceeded. Please try again later." }),
+        { status: 429, headers: { ...corsHeaders, "Content-Type": "application/json" } },
       );
     }
 
+    const rawBody = await req.json().catch(() => ({}));
+    const legacyQuestion = typeof rawBody?.question === "string" ? rawBody.question.trim() : "";
+    const litRequest = isLitRoute
+      ? sanitizeSearchRequest(rawBody as Partial<SearchRequestPayload>)
+      : sanitizeSearchRequest(defaultSearchRequestFromQuestion(legacyQuestion));
+    const question = (litRequest.query || legacyQuestion).trim();
+
+    if (!question || question.length < 5) {
+      return new Response(JSON.stringify({ error: "Please provide a valid research query (at least 5 characters)" }), {
+        status: 400,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
     if (question.length > 500) {
-      return new Response(
-        JSON.stringify({ error: "Question is too long (maximum 500 characters)" }),
-        { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-      );
+      return new Response(JSON.stringify({ error: "Query is too long (maximum 500 characters)" }), {
+        status: 400,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
     }
 
+    const cacheKey = hashKey(JSON.stringify(litRequest));
     const { data: report, error: insertError } = await supabase
       .from("research_reports")
-      .insert({ question: question.trim(), status: "processing", user_id: userId })
+      .insert({
+        question,
+        status: "processing",
+        user_id: userId,
+        lit_request: litRequest,
+      })
       .select("id")
       .single();
 
@@ -1131,14 +1771,52 @@ serve(async (req) => {
       throw new Error("Failed to create report");
     }
 
-    const reportId = report.id;
-    console.log(`[research-async] Created report ${reportId} for: "${question}"`);
+    const reportId = report.id as string;
 
-    // Run the full pipeline in background — no HTTP fetch, no gateway timeout
+    if (isLitRoute) {
+      const cached = await readCachedSearch(supabase, cacheKey);
+      if (cached && cached.status === "completed") {
+        const replayed = { ...cached, search_id: reportId };
+        await supabase
+          .from("research_reports")
+          .update({
+            status: "completed",
+            lit_response: replayed,
+            coverage_report: replayed.coverage,
+            evidence_table: replayed.evidence_table,
+            brief_json: replayed.brief,
+            search_stats: replayed.stats,
+            completed_at: new Date().toISOString(),
+          })
+          .eq("id", reportId);
+
+        return new Response(JSON.stringify(replayed), {
+          status: 200,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+    }
+
     const backgroundWork = (async () => {
       try {
-        console.log(`[research-async] Starting background pipeline for ${reportId}`);
-        const data = await runResearchPipeline(question.trim());
+        const data = await runResearchPipeline(question, litRequest, {
+          mode: metadataMode,
+          store: metadataStore,
+          sourceTrust: metadataSourceTrust,
+          userId,
+          reportId,
+          searchId: reportId,
+          retryMax: metadataRuntime.retryMax,
+          maxLatencyMs: metadataRuntime.maxLatencyMs,
+        });
+        const litResponse: SearchResponsePayload = {
+          search_id: reportId,
+          status: "completed",
+          coverage: data.coverage,
+          evidence_table: data.evidence_table,
+          brief: data.brief,
+          stats: data.stats,
+        };
 
         const { error: updateError } = await supabase
           .from("research_reports")
@@ -1146,47 +1824,109 @@ serve(async (req) => {
             status: "completed",
             results: data.results || [],
             normalized_query: data.normalized_query || null,
+            query_processing_meta: data.query_processing || null,
             total_papers_searched: data.total_papers_searched || 0,
             openalex_count: data.openalex_count || 0,
             semantic_scholar_count: data.semantic_scholar_count || 0,
             arxiv_count: data.arxiv_count || 0,
             pubmed_count: data.pubmed_count || 0,
+            lit_response: litResponse,
+            coverage_report: data.coverage,
+            evidence_table: data.evidence_table,
+            brief_json: data.brief,
+            search_stats: data.stats,
             completed_at: new Date().toISOString(),
           })
           .eq("id", reportId);
 
         if (updateError) {
           console.error(`[research-async] Update error for ${reportId}:`, updateError);
-        } else {
-          console.log(`[research-async] Report ${reportId} completed with ${(data.results || []).length} results`);
+          return;
+        }
 
-          // Trigger PDF downloads for DOIs
-          const dois = (data.results || [])
-            .map((r: any) => r.citation?.doi?.trim())
-            .filter((doi: string | undefined): doi is string => doi !== undefined && doi !== '');
+        await writeSearchCache(supabase, cacheKey, litRequest, litResponse);
+        await upsertPaperCache(supabase, data.canonical_papers);
 
-          if (dois.length > 0) {
-            console.log(`[research-async] Triggering PDF download for ${dois.length} DOIs`);
-            const scihubUrl = `${supabaseUrl}/functions/v1/scihub-download`;
-            fetch(scihubUrl, {
-              method: "POST",
-              headers: {
-                "Content-Type": "application/json",
-                "Authorization": `Bearer ${Deno.env.get("SUPABASE_ANON_KEY")}`,
-              },
-              body: JSON.stringify({ report_id: reportId, dois, user_id: userId }),
-            }).catch(err => {
-              console.error(`[research-async] Failed to trigger PDF downloads:`, err);
-            });
-          }
+        await recordQueryProcessingEvent(supabase, {
+          functionName: "research-async",
+          mode: data.query_pipeline_mode,
+          reportId,
+          originalQuery: question,
+          servedQuery: data.normalized_query || question,
+          normalizedQuery: data.normalized_query,
+          queryProcessing: data.query_processing,
+          userId,
+        });
+
+        if (metadataMode === "offline_apply") {
+          const jobPapers = (data.canonical_papers || []).map((paper) => ({
+            id: paper.paper_id,
+            title: paper.title,
+            year: paper.year,
+            authors: paper.authors,
+            venue: paper.venue,
+            doi: paper.doi,
+            citationCount: paper.citation_count,
+            journal: paper.venue,
+            source: paper.provenance?.[0]?.provider || "unknown",
+          }));
+
+          await metadataStore.enqueueJob({
+            stack: "supabase_edge",
+            report_id: reportId,
+            search_id: reportId,
+            user_id: userId,
+            payload: {
+              function_name: "research-async",
+              mode: "offline_apply",
+              report_id: reportId,
+              papers: jobPapers,
+            },
+          });
+        }
+
+        const dois = (data.results || [])
+          .map((result: StudyResult) => result.citation?.doi?.trim())
+          .filter((doi: string | undefined): doi is string => Boolean(doi));
+
+        if (dois.length > 0) {
+          const scihubUrl = `${supabaseUrl}/functions/v1/scihub-download`;
+          fetch(scihubUrl, {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              "Authorization": `Bearer ${Deno.env.get("SUPABASE_ANON_KEY")}`,
+            },
+            body: JSON.stringify({ report_id: reportId, dois, user_id: userId }),
+          }).catch((err) => {
+            console.error(`[research-async] Failed to trigger PDF downloads:`, err);
+          });
         }
       } catch (err) {
-        console.error(`[research-async] Background pipeline failed for ${reportId}:`, err);
+        const errorMessage = err instanceof Error ? err.message : "An unexpected error occurred";
         await supabase
           .from("research_reports")
           .update({
             status: "failed",
-            error_message: err instanceof Error ? err.message : "An unexpected error occurred",
+            error_message: errorMessage,
+            lit_response: {
+              search_id: reportId,
+              status: "failed",
+              coverage: {
+                providers_queried: 0,
+                providers_failed: 0,
+                failed_provider_names: [],
+                degraded: false,
+              },
+              evidence_table: [],
+              brief: { sentences: [] },
+              stats: {
+                latency_ms: 0,
+                candidates_total: 0,
+                candidates_filtered: 0,
+              },
+              error: errorMessage,
+            },
             completed_at: new Date().toISOString(),
           })
           .eq("id", reportId);
@@ -1195,10 +1935,17 @@ serve(async (req) => {
 
     scheduleBackgroundWork(backgroundWork);
 
-    return new Response(
-      JSON.stringify({ report_id: reportId }),
-      { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-    );
+    if (isLitRoute) {
+      return new Response(JSON.stringify(runningSearchResponse(reportId)), {
+        status: 200,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
+    return new Response(JSON.stringify({ report_id: reportId }), {
+      status: 200,
+      headers: { ...corsHeaders, "Content-Type": "application/json" },
+    });
 
   } catch (error) {
     console.error("[research-async] Error:", error);

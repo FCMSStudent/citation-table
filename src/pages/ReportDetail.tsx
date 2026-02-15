@@ -98,9 +98,14 @@ const ReportDetail = () => {
                     openalexCount={report.openalex_count}
                     semanticScholarCount={report.semantic_scholar_count}
                     arxivCount={report.arxiv_count}
+                    pubmedCount={report.pubmed_count}
                     pdfsByDoi={pdfsByDoi}
                     reportId={id}
                     cachedSynthesis={report.narrative_synthesis}
+                    evidenceTable={report.evidence_table || undefined}
+                    briefSentences={report.brief_json?.sentences || undefined}
+                    coverageReport={report.coverage_report || undefined}
+                    searchStats={report.search_stats || undefined}
                   />
                 </section>
 

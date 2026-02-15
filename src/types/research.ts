@@ -35,10 +35,104 @@ export interface StudyResult {
   landing_page_url?: string | null; // Publisher or S2 landing page URL
 }
 
+export interface ProviderProvenance {
+  provider: "openalex" | "semantic_scholar" | "arxiv" | "pubmed" | "crossref";
+  external_id: string;
+  rank_signal: number;
+  metadata_confidence: number;
+}
+
+export interface QualityScoreBreakdown {
+  source_authority: number;
+  study_design_strength: number;
+  methods_transparency: number;
+  citation_impact: number;
+  recency_fit: number;
+  q_total: number;
+  hard_rejected: boolean;
+  reject_reason: string | null;
+}
+
+export interface CitationAnchor {
+  paper_id: string;
+  section: "abstract";
+  page: number | null;
+  char_start: number;
+  char_end: number;
+  snippet_hash: string;
+}
+
+export interface ClaimSentence {
+  text: string;
+  citations: CitationAnchor[];
+  stance: "positive" | "negative" | "neutral" | "mixed" | "conflicting";
+}
+
+export interface EvidenceRow {
+  rank: number;
+  paper_id: string;
+  title: string;
+  year: number | null;
+  authors: string[];
+  venue: string;
+  doi: string | null;
+  pubmed_id: string | null;
+  openalex_id: string | null;
+  arxiv_id: string | null;
+  abstract_snippet: string;
+  proposition_label: string;
+  quality: QualityScoreBreakdown;
+  provenance: ProviderProvenance[];
+}
+
+export interface CoverageReport {
+  providers_queried: number;
+  providers_failed: number;
+  failed_provider_names: string[];
+  degraded: boolean;
+}
+
+export interface SearchStats {
+  latency_ms: number;
+  candidates_total: number;
+  candidates_filtered: number;
+}
+
+export interface LiteratureSearchResponse {
+  search_id: string;
+  status: "running" | "completed" | "failed";
+  coverage: CoverageReport;
+  evidence_table: EvidenceRow[];
+  brief: {
+    sentences: ClaimSentence[];
+  };
+  stats: SearchStats;
+  error?: string;
+}
+
+export interface QueryProcessingMeta {
+  version: "v2";
+  deterministic_confidence: number;
+  used_llm_fallback: boolean;
+  processing_ms: number;
+  reason_codes: string[];
+  source_queries: {
+    semantic_scholar: string;
+    openalex: string;
+    pubmed: string;
+    arxiv: string;
+  };
+}
+
 export interface ResearchResponse {
   results: StudyResult[];
   query: string;
   normalized_query?: string; // Present if query was normalized
+  query_processing?: QueryProcessingMeta;
+  evidence_table?: EvidenceRow[];
+  brief?: { sentences: ClaimSentence[] };
+  coverage?: CoverageReport;
+  stats?: SearchStats;
   total_papers_searched: number;
   openalex_count?: number; // Breakdown by source
   semantic_scholar_count?: number;
