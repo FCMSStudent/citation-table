@@ -1,6 +1,13 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.49.1";
 import { prepareQueryProcessingV2, type QueryProcessingMeta, type SearchSource } from "../_shared/query-processing.ts";
+import {
+  getMetadataEnrichmentRuntimeConfig,
+  runMetadataEnrichment,
+  selectEffectiveEnrichmentMode,
+  type EnrichmentInputPaper,
+} from "../_shared/metadata-enrichment.ts";
+import { MetadataEnrichmentStore, type MetadataEnrichmentMode } from "../_shared/metadata-enrichment-store.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -721,105 +728,69 @@ function deduplicateAndMerge(s2Papers: UnifiedPaper[], openAlexPapers: UnifiedPa
 }
 
 
-// Enrich papers with Crossref metadata
-async function enrichWithCrossref(papers: UnifiedPaper[]): Promise<UnifiedPaper[]> {
-  const enrichedPapers = [...papers];
-  
-  for (const paper of enrichedPapers) {
-    try {
-      let crossrefData = null;
-      
-      // Try fetching by DOI first
-      if (paper.doi) {
-        const encodedDoi = encodeURIComponent(paper.doi);
-        const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 5000); // 5 second timeout
-        
-        try {
-          const response = await fetch(`https://api.crossref.org/works/${encodedDoi}`, {
-            headers: {
-              'User-Agent': 'CitationTable/1.0 (https://github.com/FCMSStudent/citation-table)'
-            },
-            signal: controller.signal
-          });
-          clearTimeout(timeoutId);
-          
-          if (response.ok) {
-            const data = await response.json();
-            crossrefData = data.message;
-          } else if (response.status === 404) {
-            console.log(`[Crossref] DOI not found: ${paper.doi}`);
-          } else if (response.status === 429) {
-            console.warn(`[Crossref] Rate limit hit for DOI: ${paper.doi}`);
-          }
-        } catch (error) {
-          clearTimeout(timeoutId);
-          if ((error as Error).name === 'AbortError') {
-            console.warn(`[Crossref] Request timeout for DOI: ${paper.doi}`);
-          } else {
-            throw error;
-          }
-        }
-      } 
-      // Fallback: search by title if no DOI
-      else if (paper.title) {
-        const encodedTitle = encodeURIComponent(paper.title);
-        const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 5000);
-        
-        try {
-          const response = await fetch(
-            `https://api.crossref.org/works?query.bibliographic=${encodedTitle}&rows=1`,
-            {
-              headers: {
-                'User-Agent': 'CitationTable/1.0 (https://github.com/FCMSStudent/citation-table)'
-              },
-              signal: controller.signal
-            }
-          );
-          clearTimeout(timeoutId);
-          
-          if (response.ok) {
-            const data = await response.json();
-            if (data.message.items && data.message.items.length > 0) {
-              crossrefData = data.message.items[0];
-            }
-          }
-        } catch (error) {
-          clearTimeout(timeoutId);
-          if ((error as Error).name === 'AbortError') {
-            console.warn(`[Crossref] Request timeout for title search: ${paper.title}`);
-          } else {
-            throw error;
-          }
-        }
-      }
-      
-      // Merge Crossref data into paper
-      if (crossrefData) {
-        paper.doi = crossrefData.DOI || paper.doi;
-        paper.year = crossrefData.issued?.['date-parts']?.[0]?.[0] || paper.year;
-        paper.citationCount = crossrefData['is-referenced-by-count'] ?? paper.citationCount;
-        
-        // Add journal/publisher metadata
-        if (crossrefData['container-title']?.[0]) {
-          paper.journal = crossrefData['container-title'][0];
-        }
-        
-        console.log(`[Crossref] Enriched "${paper.title}" with citation count: ${crossrefData['is-referenced-by-count']}`);
-      }
-      
-      // Rate limiting: small delay between requests
-      await new Promise(resolve => setTimeout(resolve, 100));
-      
-    } catch (error) {
-      console.error(`[Crossref] Enrichment failed for paper "${paper.title}":`, error);
-      // Continue without enrichment
-    }
-  }
-  
-  console.log(`[Crossref] Enrichment complete for ${enrichedPapers.length} papers`);
-  return enrichedPapers;
+interface MetadataEnrichmentContext {
+  mode: MetadataEnrichmentMode;
+  store?: MetadataEnrichmentStore;
+  sourceTrust?: Record<string, number>;
+  userId?: string;
+  reportId?: string;
+  searchId?: string;
+  retryMax?: number;
+  maxLatencyMs?: number;
+}
+
+function toEnrichmentInputPaper(paper: UnifiedPaper): EnrichmentInputPaper {
+  return {
+    id: paper.id,
+    title: paper.title,
+    year: paper.year,
+    abstract: paper.abstract,
+    authors: paper.authors,
+    venue: paper.venue,
+    doi: paper.doi,
+    source: paper.source,
+    citationCount: paper.citationCount ?? null,
+    journal: paper.journal ?? null,
+  };
+}
+
+function mergeEnrichmentPaper(basePaper: UnifiedPaper, enrichedPaper: EnrichmentInputPaper): UnifiedPaper {
+  return {
+    ...basePaper,
+    doi: enrichedPaper.doi ?? basePaper.doi,
+    year: enrichedPaper.year ?? basePaper.year,
+    citationCount: enrichedPaper.citationCount ?? basePaper.citationCount,
+    journal: enrichedPaper.journal ?? basePaper.journal,
+  };
+}
+
+async function enrichWithMetadata(
+  papers: UnifiedPaper[],
+  context: MetadataEnrichmentContext,
+): Promise<UnifiedPaper[]> {
+  const input = papers.map(toEnrichmentInputPaper);
+  const { papers: enrichedPapers, decisions } = await runMetadataEnrichment(input, {
+    mode: context.mode,
+    functionName: "research",
+    stack: "supabase_edge",
+    store: context.store,
+    sourceTrust: context.sourceTrust,
+    reportId: context.reportId,
+    searchId: context.searchId,
+    userId: context.userId,
+    retryMax: context.retryMax,
+    maxLatencyMs: context.maxLatencyMs,
+  });
+
+  const merged = papers.map((paper, idx) => mergeEnrichmentPaper(paper, enrichedPapers[idx] || input[idx]));
+  const acceptedCount = decisions.filter((decision) => decision.outcome === "accepted").length;
+  const deferredCount = decisions.filter((decision) => decision.outcome === "deferred").length;
+  const rejectedCount = decisions.filter((decision) => decision.outcome === "rejected").length;
+  const cacheHitCount = decisions.filter((decision) => decision.used_cache).length;
+  console.log(
+    `[MetadataEnrichment] mode=${context.mode} total=${decisions.length} accepted=${acceptedCount} deferred=${deferredCount} rejected=${rejectedCount} cache_hits=${cacheHitCount}`,
+  );
+  return merged;
 }
 
 function isCompleteStudy(study: any): boolean {
@@ -1098,9 +1069,11 @@ serve(async (req) => {
 
     const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
     const anonKey = Deno.env.get("SUPABASE_ANON_KEY")!;
+    const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
     const anonClient = createClient(supabaseUrl, anonKey, {
       global: { headers: { Authorization: authHeader } },
     });
+    const serviceClient = serviceRoleKey ? createClient(supabaseUrl, serviceRoleKey) : null;
     const { data: userData, error: userError } = await anonClient.auth.getUser();
     if (userError || !userData?.user?.id) {
       return new Response(
@@ -1110,6 +1083,11 @@ serve(async (req) => {
     }
 
     const { question } = await req.json();
+
+    const metadataRuntime = getMetadataEnrichmentRuntimeConfig();
+    const metadataMode = selectEffectiveEnrichmentMode(metadataRuntime);
+    const metadataStore = serviceClient ? new MetadataEnrichmentStore(serviceClient) : undefined;
+    const sourceTrust = metadataStore ? await metadataStore.getSourceTrustMap() : undefined;
     
     // Security: Input validation
     if (!question || typeof question !== "string" || question.trim().length < 5) {
@@ -1218,8 +1196,15 @@ serve(async (req) => {
       );
     }
 
-    // Step 3.5: Enrich with Crossref data
-    const enrichedPapers = await enrichWithCrossref(allPapers);
+    // Step 3.5: Enrich with deterministic metadata policy.
+    const enrichedPapers = await enrichWithMetadata(allPapers, {
+      mode: metadataMode,
+      store: metadataStore,
+      sourceTrust,
+      userId: userData.user.id,
+      retryMax: metadataRuntime.retryMax,
+      maxLatencyMs: metadataRuntime.maxLatencyMs,
+    });
 
     // Filter papers with sufficient abstracts
     const papersWithAbstracts = enrichedPapers.filter(p => p.abstract.length > 50);
