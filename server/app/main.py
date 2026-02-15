@@ -8,7 +8,8 @@ Downloads are processed in background threads and status can be polled.
 import os
 import uuid
 import threading
-from typing import Dict, Optional
+import shutil
+from typing import Dict, Optional, Literal
 from datetime import datetime
 from pathlib import Path
 
@@ -21,10 +22,15 @@ from scidownl import scihub_download
 STORAGE_DIR = Path(__file__).parent.parent / "storage"
 STORAGE_DIR.mkdir(exist_ok=True)
 
+# Security Constants
+MAX_TASKS = 100
+MAX_CONCURRENT_DOWNLOADS = 5
+
 # Task storage (in-memory for lightweight implementation)
-# In production, consider Redis/database for persistence
 tasks: Dict[str, dict] = {}
 tasks_lock = threading.Lock()
+# Semaphore to limit concurrent background downloads
+download_semaphore = threading.Semaphore(MAX_CONCURRENT_DOWNLOADS)
 
 app = FastAPI(
     title="Research Paper Download Service",
@@ -44,8 +50,8 @@ app.add_middleware(
 
 class DownloadRequest(BaseModel):
     """Request model for paper download."""
-    keyword: str = Field(..., description="DOI, PMID, or paper title")
-    paper_type: str = Field(..., description="Type: 'doi', 'pmid', or 'title'")
+    keyword: str = Field(..., max_length=500, description="DOI, PMID, or paper title")
+    paper_type: Literal["doi", "pmid", "title"] = Field(..., description="Type of keyword")
 
 
 class DownloadResponse(BaseModel):
@@ -69,62 +75,49 @@ class TaskStatus(BaseModel):
 def download_paper_task(task_id: str, keyword: str, paper_type: str):
     """
     Background task to download a paper using SciDownl.
-    
-    Args:
-        task_id: Unique task identifier
-        keyword: DOI, PMID, or paper title
-        paper_type: Type of keyword ('doi', 'pmid', or 'title')
     """
-    try:
-        # Update task status to processing
-        with tasks_lock:
-            tasks[task_id]["status"] = "processing"
-        
-        # Download the paper using SciDownl
-        # scihub_download returns the output filename
-        output_path = str(STORAGE_DIR)
-        
-        # Download based on paper_type
-        result = scihub_download(
-            keyword,
-            paper_type=paper_type,
-            out=output_path
-        )
-        
-        # Find the downloaded file
-        # SciDownl creates files with sanitized names
-        downloaded_files = list(STORAGE_DIR.glob("*.pdf"))
-        if downloaded_files:
-            # Get the most recently modified file
-            latest_file = max(downloaded_files, key=lambda p: p.stat().st_mtime)
-            filename = latest_file.name
-            filepath = str(latest_file.relative_to(STORAGE_DIR.parent))
-            
-            # Update task with success
+    with download_semaphore:
+        task_dir = STORAGE_DIR / task_id
+        try:
             with tasks_lock:
-                tasks[task_id].update({
-                    "status": "completed",
-                    "completed_at": datetime.utcnow().isoformat(),
-                    "filename": filename,
-                    "filepath": filepath,
-                })
-        else:
-            # No file was downloaded
+                if task_id in tasks:
+                    tasks[task_id]["status"] = "processing"
+
+            task_dir.mkdir(exist_ok=True)
+            scihub_download(keyword, paper_type=paper_type, out=str(task_dir))
+
+            downloaded_files = list(task_dir.glob("*.pdf"))
+            if downloaded_files:
+                latest_file = max(downloaded_files, key=lambda p: p.stat().st_mtime)
+                filename = latest_file.name
+                with tasks_lock:
+                    if task_id in tasks:
+                        tasks[task_id].update({
+                            "status": "completed",
+                            "completed_at": datetime.utcnow().isoformat(),
+                            "filename": filename,
+                            "filepath": f"storage/{task_id}/{filename}",
+                        })
+            else:
+                with tasks_lock:
+                    if task_id in tasks:
+                        tasks[task_id].update({
+                            "status": "failed",
+                            "completed_at": datetime.utcnow().isoformat(),
+                            "error": "Paper not available or download failed.",
+                        })
+        except Exception:
             with tasks_lock:
-                tasks[task_id].update({
-                    "status": "failed",
-                    "completed_at": datetime.utcnow().isoformat(),
-                    "error": "No PDF file was downloaded. The paper may not be available.",
-                })
-    
-    except Exception as e:
-        # Handle any errors during download
-        with tasks_lock:
-            tasks[task_id].update({
-                "status": "failed",
-                "completed_at": datetime.utcnow().isoformat(),
-                "error": str(e),
-            })
+                if task_id in tasks:
+                    tasks[task_id].update({
+                        "status": "failed",
+                        "completed_at": datetime.utcnow().isoformat(),
+                        "error": "An unexpected error occurred during download.",
+                    })
+        finally:
+            # Cleanup task directory if no PDF was successfully saved
+            if task_dir.exists() and not list(task_dir.glob("*.pdf")):
+                shutil.rmtree(task_dir, ignore_errors=True)
 
 
 @app.get("/")
@@ -144,39 +137,22 @@ async def root():
 @app.get("/health")
 async def health_check():
     """Health check endpoint."""
+    with tasks_lock:
+        active = len([t for t in tasks.values() if t["status"] == "processing"])
+        total = len(tasks)
     return {
         "status": "healthy",
         "storage_dir": str(STORAGE_DIR),
-        "active_tasks": len([t for t in tasks.values() if t["status"] == "processing"]),
+        "active_tasks": active,
+        "total_tasks_cached": total,
+        "concurrency_limit": MAX_CONCURRENT_DOWNLOADS,
     }
 
 
 @app.post("/api/download", response_model=DownloadResponse, status_code=202)
 async def download_paper(request: DownloadRequest):
-    """
-    Request a paper download by DOI, PMID, or title.
-    
-    Returns a task_id that can be used to poll the download status.
-    The download is processed in a background thread.
-    
-    Args:
-        request: DownloadRequest with keyword and paper_type
-        
-    Returns:
-        DownloadResponse with task_id and initial status
-    """
-    # Validate paper_type
-    valid_types = ["doi", "pmid", "title"]
-    if request.paper_type not in valid_types:
-        raise HTTPException(
-            status_code=400,
-            detail=f"Invalid paper_type. Must be one of: {', '.join(valid_types)}"
-        )
-    
-    # Generate unique task ID
+    """Request a paper download by DOI, PMID, or title."""
     task_id = str(uuid.uuid4())
-    
-    # Initialize task record
     task_record = {
         "task_id": task_id,
         "status": "pending",
@@ -185,10 +161,18 @@ async def download_paper(request: DownloadRequest):
         "paper_type": request.paper_type,
     }
     
+    evict_path = None
     with tasks_lock:
+        if len(tasks) >= MAX_TASKS:
+            evict_id = next(iter(tasks))
+            evicted = tasks.pop(evict_id)
+            if evicted["status"] != "processing":
+                evict_path = STORAGE_DIR / evict_id
         tasks[task_id] = task_record
     
-    # Start background thread for download
+    if evict_path and evict_path.exists():
+        shutil.rmtree(evict_path, ignore_errors=True)
+
     thread = threading.Thread(
         target=download_paper_task,
         args=(task_id, request.keyword, request.paper_type),
