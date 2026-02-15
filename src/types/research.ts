@@ -69,6 +69,12 @@ export interface SynthesisData {
   warnings: SynthesisWarning[];
 }
 
+// Elicit-style narrative synthesis (new format)
+export interface NarrativeSynthesisData {
+  narrative: string;
+  warnings: SynthesisWarning[];
+}
+
 export type SortField = keyof Pick<StudyResult, 'year' | 'sample_size' | 'study_design' | 'title'>;
 export type SortDirection = 'asc' | 'desc';
 

@@ -7,7 +7,7 @@ import { Skeleton } from './ui/skeleton';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from './ui/tooltip';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from './ui/collapsible';
 import { getSupabase } from '@/integrations/supabase/fallback';
-import type { StudyResult, SynthesisData, SynthesisClaim, SynthesisWarning } from '@/types/research';
+import type { StudyResult, SynthesisData, SynthesisClaim, SynthesisWarning, NarrativeSynthesisData } from '@/types/research';
 
 interface NarrativeSynthesisProps {
   reportId: string;
@@ -16,11 +16,23 @@ interface NarrativeSynthesisProps {
   cachedSynthesis?: string | null;
 }
 
-function parseSynthesis(raw: string | null): SynthesisData | null {
+type ParsedSynthesis =
+  | { type: 'narrative'; data: NarrativeSynthesisData }
+  | { type: 'structured'; data: SynthesisData }
+  | null;
+
+function parseSynthesis(raw: string | null): ParsedSynthesis {
   if (!raw) return null;
   try {
     const parsed = JSON.parse(raw);
-    if (parsed.sections && Array.isArray(parsed.sections)) return parsed as SynthesisData;
+    // New narrative format
+    if (parsed.narrative && typeof parsed.narrative === 'string') {
+      return { type: 'narrative', data: parsed as NarrativeSynthesisData };
+    }
+    // Legacy structured format
+    if (parsed.sections && Array.isArray(parsed.sections)) {
+      return { type: 'structured', data: parsed as SynthesisData };
+    }
     return null;
   } catch {
     return null;
@@ -28,7 +40,6 @@ function parseSynthesis(raw: string | null): SynthesisData | null {
 }
 
 function getAuthorLabel(title: string, year: number): string {
-  // Extract first meaningful word(s) from title as author proxy
   const words = title.split(/[\s:,]+/).filter(Boolean);
   const first = words[0] || 'Study';
   return `${first} et al., ${year}`;
@@ -146,6 +157,28 @@ function WarningsPanel({ warnings }: { warnings: SynthesisWarning[] }) {
   );
 }
 
+function ElicitStyleView({ data, onRegenerate }: { data: NarrativeSynthesisData; onRegenerate: () => void }) {
+  return (
+    <div className="rounded-lg border-l-4 border-l-primary bg-gradient-to-r from-primary/5 to-transparent p-4">
+      <div className="flex items-center justify-between mb-3">
+        <div className="flex items-center gap-2">
+          <Sparkles className="h-4 w-4 text-primary" />
+          <h3 className="font-semibold text-foreground">Research Synthesis</h3>
+        </div>
+        <Button variant="ghost" size="sm" onClick={onRegenerate} className="gap-2 text-muted-foreground hover:text-foreground">
+          <RefreshCw className="h-3 w-3" />Regenerate
+        </Button>
+      </div>
+
+      <div className="prose prose-sm max-w-none text-foreground prose-p:my-2.5 prose-p:leading-relaxed prose-strong:text-foreground prose-strong:font-semibold">
+        <ReactMarkdown>{data.narrative}</ReactMarkdown>
+      </div>
+
+      <WarningsPanel warnings={data.warnings || []} />
+    </div>
+  );
+}
+
 function StructuredSynthesisView({ data, studies, onRegenerate }: { data: SynthesisData; studies: StudyResult[]; onRegenerate: () => void }) {
   return (
     <div className="rounded-lg border-l-4 border-l-primary bg-gradient-to-r from-primary/5 to-transparent p-4">
@@ -153,6 +186,7 @@ function StructuredSynthesisView({ data, studies, onRegenerate }: { data: Synthe
         <div className="flex items-center gap-2">
           <Sparkles className="h-4 w-4 text-primary" />
           <h3 className="font-semibold text-foreground">Research Synthesis</h3>
+          <Badge variant="outline" className="text-[10px]">Legacy</Badge>
         </div>
         <Button variant="ghost" size="sm" onClick={onRegenerate} className="gap-2 text-muted-foreground hover:text-foreground">
           <RefreshCw className="h-3 w-3" />Regenerate
@@ -265,14 +299,17 @@ export function NarrativeSynthesis({ reportId, studies, query, cachedSynthesis }
     );
   }
 
-  // Try structured JSON format first, fall back to markdown
-  const structured = parseSynthesis(rawSynthesis);
+  const parsed = parseSynthesis(rawSynthesis);
 
-  if (structured) {
-    return <StructuredSynthesisView data={structured} studies={studies} onRegenerate={generate} />;
+  if (parsed?.type === 'narrative') {
+    return <ElicitStyleView data={parsed.data} onRegenerate={generate} />;
   }
 
-  // Invalid JSON fallback — show error with regenerate option
+  if (parsed?.type === 'structured') {
+    return <StructuredSynthesisView data={parsed.data} studies={studies} onRegenerate={generate} />;
+  }
+
+  // Invalid JSON fallback
   if (rawSynthesis.trimStart().startsWith('{') || rawSynthesis.trimStart().startsWith('[')) {
     return (
       <div className="rounded-lg border-l-4 border-l-destructive bg-destructive/5 p-4">

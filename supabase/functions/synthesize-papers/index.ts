@@ -204,37 +204,26 @@ ${studyContext}
 
 Produce a JSON object with this EXACT schema:
 {
-  "sections": [
-    {
-      "heading": "Section title",
-      "claims": [
-        {
-          "text": "Claim text referencing specific findings from studies.",
-          "citations": ["study-0", "study-3"]
-        }
-      ]
-    }
-  ],
+  "narrative": "A single markdown string with flowing prose",
   "warnings": [
     { "type": "gap", "text": "Description of evidence gap" }
   ]
 }
 
-SECTIONS TO INCLUDE (3-5 sections):
-1. "Corpus Overview" — Describe the evidence body: number of studies, designs, populations, year range. Cite all studies referenced.
-2. "Areas of Agreement" — Findings where multiple studies converge. Every sentence must cite specific studies.
-3. "Areas of Disagreement" — Conflicting findings with possible methodological explanations. Cite each.
-4. "Limitations" — Concrete limitations visible in the data. Cite specific studies.
-5. "Evidence Gaps" — What questions remain unanswered.
-
-CRITICAL RULES:
-- The "citations" array must contain study index references formatted as "study-N" where N is the study number from [Study N] above (0-indexed)
-- EVERY claim MUST have at least one citation. If you cannot tie a claim to a specific study, DO NOT include it.
+NARRATIVE FIELD RULES:
+- Start with a **bold sentence** that directly answers the research question based on the evidence
+- Follow with 2-4 paragraphs of flowing prose
+- Cite EVERY factual claim inline as (AuthorLastName et al., Year) — derive author last names from the study titles provided
+- Use natural paragraph transitions ("However,", "Neuroimaging evidence shows...", "In contrast,", etc.)
+- Do NOT use markdown headers, bullet points, or numbered lists
 - Do NOT invent findings or data points not present in the study data above
 - Do NOT use causal language unless the study is an RCT
-- Be concise: 2-4 claims per section
-- For "warnings", include LLM-identified evidence gaps (populations not studied, outcomes not measured, time horizons not covered). Use type "gap" for missing evidence and "quality" for methodological concerns.
-- Return ONLY valid JSON, no markdown fences or extra text`;
+- Keep the narrative concise and evidence-dense
+
+WARNING FIELD RULES:
+- Include evidence gaps (populations not studied, outcomes not measured, time horizons not covered). Use type "gap" for missing evidence and "quality" for methodological concerns.
+
+Return ONLY valid JSON, no markdown fences or extra text`;
 
     const GEMINI_API_KEY = Deno.env.get("GOOGLE_GEMINI_API_KEY");
     if (!GEMINI_API_KEY) {
@@ -284,12 +273,12 @@ CRITICAL RULES:
       );
     }
 
-    // Parse and validate the structured output
+    // Parse and validate the narrative output
     let synthesisData: any;
     try {
       synthesisData = JSON.parse(rawText);
-      if (!synthesisData.sections || !Array.isArray(synthesisData.sections)) {
-        throw new Error("Missing sections array");
+      if (!synthesisData.narrative || typeof synthesisData.narrative !== "string") {
+        throw new Error("Missing narrative string");
       }
     } catch (parseErr) {
       console.error("Failed to parse/validate synthesis JSON:", parseErr);
@@ -311,14 +300,6 @@ CRITICAL RULES:
       return true;
     });
     synthesisData.warnings = dedupedWarnings;
-
-    // Recalculate confidence on the server based on citation count
-    for (const section of synthesisData.sections || []) {
-      for (const claim of section.claims || []) {
-        const count = (claim.citations || []).length;
-        claim.confidence = count >= 3 ? "high" : count === 2 ? "moderate" : "low";
-      }
-    }
 
     const synthesisJson = JSON.stringify(synthesisData);
 
