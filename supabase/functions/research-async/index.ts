@@ -459,6 +459,65 @@ function isCompleteStudy(study: any): boolean {
   return hasCompleteOutcome;
 }
 
+function getQueryKeywordSet(query: string): Set<string> {
+  const keywords = extractSearchKeywords(query)
+    .split(/\s+/)
+    .map(k => k.trim())
+    .filter(Boolean);
+  return new Set(keywords);
+}
+
+function scorePaperCandidate(paper: UnifiedPaper, queryKeywords: Set<string>): number {
+  const text = `${paper.title} ${paper.abstract}`.toLowerCase();
+  const textTokens = new Set(text.split(/[^a-z0-9]+/).filter(Boolean));
+
+  let keywordOverlap = 0;
+  for (const keyword of queryKeywords) {
+    if (textTokens.has(keyword)) keywordOverlap += 1;
+  }
+
+  const overlapScore = queryKeywords.size > 0 ? keywordOverlap / queryKeywords.size : 0;
+  const abstractLengthScore = Math.min((paper.abstract.length || 0) / 2000, 1);
+  const citationScore = Math.min(Math.log10((paper.citationCount ?? 0) + 1) / 3, 1);
+
+  return overlapScore * 3 + abstractLengthScore + citationScore;
+}
+
+function mergeExtractedStudies(studies: StudyResult[]): StudyResult[] {
+  const byStudyId = new Map<string, StudyResult>();
+
+  for (const study of studies) {
+    if (!study?.study_id) continue;
+
+    const existing = byStudyId.get(study.study_id);
+    if (!existing) {
+      byStudyId.set(study.study_id, study);
+      continue;
+    }
+
+    const combinedOutcomes = [...(existing.outcomes || []), ...(study.outcomes || [])];
+    const seenOutcomes = new Set<string>();
+    const dedupedOutcomes = combinedOutcomes.filter((outcome: any) => {
+      const key = `${outcome?.outcome_measured || ""}|${outcome?.citation_snippet || ""}|${outcome?.key_result || ""}`;
+      if (seenOutcomes.has(key)) return false;
+      seenOutcomes.add(key);
+      return true;
+    });
+
+    byStudyId.set(study.study_id, {
+      ...existing,
+      ...study,
+      outcomes: dedupedOutcomes,
+      citationCount: Math.max(existing.citationCount ?? 0, study.citationCount ?? 0) || undefined,
+      abstract_excerpt: existing.abstract_excerpt?.length >= (study.abstract_excerpt?.length || 0)
+        ? existing.abstract_excerpt
+        : study.abstract_excerpt,
+    });
+  }
+
+  return Array.from(byStudyId.values());
+}
+
 // ─── LLM Extraction ─────────────────────────────────────────────────────────
 
 async function extractStudyData(
@@ -591,9 +650,7 @@ Extract structured data from each paper's abstract following the strict rules. R
       }
     }
 
-    const complete = results.filter((s: any) => isCompleteStudy(s));
-    console.log(`[LLM] isCompleteStudy filter: ${results.length} -> ${complete.length}`);
-    return complete;
+    return results;
   } catch (parseError) {
     console.error(`[LLM] JSON parse error:`, parseError);
     throw new Error("Failed to parse LLM response as JSON");
@@ -626,8 +683,11 @@ async function runResearchPipeline(question: string): Promise<PipelineResult> {
   const s2Papers = await searchSemanticScholar(searchQuery);
   const openAlexPapers = await searchOpenAlex(searchQuery);
   const arxivPapers = await searchArxiv(searchQuery);
+  const totalFetched = s2Papers.length + openAlexPapers.length + arxivPapers.length;
+  console.log(`[Pipeline] Stage stats: fetched=${totalFetched} (s2=${s2Papers.length}, openalex=${openAlexPapers.length}, arxiv=${arxivPapers.length})`);
 
   const allPapers = deduplicateAndMerge(s2Papers, openAlexPapers, arxivPapers);
+  console.log(`[Pipeline] Stage stats: deduped=${allPapers.length}`);
 
   if (allPapers.length === 0) {
     return {
@@ -642,7 +702,7 @@ async function runResearchPipeline(question: string): Promise<PipelineResult> {
 
   const enrichedPapers = await enrichWithCrossref(allPapers);
   const papersWithAbstracts = enrichedPapers.filter(p => p.abstract.length > 50);
-  console.log(`[Pipeline] ${papersWithAbstracts.length} papers with valid abstracts`);
+  console.log(`[Pipeline] Stage stats: abstract-qualified=${papersWithAbstracts.length}`);
 
   if (papersWithAbstracts.length === 0) {
     return {
@@ -655,8 +715,27 @@ async function runResearchPipeline(question: string): Promise<PipelineResult> {
     };
   }
 
-  const topPapers = papersWithAbstracts.slice(0, 15);
-  const results = await extractStudyData(topPapers, question, GOOGLE_GEMINI_API_KEY);
+  const queryKeywords = getQueryKeywordSet(searchQuery);
+  const rankedCandidates = [...papersWithAbstracts].sort(
+    (a, b) => scorePaperCandidate(b, queryKeywords) - scorePaperCandidate(a, queryKeywords)
+  );
+
+  const stagedCandidateCount = Math.min(45, Math.max(30, rankedCandidates.length));
+  const stagedCandidates = rankedCandidates.slice(0, stagedCandidateCount);
+  const batchSize = 15;
+
+  let extractedAcrossBatches: StudyResult[] = [];
+  for (let i = 0; i < stagedCandidates.length; i += batchSize) {
+    const batch = stagedCandidates.slice(i, i + batchSize);
+    const batchNumber = Math.floor(i / batchSize) + 1;
+    const batchResults = await extractStudyData(batch, question, GOOGLE_GEMINI_API_KEY);
+    extractedAcrossBatches = extractedAcrossBatches.concat(batchResults);
+    console.log(`[Pipeline] Stage stats: batch=${batchNumber} candidates=${batch.length} extracted=${batchResults.length}`);
+  }
+
+  const mergedByStudy = mergeExtractedStudies(extractedAcrossBatches);
+  const results = mergedByStudy.filter((s: any) => isCompleteStudy(s));
+  console.log(`[Pipeline] Stage stats: extracted_total=${extractedAcrossBatches.length}, merged_unique=${mergedByStudy.length}, post-filter=${results.length}`);
 
   console.log(`[Pipeline] Returning ${results.length} structured results`);
 
