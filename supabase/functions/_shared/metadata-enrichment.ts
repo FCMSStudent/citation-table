@@ -114,8 +114,8 @@ function envGet(name: string): string | undefined {
   if (typeof denoEnv === "function") {
     return denoEnv(name) ?? undefined;
   }
-  if (typeof process !== "undefined" && process?.env) {
-    return process.env[name];
+  if (typeof (globalThis as any).process !== "undefined" && (globalThis as any).process?.env) {
+    return (globalThis as any).process.env[name];
   }
   return undefined;
 }

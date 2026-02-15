@@ -14,3 +14,6 @@ verify_jwt = false
 
 [functions.synthesize-papers]
 verify_jwt = false
+
+[functions.add-study]
+verify_jwt = false

@@ -5,12 +5,13 @@ import { useStudyPdfs } from '@/hooks/useStudyPdfs';
 import { SearchProgress } from '@/components/SearchProgress';
 import { ResultsTable } from '@/components/ResultsTable';
 import { PaperChat } from '@/components/PaperChat';
+import { AddStudyDialog } from '@/components/AddStudyDialog';
 import { Skeleton } from '@/components/ui/skeleton';
 import type { StudyResult } from '@/types/research';
 
 const ReportDetail = () => {
   const { id } = useParams<{ id: string }>();
-  const { report, isLoading, error } = useReport(id);
+  const { report, isLoading, error, refetch } = useReport(id);
   const { pdfs: pdfsByDoi } = useStudyPdfs(id);
 
   return (
@@ -60,11 +61,16 @@ const ReportDetail = () => {
         ) : report ? (
           <div>
             {/* Question header */}
-            <div className="mb-6">
-              <h2 className="text-xl font-semibold text-foreground">{report.question}</h2>
-              <p className="mt-1 text-xs text-muted-foreground">
-                Started {new Date(report.created_at).toLocaleString()}
-              </p>
+            <div className="mb-6 flex items-start justify-between gap-4">
+              <div>
+                <h2 className="text-xl font-semibold text-foreground">{report.question}</h2>
+                <p className="mt-1 text-xs text-muted-foreground">
+                  Started {new Date(report.created_at).toLocaleString()}
+                </p>
+              </div>
+              {report.status === 'completed' && id && (
+                <AddStudyDialog reportId={id} onStudyAdded={refetch} />
+              )}
             </div>
 
             {/* Processing state */}

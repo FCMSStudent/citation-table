@@ -130,16 +130,16 @@ interface DeterministicResult {
 
 function getEnv(name: string): string | undefined {
   try {
-    if (typeof Deno !== "undefined" && Deno?.env?.get) {
-      return Deno.env.get(name) ?? undefined;
+    if (typeof (globalThis as any).Deno !== "undefined" && (globalThis as any).Deno?.env?.get) {
+      return (globalThis as any).Deno.env.get(name) ?? undefined;
     }
   } catch (_) {
     // ignore
   }
 
   try {
-    if (typeof process !== "undefined") {
-      return process.env?.[name];
+    if (typeof (globalThis as any).process !== "undefined") {
+      return (globalThis as any).process.env?.[name];
     }
   } catch (_) {
     // ignore
