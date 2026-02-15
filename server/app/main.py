@@ -13,10 +13,15 @@ from typing import Dict, Optional, Literal
 from datetime import datetime
 from pathlib import Path
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Header
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 from scidownl import scihub_download
+from app.services.pdf_extraction_service import (
+    ExtractStudiesRequest,
+    ExtractStudiesResponse,
+    extract_studies_batch,
+)
 
 # Configuration
 STORAGE_DIR = Path(__file__).parent.parent / "storage"
@@ -25,6 +30,7 @@ STORAGE_DIR.mkdir(exist_ok=True)
 # Security Constants
 MAX_TASKS = 100
 MAX_CONCURRENT_DOWNLOADS = 5
+PDF_EXTRACTOR_BEARER_TOKEN = os.getenv("PDF_EXTRACTOR_BEARER_TOKEN", "").strip()
 
 # Task storage (in-memory for lightweight implementation)
 tasks: Dict[str, dict] = {}
@@ -129,6 +135,7 @@ async def root():
         "endpoints": {
             "download": "POST /api/download",
             "status": "GET /api/status/{task_id}",
+            "extract_studies": "POST /extract/studies",
             "health": "GET /health",
         }
     }
@@ -146,7 +153,35 @@ async def health_check():
         "active_tasks": active,
         "total_tasks_cached": total,
         "concurrency_limit": MAX_CONCURRENT_DOWNLOADS,
+        "pdf_extractor_auth_enabled": bool(PDF_EXTRACTOR_BEARER_TOKEN),
     }
+
+
+def validate_extractor_token(authorization: Optional[str]) -> None:
+    if not PDF_EXTRACTOR_BEARER_TOKEN:
+        return
+    if not authorization or not authorization.startswith("Bearer "):
+        raise HTTPException(status_code=401, detail="Missing bearer token")
+    supplied = authorization.replace("Bearer ", "", 1).strip()
+    if supplied != PDF_EXTRACTOR_BEARER_TOKEN:
+        raise HTTPException(status_code=403, detail="Invalid bearer token")
+
+
+@app.post("/extract/studies", response_model=ExtractStudiesResponse)
+async def extract_studies_endpoint(
+    request: ExtractStudiesRequest,
+    authorization: Optional[str] = Header(default=None),
+):
+    """
+    Deterministically extract study fields from PDFs (with abstract fallback).
+    """
+    validate_extractor_token(authorization)
+    try:
+        return extract_studies_batch(request)
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Extraction failed: {str(exc)[:160]}")
 
 
 @app.post("/api/download", response_model=DownloadResponse, status_code=202)

@@ -21,6 +21,12 @@ import {
   type EnrichmentInputPaper,
 } from "../_shared/metadata-enrichment.ts";
 import { MetadataEnrichmentStore, type MetadataEnrichmentMode } from "../_shared/metadata-enrichment-store.ts";
+import {
+  applyCompletenessTiers,
+  extractStudiesDeterministic,
+  summarizeExtractionResults,
+  type DeterministicExtractionInput,
+} from "../_shared/study-extraction.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -194,6 +200,7 @@ const BIOMEDICAL_SYNONYMS: Record<string, string[]> = {
 
 type ExpansionMode = "balanced" | "broad";
 type QueryPipelineMode = "v1" | "v2" | "shadow";
+type ExtractionEngine = "llm" | "scripted" | "hybrid";
 
 interface PreparedSourceQuery {
   source: SearchSource;
@@ -276,6 +283,24 @@ function getQueryPipelineMode(): QueryPipelineMode {
   const raw = (Deno.env.get("QUERY_PIPELINE_MODE") || "shadow").toLowerCase();
   if (raw === "v1" || raw === "v2" || raw === "shadow") return raw;
   return "shadow";
+}
+
+function getExtractionEngine(): ExtractionEngine {
+  const raw = (Deno.env.get("EXTRACTION_ENGINE") || "hybrid").toLowerCase();
+  if (raw === "llm" || raw === "scripted" || raw === "hybrid") return raw;
+  return "hybrid";
+}
+
+function getPdfParseTimeoutMs(): number {
+  const raw = Number(Deno.env.get("PDF_PARSE_TIMEOUT_MS") || 12_000);
+  if (!Number.isFinite(raw)) return 12_000;
+  return Math.min(60_000, Math.max(1_000, Math.trunc(raw)));
+}
+
+function getExtractionMaxCandidates(): number {
+  const raw = Number(Deno.env.get("EXTRACTION_MAX_CANDIDATES") || 30);
+  if (!Number.isFinite(raw)) return 30;
+  return Math.min(60, Math.max(5, Math.trunc(raw)));
 }
 
 const PROVIDER_TIMEOUT_MS = 8_000;
@@ -1149,6 +1174,26 @@ function canonicalToUnifiedPaper(paper: CanonicalPaper): UnifiedPaper {
   };
 }
 
+function toDeterministicInput(paper: UnifiedPaper): DeterministicExtractionInput {
+  return {
+    study_id: paper.id,
+    title: paper.title,
+    year: paper.year,
+    abstract: paper.abstract,
+    authors: paper.authors,
+    venue: paper.venue,
+    doi: paper.doi,
+    pubmed_id: paper.pubmed_id,
+    openalex_id: paper.openalex_id,
+    source: paper.source,
+    citationCount: paper.citationCount,
+    publicationTypes: paper.publicationTypes,
+    preprint_status: paper.preprint_status || (paper.source === "arxiv" ? "Preprint" : "Peer-reviewed"),
+    pdf_url: paper.pdfUrl || null,
+    landing_page_url: paper.landingPageUrl || null,
+  };
+}
+
 function canonicalToFallbackStudy(paper: CanonicalPaper): StudyResult {
   const unified = canonicalToUnifiedPaper(paper);
   const abstractSentence = (paper.abstract || "").split(/(?<=[.!?])\s+/).map((s) => s.trim()).find(Boolean) || null;
@@ -1199,6 +1244,8 @@ function canonicalToFallbackStudy(paper: CanonicalPaper): StudyResult {
 
 interface PipelineResult {
   results: StudyResult[];
+  partial_results: StudyResult[];
+  extraction_stats: Record<string, unknown>;
   evidence_table: SearchResponsePayload["evidence_table"];
   brief: SearchResponsePayload["brief"];
   coverage: CoverageReport;
@@ -1221,6 +1268,11 @@ async function runResearchPipeline(
 ): Promise<PipelineResult> {
   const pipelineStartedAt = Date.now();
   const GOOGLE_GEMINI_API_KEY = Deno.env.get("GOOGLE_GEMINI_API_KEY") || "";
+  const extractionEngine = getExtractionEngine();
+  const extractionMaxCandidates = getExtractionMaxCandidates();
+  const pdfExtractorUrl = Deno.env.get("PDF_EXTRACTOR_URL") || "";
+  const pdfExtractorBearerToken = Deno.env.get("PDF_EXTRACTOR_BEARER_TOKEN") || "";
+  const pdfParseTimeoutMs = getPdfParseTimeoutMs();
 
   console.log(`[Pipeline] Processing query="${question}" max_candidates=${requestPayload.max_candidates}`);
 
@@ -1235,7 +1287,7 @@ async function runResearchPipeline(
 
   if (queryPipelineMode === "v2") {
     const prepared = await prepareQueryProcessingV2(question, {
-      llmApiKey: GOOGLE_GEMINI_API_KEY,
+      llmApiKey: GOOGLE_GEMINI_API_KEY || undefined,
       fallbackTimeoutMs: 350,
     });
     searchQuery = prepared.search_query;
@@ -1248,7 +1300,7 @@ async function runResearchPipeline(
     sourceQueryOverrides.arxiv = prepared.query_processing.source_queries.arxiv;
   } else if (queryPipelineMode === "shadow") {
     shadowPreparedPromise = prepareQueryProcessingV2(question, {
-      llmApiKey: GOOGLE_GEMINI_API_KEY,
+      llmApiKey: GOOGLE_GEMINI_API_KEY || undefined,
       fallbackTimeoutMs: 350,
     });
   }
@@ -1316,6 +1368,13 @@ async function runResearchPipeline(
     (left, right) => scorePaperCandidate(right, queryKeywords) - scorePaperCandidate(left, queryKeywords),
   );
   const cappedCandidates = rankedByQuery.slice(0, requestPayload.max_candidates);
+  const providerById = new Map<string, UnifiedPaper>();
+  const providerByDoi = new Map<string, UnifiedPaper>();
+  for (const candidate of cappedCandidates) {
+    providerById.set(candidate.id, candidate);
+    const normalized = normalizeDoi(candidate.doi);
+    if (normalized && !providerByDoi.has(normalized)) providerByDoi.set(normalized, candidate);
+  }
 
   const canonicalCandidates = canonicalizePapers(cappedCandidates as InputPaper[]);
   const timeframe: [number, number] = [requestPayload.filters.from_year, requestPayload.filters.to_year];
@@ -1324,25 +1383,102 @@ async function runResearchPipeline(
   const { evidence_table, brief } = buildEvidenceAndBrief(keptCapped, requestPayload.max_evidence_rows);
 
   let results: StudyResult[] = [];
+  let partial_results: StudyResult[] = [];
+  let extraction_stats: Record<string, unknown> = {};
   if (keptCapped.length > 0) {
-    const llmCandidates = keptCapped.slice(0, 30).map(canonicalToUnifiedPaper);
-    if (GOOGLE_GEMINI_API_KEY) {
+    const extractionCandidates = keptCapped.slice(0, extractionMaxCandidates).map((paper) => {
+      const base = canonicalToUnifiedPaper(paper);
+      const providerMatch = providerById.get(paper.paper_id) || (paper.doi ? providerByDoi.get(normalizeDoi(paper.doi) || "") : undefined);
+      if (providerMatch?.pdfUrl) base.pdfUrl = providerMatch.pdfUrl;
+      if (providerMatch?.landingPageUrl) base.landingPageUrl = providerMatch.landingPageUrl;
+      return base;
+    });
+    const extractionStartedAt = Date.now();
+
+    if (extractionEngine === "llm") {
+      if (!GOOGLE_GEMINI_API_KEY) {
+        throw new Error("GOOGLE_GEMINI_API_KEY required when EXTRACTION_ENGINE=llm");
+      }
+
       try {
         const batchSize = 15;
         const extractionBatches: Promise<StudyResult[]>[] = [];
-        for (let i = 0; i < llmCandidates.length; i += batchSize) {
-          const batch = llmCandidates.slice(i, i + batchSize);
+        for (let i = 0; i < extractionCandidates.length; i += batchSize) {
+          const batch = extractionCandidates.slice(i, i + batchSize);
           extractionBatches.push(extractStudyData(batch, question, GOOGLE_GEMINI_API_KEY));
         }
         const extracted = (await Promise.all(extractionBatches)).flat();
         const mergedByStudy = mergeExtractedStudies(extracted);
-        results = mergedByStudy.filter((study: StudyResult) => isCompleteStudy(study));
+        const tiers = applyCompletenessTiers(mergedByStudy as any);
+        results = tiers.complete as unknown as StudyResult[];
+        partial_results = tiers.partial as unknown as StudyResult[];
       } catch (error) {
         console.warn("[Pipeline] LLM extraction fallback triggered:", error);
-        results = keptCapped.slice(0, 50).map(canonicalToFallbackStudy);
+        partial_results = keptCapped.slice(0, 50).map(canonicalToFallbackStudy);
       }
+
+      extraction_stats = {
+        total_inputs: extractionCandidates.length,
+        extracted_total: results.length + partial_results.length,
+        complete_total: results.length,
+        partial_total: partial_results.length,
+        used_pdf: 0,
+        used_abstract_fallback: 0,
+        failures: 0,
+        fallback_reasons: {},
+        engine: "llm",
+        llm_fallback_applied: false,
+        latency_ms: Date.now() - extractionStartedAt,
+      };
     } else {
-      results = keptCapped.slice(0, 50).map(canonicalToFallbackStudy);
+      const deterministicInputs = extractionCandidates.map((paper) => toDeterministicInput(paper));
+      const deterministicResults = await extractStudiesDeterministic(deterministicInputs, {
+        question,
+        pdfExtractorUrl: pdfExtractorUrl || undefined,
+        pdfExtractorBearerToken: pdfExtractorBearerToken || undefined,
+        pdfParseTimeoutMs,
+        batchSize: 10,
+      });
+      const deterministicMerged = mergeExtractedStudies(
+        deterministicResults.map((row) => row.study as unknown as StudyResult),
+      );
+      const deterministicTiers = applyCompletenessTiers(deterministicMerged as any);
+      results = deterministicTiers.complete as unknown as StudyResult[];
+      partial_results = deterministicTiers.partial as unknown as StudyResult[];
+
+      let llmFallbackApplied = false;
+      if (extractionEngine === "hybrid" && results.length === 0 && GOOGLE_GEMINI_API_KEY) {
+        try {
+          const batchSize = 15;
+          const llmBatches: Promise<StudyResult[]>[] = [];
+          for (let i = 0; i < extractionCandidates.length; i += batchSize) {
+            const batch = extractionCandidates.slice(i, i + batchSize);
+            llmBatches.push(extractStudyData(batch, question, GOOGLE_GEMINI_API_KEY));
+          }
+          const llmExtracted = (await Promise.all(llmBatches)).flat();
+          const llmMerged = mergeExtractedStudies(llmExtracted);
+          const llmTiers = applyCompletenessTiers(llmMerged as any);
+          if (llmTiers.complete.length > 0) {
+            results = llmTiers.complete as unknown as StudyResult[];
+            llmFallbackApplied = true;
+          }
+        } catch (error) {
+          console.warn("[Pipeline] Hybrid LLM fallback failed:", error);
+        }
+      }
+
+      if (results.length === 0 && partial_results.length === 0) {
+        partial_results = keptCapped.slice(0, 50).map(canonicalToFallbackStudy);
+      }
+
+      extraction_stats = summarizeExtractionResults(deterministicResults, {
+        totalInputs: deterministicInputs.length,
+        completeTotal: results.length,
+        partialTotal: partial_results.length,
+        latencyMs: Date.now() - extractionStartedAt,
+        engine: extractionEngine,
+        llmFallbackApplied,
+      }) as unknown as Record<string, unknown>;
     }
   }
 
@@ -1354,6 +1490,8 @@ async function runResearchPipeline(
 
   return {
     results,
+    partial_results,
+    extraction_stats,
     evidence_table,
     brief,
     coverage,
@@ -1823,6 +1961,8 @@ serve(async (req) => {
           .update({
             status: "completed",
             results: data.results || [],
+            partial_results: data.partial_results || [],
+            extraction_stats: data.extraction_stats || {},
             normalized_query: data.normalized_query || null,
             query_processing_meta: data.query_processing || null,
             total_papers_searched: data.total_papers_searched || 0,

@@ -44,12 +44,14 @@ export type Database = {
           created_at: string
           evidence_table: Json | null
           error_message: string | null
+          extraction_stats: Json
           id: string
           lit_request: Json | null
           lit_response: Json | null
           narrative_synthesis: string | null
           normalized_query: string | null
           openalex_count: number | null
+          partial_results: Json
           pubmed_count: number | null
           query_processing_meta: Json | null
           question: string
@@ -68,12 +70,14 @@ export type Database = {
           created_at?: string
           evidence_table?: Json | null
           error_message?: string | null
+          extraction_stats?: Json
           id?: string
           lit_request?: Json | null
           lit_response?: Json | null
           narrative_synthesis?: string | null
           normalized_query?: string | null
           openalex_count?: number | null
+          partial_results?: Json
           pubmed_count?: number | null
           query_processing_meta?: Json | null
           question: string
@@ -92,12 +96,14 @@ export type Database = {
           created_at?: string
           evidence_table?: Json | null
           error_message?: string | null
+          extraction_stats?: Json
           id?: string
           lit_request?: Json | null
           lit_response?: Json | null
           narrative_synthesis?: string | null
           normalized_query?: string | null
           openalex_count?: number | null
+          partial_results?: Json
           pubmed_count?: number | null
           query_processing_meta?: Json | null
           question?: string

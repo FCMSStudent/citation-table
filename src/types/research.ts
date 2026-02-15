@@ -124,8 +124,24 @@ export interface QueryProcessingMeta {
   };
 }
 
+export interface ExtractionStats {
+  total_inputs: number;
+  extracted_total: number;
+  complete_total: number;
+  partial_total: number;
+  used_pdf: number;
+  used_abstract_fallback: number;
+  failures: number;
+  fallback_reasons: Record<string, number>;
+  engine: "llm" | "scripted" | "hybrid";
+  llm_fallback_applied: boolean;
+  latency_ms: number;
+}
+
 export interface ResearchResponse {
   results: StudyResult[];
+  partial_results?: StudyResult[];
+  extraction_stats?: ExtractionStats;
   query: string;
   normalized_query?: string; // Present if query was normalized
   query_processing?: QueryProcessingMeta;

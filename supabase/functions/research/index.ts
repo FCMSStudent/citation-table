@@ -8,6 +8,12 @@ import {
   type EnrichmentInputPaper,
 } from "../_shared/metadata-enrichment.ts";
 import { MetadataEnrichmentStore, type MetadataEnrichmentMode } from "../_shared/metadata-enrichment-store.ts";
+import {
+  applyCompletenessTiers,
+  extractStudiesDeterministic,
+  summarizeExtractionResults,
+  type DeterministicExtractionInput,
+} from "../_shared/study-extraction.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -59,6 +65,10 @@ interface OpenAlexWork {
   primary_location?: {
     source?: { display_name: string };
   };
+  best_oa_location?: {
+    pdf_url?: string;
+    landing_page_url?: string;
+  };
   doi?: string;
   type?: string;
   cited_by_count?: number;
@@ -77,6 +87,8 @@ interface SemanticScholarPaper {
     DOI?: string;
     PubMed?: string;
   };
+  openAccessPdf?: { url: string } | null;
+  url?: string;
 }
 
 interface UnifiedPaper {
@@ -93,6 +105,8 @@ interface UnifiedPaper {
   citationCount?: number;
   publicationTypes?: string[];
   journal?: string;
+  pdfUrl?: string | null;
+  landingPageUrl?: string | null;
 }
 
 // Reconstruct abstract from OpenAlex inverted index
@@ -184,6 +198,7 @@ const BIOMEDICAL_SYNONYMS: Record<string, string[]> = {
 
 type ExpansionMode = "balanced" | "broad";
 type QueryPipelineMode = "v1" | "v2" | "shadow";
+type ExtractionEngine = "llm" | "scripted" | "hybrid";
 
 interface PreparedSourceQuery {
   source: SearchSource;
@@ -268,6 +283,24 @@ function getQueryPipelineMode(): QueryPipelineMode {
   return "shadow";
 }
 
+function getExtractionEngine(): ExtractionEngine {
+  const raw = (Deno.env.get("EXTRACTION_ENGINE") || "hybrid").toLowerCase();
+  if (raw === "llm" || raw === "scripted" || raw === "hybrid") return raw;
+  return "hybrid";
+}
+
+function getPdfParseTimeoutMs(): number {
+  const raw = Number(Deno.env.get("PDF_PARSE_TIMEOUT_MS") || 12_000);
+  if (!Number.isFinite(raw)) return 12_000;
+  return Math.min(60_000, Math.max(1_000, Math.trunc(raw)));
+}
+
+function getExtractionMaxCandidates(): number {
+  const raw = Number(Deno.env.get("EXTRACTION_MAX_CANDIDATES") || 30);
+  if (!Number.isFinite(raw)) return 30;
+  return Math.min(60, Math.max(5, Math.trunc(raw)));
+}
+
 // Query OpenAlex API
 async function searchOpenAlex(
   query: string,
@@ -318,6 +351,8 @@ async function searchOpenAlex(
       source: "openalex" as const,
       citationCount: work.cited_by_count,
       publicationTypes: work.type ? [work.type] : undefined,
+      pdfUrl: work.best_oa_location?.pdf_url || null,
+      landingPageUrl: work.best_oa_location?.landing_page_url || null,
     }));
   } catch (error) {
     console.error(`[OpenAlex] Error:`, error);
@@ -350,7 +385,7 @@ async function searchSemanticScholar(
     return [];
   }
   const encodedQuery = encodeURIComponent(prepared.apiQuery);
-  const fields = "paperId,title,abstract,year,authors,venue,citationCount,publicationTypes,externalIds";
+  const fields = "paperId,title,abstract,year,authors,venue,citationCount,publicationTypes,externalIds,openAccessPdf,url";
   const url = `https://api.semanticscholar.org/graph/v1/paper/search?query=${encodedQuery}&fields=${fields}&limit=25`;
   
   const apiKey = Deno.env.get("SEMANTIC_SCHOLAR_API_KEY");
@@ -391,6 +426,8 @@ async function searchSemanticScholar(
         source: "semantic_scholar" as const,
         citationCount: paper.citationCount,
         publicationTypes: paper.publicationTypes ?? undefined,
+        pdfUrl: paper.openAccessPdf?.url || null,
+        landingPageUrl: paper.url || null,
       }));
   } catch (error) {
     console.error(`[SemanticScholar] Error:`, error);
@@ -867,6 +904,26 @@ function mergeExtractedStudies(studies: StudyResult[]): StudyResult[] {
   return Array.from(byStudyId.values());
 }
 
+function toDeterministicInput(paper: UnifiedPaper): DeterministicExtractionInput {
+  return {
+    study_id: paper.id,
+    title: paper.title,
+    year: paper.year,
+    abstract: paper.abstract,
+    authors: paper.authors,
+    venue: paper.venue,
+    doi: paper.doi,
+    pubmed_id: paper.pubmed_id,
+    openalex_id: paper.openalex_id,
+    source: paper.source,
+    citationCount: paper.citationCount,
+    publicationTypes: paper.publicationTypes,
+    preprint_status: paper.source === "arxiv" ? "Preprint" : "Peer-reviewed",
+    pdf_url: paper.pdfUrl || null,
+    landing_page_url: paper.landingPageUrl || null,
+  };
+}
+
 // Extract data using LLM with strict prompting per meta prompt
 async function extractStudyData(
   papers: UnifiedPaper[],
@@ -1105,14 +1162,12 @@ serve(async (req) => {
       );
     }
 
-    const GOOGLE_GEMINI_API_KEY = Deno.env.get("GOOGLE_GEMINI_API_KEY");
-    if (!GOOGLE_GEMINI_API_KEY) {
-      console.error("GOOGLE_GEMINI_API_KEY not configured");
-      return new Response(
-        JSON.stringify({ error: "AI service not configured. Please add your Google Gemini API key." }),
-        { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-      );
-    }
+    const GOOGLE_GEMINI_API_KEY = Deno.env.get("GOOGLE_GEMINI_API_KEY") || "";
+    const extractionEngine = getExtractionEngine();
+    const extractionMaxCandidates = getExtractionMaxCandidates();
+    const pdfExtractorUrl = Deno.env.get("PDF_EXTRACTOR_URL") || "";
+    const pdfExtractorBearerToken = Deno.env.get("PDF_EXTRACTOR_BEARER_TOKEN") || "";
+    const pdfParseTimeoutMs = getPdfParseTimeoutMs();
 
     console.log(`[Research] Processing question: "${question}"`);
 
@@ -1127,7 +1182,7 @@ serve(async (req) => {
 
     if (queryPipelineMode === "v2") {
       const prepared = await prepareQueryProcessingV2(question, {
-        llmApiKey: GOOGLE_GEMINI_API_KEY,
+        llmApiKey: GOOGLE_GEMINI_API_KEY || undefined,
         fallbackTimeoutMs: 350,
       });
       searchQuery = prepared.search_query;
@@ -1140,7 +1195,7 @@ serve(async (req) => {
       sourceQueryOverrides.arxiv = prepared.query_processing.source_queries.arxiv;
     } else if (queryPipelineMode === "shadow") {
       shadowPreparedPromise = prepareQueryProcessingV2(question, {
-        llmApiKey: GOOGLE_GEMINI_API_KEY,
+        llmApiKey: GOOGLE_GEMINI_API_KEY || undefined,
         fallbackTimeoutMs: 350,
       });
     }
@@ -1241,22 +1296,100 @@ serve(async (req) => {
       (a, b) => scorePaperCandidate(b, queryKeywords) - scorePaperCandidate(a, queryKeywords)
     );
 
-    const stagedCandidateCount = Math.min(45, Math.max(30, rankedCandidates.length));
+    const stagedCandidateCount = Math.min(Math.max(30, extractionMaxCandidates), rankedCandidates.length);
     const stagedCandidates = rankedCandidates.slice(0, stagedCandidateCount);
     const batchSize = 15;
 
-    let extractedAcrossBatches: StudyResult[] = [];
-    for (let i = 0; i < stagedCandidates.length; i += batchSize) {
-      const batch = stagedCandidates.slice(i, i + batchSize);
-      const batchNumber = Math.floor(i / batchSize) + 1;
-      const batchResults = await extractStudyData(batch, question, GOOGLE_GEMINI_API_KEY);
-      extractedAcrossBatches = extractedAcrossBatches.concat(batchResults);
-      console.log(`[Research] Stage stats: batch=${batchNumber} candidates=${batch.length} extracted=${batchResults.length}`);
-    }
+    const extractionStartedAt = Date.now();
+    let results: StudyResult[] = [];
+    let partialResults: StudyResult[] = [];
+    let extractionStats: Record<string, unknown> = {};
 
-    const mergedByStudy = mergeExtractedStudies(extractedAcrossBatches);
-    const results = mergedByStudy.filter((s: any) => isCompleteStudy(s));
-    console.log(`[Research] Stage stats: extracted_total=${extractedAcrossBatches.length}, merged_unique=${mergedByStudy.length}, post-filter=${results.length}`);
+    if (extractionEngine === "llm") {
+      if (!GOOGLE_GEMINI_API_KEY) {
+        return new Response(
+          JSON.stringify({ error: "AI extraction requires GOOGLE_GEMINI_API_KEY when EXTRACTION_ENGINE=llm" }),
+          { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } },
+        );
+      }
+
+      let extractedAcrossBatches: StudyResult[] = [];
+      for (let i = 0; i < stagedCandidates.length; i += batchSize) {
+        const batch = stagedCandidates.slice(i, i + batchSize);
+        const batchNumber = Math.floor(i / batchSize) + 1;
+        const batchResults = await extractStudyData(batch, question, GOOGLE_GEMINI_API_KEY);
+        extractedAcrossBatches = extractedAcrossBatches.concat(batchResults);
+        console.log(`[Research] Stage stats: batch=${batchNumber} candidates=${batch.length} extracted=${batchResults.length}`);
+      }
+
+      const mergedByStudy = mergeExtractedStudies(extractedAcrossBatches);
+      const tiers = applyCompletenessTiers(mergedByStudy as any);
+      results = tiers.complete as unknown as StudyResult[];
+      partialResults = tiers.partial as unknown as StudyResult[];
+      extractionStats = {
+        total_inputs: stagedCandidates.length,
+        extracted_total: mergedByStudy.length,
+        complete_total: results.length,
+        partial_total: partialResults.length,
+        used_pdf: 0,
+        used_abstract_fallback: 0,
+        failures: Math.max(0, stagedCandidates.length - mergedByStudy.length),
+        fallback_reasons: {},
+        engine: "llm",
+        llm_fallback_applied: false,
+        latency_ms: Date.now() - extractionStartedAt,
+      };
+      console.log(`[Research] Stage stats: extracted_total=${extractedAcrossBatches.length}, merged_unique=${mergedByStudy.length}, complete=${results.length}, partial=${partialResults.length}`);
+    } else {
+      const deterministicInputs = stagedCandidates
+        .slice(0, extractionMaxCandidates)
+        .map((paper) => toDeterministicInput(paper));
+      const deterministicResults = await extractStudiesDeterministic(deterministicInputs, {
+        question,
+        pdfExtractorUrl: pdfExtractorUrl || undefined,
+        pdfExtractorBearerToken: pdfExtractorBearerToken || undefined,
+        pdfParseTimeoutMs,
+        batchSize: 10,
+      });
+
+      const mergedByStudy = mergeExtractedStudies(
+        deterministicResults.map((row) => row.study as unknown as StudyResult),
+      );
+      const tiers = applyCompletenessTiers(mergedByStudy as any);
+      results = tiers.complete as unknown as StudyResult[];
+      partialResults = tiers.partial as unknown as StudyResult[];
+
+      let llmFallbackApplied = false;
+      if (extractionEngine === "hybrid" && results.length === 0 && GOOGLE_GEMINI_API_KEY) {
+        try {
+          let llmExtractedAcrossBatches: StudyResult[] = [];
+          const llmCandidates = stagedCandidates.slice(0, extractionMaxCandidates);
+          for (let i = 0; i < llmCandidates.length; i += batchSize) {
+            const batch = llmCandidates.slice(i, i + batchSize);
+            const batchResults = await extractStudyData(batch, question, GOOGLE_GEMINI_API_KEY);
+            llmExtractedAcrossBatches = llmExtractedAcrossBatches.concat(batchResults);
+          }
+          const llmMerged = mergeExtractedStudies(llmExtractedAcrossBatches);
+          const llmTiers = applyCompletenessTiers(llmMerged as any);
+          if (llmTiers.complete.length > 0) {
+            results = llmTiers.complete as unknown as StudyResult[];
+            llmFallbackApplied = true;
+          }
+        } catch (error) {
+          console.warn("[Research] Hybrid LLM fallback failed:", error);
+        }
+      }
+
+      extractionStats = summarizeExtractionResults(deterministicResults, {
+        totalInputs: deterministicInputs.length,
+        completeTotal: results.length,
+        partialTotal: partialResults.length,
+        latencyMs: Date.now() - extractionStartedAt,
+        engine: extractionEngine,
+        llmFallbackApplied,
+      }) as unknown as Record<string, unknown>;
+      console.log(`[Research] Stage stats: extracted_total=${deterministicResults.length}, complete=${results.length}, partial=${partialResults.length}`);
+    }
 
     console.log(`[Research] Returning ${results.length} structured results`);
     await recordQueryProcessingEvent(anonClient, {
@@ -1279,6 +1412,8 @@ serve(async (req) => {
         arxiv_count: arxivPapers.length,
         pubmed_count: pubmedPapers.length,
         query_processing: queryProcessingMeta,
+        partial_results: partialResults,
+        extraction_stats: extractionStats,
       }),
       { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } }
     );
