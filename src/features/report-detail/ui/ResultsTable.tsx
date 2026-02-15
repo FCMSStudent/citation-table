@@ -490,7 +490,12 @@ export function ResultsTable({
         </span>
         <Popover>
           <PopoverTrigger asChild>
-            <button type="button" className="inline-flex items-center rounded text-muted-foreground hover:text-foreground">
+            <button
+              type="button"
+              className="inline-flex items-center rounded text-muted-foreground hover:text-foreground"
+              aria-label="View methodology details"
+              title="Methodology details"
+            >
               <Info className="h-4 w-4" />
             </button>
           </PopoverTrigger>
