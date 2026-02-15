@@ -30,7 +30,7 @@ describe("Research Retrieval Response Validation", () => {
       citation: { doi: "10.1234/test", pubmed_id: null, openalex_id: "https://openalex.org/W123", formatted: "Test (2023)" },
       abstract_excerpt: "Test abstract", preprint_status: "Peer-reviewed", review_type: "None", source: "openalex"
     };
-    expect(study.source).toMatch(/^(openalex|semantic_scholar)$/);
+    expect(study.source).toMatch(/^(openalex|semantic_scholar|arxiv|pubmed)$/);
   });
 
   it("should validate citation count from semantic scholar", () => {

@@ -1,5 +1,19 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.49.1";
+import { prepareQueryProcessingV2, type QueryProcessingMeta, type SearchSource } from "../_shared/query-processing.ts";
+import {
+  applyQualityFilter,
+  buildEvidenceAndBrief,
+  canonicalizePapers,
+  defaultSearchRequestFromQuestion,
+  sanitizeSearchRequest,
+  type CanonicalPaper,
+  type CoverageReport,
+  type InputPaper,
+  type SearchRequestPayload,
+  type SearchResponsePayload,
+  type SearchStats,
+} from "../_shared/lit-search.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -54,6 +68,8 @@ interface OpenAlexWork {
   doi?: string;
   type?: string;
   cited_by_count?: number;
+  referenced_works?: string[];
+  is_retracted?: boolean;
 }
 
 interface SemanticScholarPaper {
@@ -68,6 +84,8 @@ interface SemanticScholarPaper {
   externalIds: { DOI?: string; PubMed?: string };
   openAccessPdf?: { url: string } | null;
   url?: string;
+  isRetracted?: boolean;
+  references?: Array<{ paperId: string }>;
 }
 
 interface UnifiedPaper {
@@ -86,6 +104,10 @@ interface UnifiedPaper {
   journal?: string;
   pdfUrl?: string | null;
   landingPageUrl?: string | null;
+  referenced_ids?: string[];
+  is_retracted?: boolean;
+  preprint_status?: "Preprint" | "Peer-reviewed";
+  rank_signal?: number;
 }
 
 // ─── Helpers (copied from research/index.ts) ─────────────────────────────────
@@ -164,7 +186,7 @@ const BIOMEDICAL_SYNONYMS: Record<string, string[]> = {
 };
 
 type ExpansionMode = "balanced" | "broad";
-type SearchSource = "semantic_scholar" | "openalex" | "arxiv" | "pubmed";
+type QueryPipelineMode = "v1" | "v2" | "shadow";
 
 interface PreparedSourceQuery {
   source: SearchSource;
@@ -228,10 +250,97 @@ function buildSourceQuery(query: string, source: SearchSource, mode: ExpansionMo
   return { source, originalKeywordQuery, expandedKeywordQuery, apiQuery: apiQuery.trim() };
 }
 
+function resolvePreparedQuery(
+  query: string,
+  source: SearchSource,
+  mode: ExpansionMode,
+  precompiledQuery?: string,
+): PreparedSourceQuery {
+  if (!precompiledQuery?.trim()) return buildSourceQuery(query, source, mode);
+  return {
+    source,
+    originalKeywordQuery: query,
+    expandedKeywordQuery: precompiledQuery.trim(),
+    apiQuery: precompiledQuery.trim(),
+  };
+}
+
+function getQueryPipelineMode(): QueryPipelineMode {
+  const raw = (Deno.env.get("QUERY_PIPELINE_MODE") || "shadow").toLowerCase();
+  if (raw === "v1" || raw === "v2" || raw === "shadow") return raw;
+  return "shadow";
+}
+
+const PROVIDER_TIMEOUT_MS = 8_000;
+const PROVIDER_RETRIES = 2;
+const RETRIEVAL_BUDGET_MS = 26_000;
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function withTimeout<T>(promise: Promise<T>, timeoutMs: number, label: string): Promise<T> {
+  let timeoutHandle: number | null = null;
+  const timeoutPromise = new Promise<never>((_, reject) => {
+    timeoutHandle = setTimeout(() => reject(new Error(`${label} timed out after ${timeoutMs}ms`)), timeoutMs);
+  });
+
+  try {
+    return await Promise.race([promise, timeoutPromise]);
+  } finally {
+    if (timeoutHandle !== null) clearTimeout(timeoutHandle);
+  }
+}
+
+async function retryProviderSearch(
+  provider: SearchSource,
+  fn: () => Promise<UnifiedPaper[]>,
+): Promise<{ papers: UnifiedPaper[]; failed: boolean; error?: string; latencyMs: number }> {
+  const started = Date.now();
+  let lastError: Error | null = null;
+
+  for (let attempt = 0; attempt <= PROVIDER_RETRIES; attempt += 1) {
+    try {
+      const papers = await withTimeout(fn(), PROVIDER_TIMEOUT_MS, provider);
+      return { papers, failed: false, latencyMs: Date.now() - started };
+    } catch (error) {
+      lastError = error instanceof Error ? error : new Error(String(error));
+      if (attempt < PROVIDER_RETRIES) {
+        await sleep(250 * (attempt + 1));
+      }
+    }
+  }
+
+  return {
+    papers: [],
+    failed: true,
+    error: lastError?.message || `${provider} failed`,
+    latencyMs: Date.now() - started,
+  };
+}
+
+function normalizeDoi(raw: string | null | undefined): string | null {
+  if (!raw) return null;
+  return raw.toLowerCase().trim().replace(/^https?:\/\/(dx\.)?doi\.org\//, "");
+}
+
+function hashKey(raw: string): string {
+  let hash = 2166136261;
+  for (let i = 0; i < raw.length; i += 1) {
+    hash ^= raw.charCodeAt(i);
+    hash += (hash << 1) + (hash << 4) + (hash << 7) + (hash << 8) + (hash << 24);
+  }
+  return (hash >>> 0).toString(16).padStart(8, "0");
+}
+
 // ─── API Search Functions ────────────────────────────────────────────────────
 
-async function searchOpenAlex(query: string, mode: ExpansionMode = "balanced"): Promise<UnifiedPaper[]> {
-  const prepared = buildSourceQuery(query, "openalex", mode);
+async function searchOpenAlex(
+  query: string,
+  mode: ExpansionMode = "balanced",
+  precompiledQuery?: string,
+): Promise<UnifiedPaper[]> {
+  const prepared = resolvePreparedQuery(query, "openalex", mode, precompiledQuery);
   const encodedQuery = encodeURIComponent(prepared.apiQuery);
   const apiKey = Deno.env.get("OPENALEX_API_KEY");
   let url = `https://api.openalex.org/works?search=${encodedQuery}&filter=has_abstract:true&per_page=25&sort=relevance_score:desc`;
@@ -254,7 +363,7 @@ async function searchOpenAlex(query: string, mode: ExpansionMode = "balanced"): 
     const data = await response.json();
     const works: OpenAlexWork[] = data.results || [];
     console.log(`[OpenAlex] Found ${works.length} papers`);
-    return works.map(work => ({
+    return works.map((work, idx) => ({
       id: work.id,
       title: work.title || "Untitled",
       year: work.publication_year || new Date().getFullYear(),
@@ -269,6 +378,10 @@ async function searchOpenAlex(query: string, mode: ExpansionMode = "balanced"): 
       publicationTypes: work.type ? [work.type] : undefined,
       pdfUrl: work.best_oa_location?.pdf_url || null,
       landingPageUrl: work.best_oa_location?.landing_page_url || null,
+      referenced_ids: work.referenced_works || [],
+      is_retracted: Boolean(work.is_retracted),
+      preprint_status: work.type === "preprint" ? "Preprint" : "Peer-reviewed",
+      rank_signal: 1 / (idx + 1),
     }));
   } catch (error) {
     console.error(`[OpenAlex] Error:`, error);
@@ -286,11 +399,15 @@ async function s2RateLimit() {
   lastS2RequestTime = Date.now();
 }
 
-async function searchSemanticScholar(query: string, mode: ExpansionMode = "balanced"): Promise<UnifiedPaper[]> {
-  const prepared = buildSourceQuery(query, "semantic_scholar", mode);
+async function searchSemanticScholar(
+  query: string,
+  mode: ExpansionMode = "balanced",
+  precompiledQuery?: string,
+): Promise<UnifiedPaper[]> {
+  const prepared = resolvePreparedQuery(query, "semantic_scholar", mode, precompiledQuery);
   if (!prepared.apiQuery) return [];
   const encodedQuery = encodeURIComponent(prepared.apiQuery);
-  const fields = "paperId,title,abstract,year,authors,venue,citationCount,publicationTypes,externalIds,openAccessPdf,url";
+  const fields = "paperId,title,abstract,year,authors,venue,citationCount,publicationTypes,externalIds,openAccessPdf,url,isRetracted,references.paperId";
   const url = `https://api.semanticscholar.org/graph/v1/paper/search/bulk?query=${encodedQuery}&fields=${fields}`;
   const apiKey = Deno.env.get("SEMANTIC_SCHOLAR_API_KEY");
   console.log(`[SemanticScholar] Searching original="${prepared.originalKeywordQuery}" expanded="${prepared.expandedKeywordQuery}" api="${prepared.apiQuery}"${apiKey ? ' (with API key)' : ' (public tier)'}`);
@@ -309,7 +426,7 @@ async function searchSemanticScholar(query: string, mode: ExpansionMode = "balan
     return papers
       .filter(paper => paper.abstract && paper.abstract.length > 50)
       .slice(0, 50)
-      .map(paper => ({
+      .map((paper, idx) => ({
         id: paper.paperId,
         title: paper.title || "Untitled",
         year: paper.year || new Date().getFullYear(),
@@ -324,6 +441,10 @@ async function searchSemanticScholar(query: string, mode: ExpansionMode = "balan
         publicationTypes: paper.publicationTypes ?? undefined,
         pdfUrl: paper.openAccessPdf?.url || null,
         landingPageUrl: paper.url || null,
+        referenced_ids: (paper.references || []).map((ref) => ref.paperId).filter(Boolean),
+        is_retracted: Boolean(paper.isRetracted),
+        preprint_status: (paper.publicationTypes || []).some((ptype) => /preprint/i.test(ptype)) ? "Preprint" : "Peer-reviewed",
+        rank_signal: 1 / (idx + 1),
       }));
   } catch (error) {
     console.error(`[SemanticScholar] Error:`, error);
@@ -331,8 +452,12 @@ async function searchSemanticScholar(query: string, mode: ExpansionMode = "balan
   }
 }
 
-async function searchArxiv(query: string, mode: ExpansionMode = "balanced"): Promise<UnifiedPaper[]> {
-  const prepared = buildSourceQuery(query, "arxiv", mode);
+async function searchArxiv(
+  query: string,
+  mode: ExpansionMode = "balanced",
+  precompiledQuery?: string,
+): Promise<UnifiedPaper[]> {
+  const prepared = resolvePreparedQuery(query, "arxiv", mode, precompiledQuery);
   if (!prepared.apiQuery) return [];
   const encodedQuery = encodeURIComponent(prepared.apiQuery);
   const url = `https://export.arxiv.org/api/query?search_query=all:${encodedQuery}&max_results=25&sortBy=relevance&sortOrder=descending`;
@@ -382,6 +507,8 @@ async function searchArxiv(query: string, mode: ExpansionMode = "balanced"): Pro
         source: "arxiv" as const,
         citationCount: undefined,
         publicationTypes: ["Preprint"],
+        preprint_status: "Preprint",
+        rank_signal: 1 / (papers.length + 1),
       });
     }
     console.log(`[ArXiv] Found ${papers.length} papers`);
@@ -394,8 +521,12 @@ async function searchArxiv(query: string, mode: ExpansionMode = "balanced"): Pro
 
 // ─── PubMed Search ──────────────────────────────────────────────────────────
 
-async function searchPubMed(query: string, mode: ExpansionMode = "balanced"): Promise<UnifiedPaper[]> {
-  const prepared = buildSourceQuery(query, "pubmed", mode);
+async function searchPubMed(
+  query: string,
+  mode: ExpansionMode = "balanced",
+  precompiledQuery?: string,
+): Promise<UnifiedPaper[]> {
+  const prepared = resolvePreparedQuery(query, "pubmed", mode, precompiledQuery);
   if (!prepared.apiQuery) return [];
   const encodedQuery = encodeURIComponent(prepared.apiQuery);
 
@@ -506,6 +637,8 @@ async function searchPubMed(query: string, mode: ExpansionMode = "balanced"): Pr
         citationCount: undefined,
         publicationTypes: undefined,
         journal,
+        preprint_status: "Peer-reviewed",
+        rank_signal: 1 / (papers.length + 1),
       });
     }
 
@@ -718,7 +851,10 @@ function isCompleteStudy(study: any): boolean {
   return hasCompleteOutcome;
 }
 
-function getQueryKeywordSet(query: string): Set<string> {
+function getQueryKeywordSet(query: string, precomputedTerms?: string[]): Set<string> {
+  if (precomputedTerms && precomputedTerms.length > 0) {
+    return new Set(precomputedTerms.map((k) => k.trim().toLowerCase()).filter(Boolean));
+  }
   const { originalTerms, expandedTerms } = extractSearchKeywords(query);
   const keywords = [...originalTerms, ...expandedTerms]
     .map(k => k.trim())
@@ -926,6 +1062,8 @@ interface PipelineResult {
   semantic_scholar_count: number;
   arxiv_count: number;
   pubmed_count: number;
+  query_processing?: QueryProcessingMeta;
+  query_pipeline_mode: QueryPipelineMode;
 }
 
 async function runResearchPipeline(question: string): Promise<PipelineResult> {
@@ -936,17 +1074,57 @@ async function runResearchPipeline(question: string): Promise<PipelineResult> {
 
   console.log(`[Pipeline] Processing question: "${question}"`);
 
-  const { normalized, wasNormalized } = normalizeQuery(question);
-  const searchQuery = wasNormalized ? normalized : question;
-  if (wasNormalized) console.log(`[Pipeline] Query normalized: "${question}" -> "${normalized}"`);
+  const queryPipelineMode = getQueryPipelineMode();
+  const { normalized: v1Normalized, wasNormalized: v1WasNormalized } = normalizeQuery(question);
+  let normalizedQueryForResponse = v1WasNormalized ? v1Normalized : undefined;
+  let searchQuery = v1WasNormalized ? v1Normalized : question;
+  let queryProcessingMeta: QueryProcessingMeta | undefined;
+  let queryTermsForRanking: string[] | undefined;
+  const sourceQueryOverrides: Partial<Record<SearchSource, string>> = {};
+
+  let shadowPreparedPromise: Promise<Awaited<ReturnType<typeof prepareQueryProcessingV2>>> | null = null;
+
+  if (queryPipelineMode === "v2") {
+    const prepared = await prepareQueryProcessingV2(question, {
+      llmApiKey: GOOGLE_GEMINI_API_KEY,
+      fallbackTimeoutMs: 350,
+    });
+    searchQuery = prepared.search_query;
+    normalizedQueryForResponse = prepared.was_normalized ? prepared.normalized_query : undefined;
+    queryTermsForRanking = prepared.query_terms;
+    queryProcessingMeta = prepared.query_processing;
+    sourceQueryOverrides.semantic_scholar = prepared.query_processing.source_queries.semantic_scholar;
+    sourceQueryOverrides.openalex = prepared.query_processing.source_queries.openalex;
+    sourceQueryOverrides.pubmed = prepared.query_processing.source_queries.pubmed;
+    sourceQueryOverrides.arxiv = prepared.query_processing.source_queries.arxiv;
+  } else if (queryPipelineMode === "shadow") {
+    shadowPreparedPromise = prepareQueryProcessingV2(question, {
+      llmApiKey: GOOGLE_GEMINI_API_KEY,
+      fallbackTimeoutMs: 350,
+    });
+  }
+
+  if (normalizedQueryForResponse) {
+    console.log(`[Pipeline] Query normalized: "${question}" -> "${normalizedQueryForResponse}"`);
+  }
 
   // Run all API searches in parallel
   const [s2Papers, openAlexPapers, arxivPapers, pubmedPapers] = await Promise.all([
-    searchSemanticScholar(searchQuery).catch(e => { console.error("[Pipeline] S2 failed:", e); return [] as UnifiedPaper[]; }),
-    searchOpenAlex(searchQuery).catch(e => { console.error("[Pipeline] OpenAlex failed:", e); return [] as UnifiedPaper[]; }),
-    searchArxiv(searchQuery).catch(e => { console.error("[Pipeline] ArXiv failed:", e); return [] as UnifiedPaper[]; }),
-    searchPubMed(searchQuery).catch(e => { console.error("[Pipeline] PubMed failed:", e); return [] as UnifiedPaper[]; }),
+    searchSemanticScholar(searchQuery, "balanced", sourceQueryOverrides.semantic_scholar).catch(e => { console.error("[Pipeline] S2 failed:", e); return [] as UnifiedPaper[]; }),
+    searchOpenAlex(searchQuery, "balanced", sourceQueryOverrides.openalex).catch(e => { console.error("[Pipeline] OpenAlex failed:", e); return [] as UnifiedPaper[]; }),
+    searchArxiv(searchQuery, "balanced", sourceQueryOverrides.arxiv).catch(e => { console.error("[Pipeline] ArXiv failed:", e); return [] as UnifiedPaper[]; }),
+    searchPubMed(searchQuery, "balanced", sourceQueryOverrides.pubmed).catch(e => { console.error("[Pipeline] PubMed failed:", e); return [] as UnifiedPaper[]; }),
   ]);
+
+  if (queryPipelineMode === "shadow" && shadowPreparedPromise) {
+    try {
+      const prepared = await shadowPreparedPromise;
+      queryProcessingMeta = prepared.query_processing;
+    } catch (error) {
+      console.warn("[Pipeline] Shadow query processing failed:", error);
+    }
+  }
+
   const totalFetched = s2Papers.length + openAlexPapers.length + arxivPapers.length + pubmedPapers.length;
   console.log(`[Pipeline] Stage stats: fetched=${totalFetched} (s2=${s2Papers.length}, openalex=${openAlexPapers.length}, arxiv=${arxivPapers.length}, pubmed=${pubmedPapers.length})`);
 
@@ -956,12 +1134,14 @@ async function runResearchPipeline(question: string): Promise<PipelineResult> {
   if (allPapers.length === 0) {
     return {
       results: [],
-      normalized_query: wasNormalized ? normalized : undefined,
+      normalized_query: normalizedQueryForResponse,
       total_papers_searched: 0,
       openalex_count: 0,
       semantic_scholar_count: 0,
       arxiv_count: 0,
       pubmed_count: 0,
+      query_processing: queryProcessingMeta,
+      query_pipeline_mode: queryPipelineMode,
     };
   }
 
@@ -972,16 +1152,18 @@ async function runResearchPipeline(question: string): Promise<PipelineResult> {
   if (papersWithAbstracts.length === 0) {
     return {
       results: [],
-      normalized_query: wasNormalized ? normalized : undefined,
+      normalized_query: normalizedQueryForResponse,
       total_papers_searched: allPapers.length,
       openalex_count: openAlexPapers.length,
       semantic_scholar_count: s2Papers.length,
       arxiv_count: arxivPapers.length,
       pubmed_count: pubmedPapers.length,
+      query_processing: queryProcessingMeta,
+      query_pipeline_mode: queryPipelineMode,
     };
   }
 
-  const queryKeywords = getQueryKeywordSet(searchQuery);
+  const queryKeywords = getQueryKeywordSet(searchQuery, queryPipelineMode === "v2" ? queryTermsForRanking : undefined);
   const rankedCandidates = [...papersWithAbstracts].sort(
     (a, b) => scorePaperCandidate(b, queryKeywords) - scorePaperCandidate(a, queryKeywords)
   );
@@ -1013,12 +1195,14 @@ async function runResearchPipeline(question: string): Promise<PipelineResult> {
 
   return {
     results,
-    normalized_query: wasNormalized ? normalized : undefined,
+    normalized_query: normalizedQueryForResponse,
     total_papers_searched: allPapers.length,
     openalex_count: openAlexPapers.length,
     semantic_scholar_count: s2Papers.length,
     arxiv_count: arxivPapers.length,
     pubmed_count: pubmedPapers.length,
+    query_processing: queryProcessingMeta,
+    query_pipeline_mode: queryPipelineMode,
   };
 }
 
@@ -1059,6 +1243,42 @@ async function checkRateLimit(
 
   await supabase.from("rate_limits").insert({ function_name: functionName, client_ip: clientIp });
   return true;
+}
+
+async function recordQueryProcessingEvent(
+  supabase: any,
+  params: {
+    functionName: string;
+    mode: QueryPipelineMode;
+    reportId?: string;
+    originalQuery: string;
+    servedQuery: string;
+    normalizedQuery?: string;
+    queryProcessing?: QueryProcessingMeta;
+    userId?: string;
+  },
+): Promise<void> {
+  if (!params.queryProcessing) return;
+
+  const payload = {
+    function_name: params.functionName,
+    mode: params.mode,
+    user_id: params.userId ?? null,
+    report_id: params.reportId ?? null,
+    original_query: params.originalQuery,
+    served_query: params.servedQuery,
+    normalized_query: params.normalizedQuery ?? null,
+    deterministic_confidence: params.queryProcessing.deterministic_confidence,
+    used_llm_fallback: params.queryProcessing.used_llm_fallback,
+    processing_ms: params.queryProcessing.processing_ms,
+    reason_codes: params.queryProcessing.reason_codes,
+    source_queries: params.queryProcessing.source_queries,
+  };
+
+  const { error } = await supabase.from("query_processing_events").insert(payload);
+  if (error) {
+    console.warn("[query-processing] Failed to record event:", error.message);
+  }
 }
 
 // ─── Main Handler ────────────────────────────────────────────────────────────
@@ -1146,6 +1366,7 @@ serve(async (req) => {
             status: "completed",
             results: data.results || [],
             normalized_query: data.normalized_query || null,
+            query_processing_meta: data.query_processing || null,
             total_papers_searched: data.total_papers_searched || 0,
             openalex_count: data.openalex_count || 0,
             semantic_scholar_count: data.semantic_scholar_count || 0,
@@ -1159,6 +1380,16 @@ serve(async (req) => {
           console.error(`[research-async] Update error for ${reportId}:`, updateError);
         } else {
           console.log(`[research-async] Report ${reportId} completed with ${(data.results || []).length} results`);
+          await recordQueryProcessingEvent(supabase, {
+            functionName: "research-async",
+            mode: data.query_pipeline_mode,
+            reportId,
+            originalQuery: question.trim(),
+            servedQuery: data.normalized_query || question.trim(),
+            normalizedQuery: data.normalized_query,
+            queryProcessing: data.query_processing,
+            userId,
+          });
 
           // Trigger PDF downloads for DOIs
           const dois = (data.results || [])

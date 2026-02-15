@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import { getSupabase } from '@/integrations/supabase/fallback';
-import type { StudyResult } from '@/types/research';
+import type { QueryProcessingMeta, StudyResult } from '@/types/research';
 
 interface Report {
   id: string;
@@ -17,6 +17,7 @@ interface Report {
   created_at: string;
   completed_at: string | null;
   narrative_synthesis?: string | null;
+  query_processing_meta?: QueryProcessingMeta | null;
 }
 
 interface UseReportReturn {

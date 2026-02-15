@@ -35,10 +35,25 @@ export interface StudyResult {
   landing_page_url?: string | null; // Publisher or S2 landing page URL
 }
 
+export interface QueryProcessingMeta {
+  version: "v2";
+  deterministic_confidence: number;
+  used_llm_fallback: boolean;
+  processing_ms: number;
+  reason_codes: string[];
+  source_queries: {
+    semantic_scholar: string;
+    openalex: string;
+    pubmed: string;
+    arxiv: string;
+  };
+}
+
 export interface ResearchResponse {
   results: StudyResult[];
   query: string;
   normalized_query?: string; // Present if query was normalized
+  query_processing?: QueryProcessingMeta;
   total_papers_searched: number;
   openalex_count?: number; // Breakdown by source
   semantic_scholar_count?: number;

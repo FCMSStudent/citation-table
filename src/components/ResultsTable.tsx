@@ -58,7 +58,7 @@ export function ResultsTable({
   const [compareStudies, setCompareStudies] = useState<StudyResult[]>([]);
   const [compareOpen, setCompareOpen] = useState(false);
 
-  const activeQuery = normalizedQuery || query;
+  const activeQuery = query;
 
   // Combined data processing: filter, score, categorize, and aggregate in fewer passes
   const { mainStudies, excludedStudies, outcomeAggregation } = useMemo(() => {
