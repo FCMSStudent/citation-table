@@ -492,7 +492,7 @@ serve(async (req) => {
               .eq("report_id", report_id)
               .eq("doi", normalizedDoi);
 
-            await reExtractStudyFromPdf(supabase, report_id, normalizedDoi, result.pdfData);
+            // PDF re-extraction skipped (function not yet implemented)
 
             console.log(`[scihub-download] Successfully processed ${normalizedDoi}`);
 
