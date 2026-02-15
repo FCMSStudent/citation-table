@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { fetchCociForDoi } from '../lib/coci';
+import { fetchCociForDoi } from '../features/citations/lib/coci';
 
 // Mock global fetch
 global.fetch = vi.fn();

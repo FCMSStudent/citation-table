@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import type { StudyResult, Outcome, Citation } from "../types/research";
+import type { StudyResult, Outcome, Citation } from "../shared/types/research";
 
 describe("Research Types", () => {
   it("should have valid Outcome structure", () => {

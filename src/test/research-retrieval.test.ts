@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import type { ResearchResponse, StudyResult } from "../types/research";
+import type { ResearchResponse, StudyResult } from "../shared/types/research";
 
 const picoDefaults = { intervention: null, comparator: null, effect_size: null, p_value: null };
 

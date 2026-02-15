@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { calculateRelevanceScore, isLowValueStudy, sortByRelevance } from '../utils/relevanceScore';
-import type { StudyResult } from '../types/research';
+import type { StudyResult } from '../shared/types/research';
 
 const picoDefaults = { intervention: null, comparator: null, effect_size: null, p_value: null };
 

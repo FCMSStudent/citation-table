@@ -1,50 +1,67 @@
 # Eureka
 
-Evidence-focused literature search app built with React + Supabase Edge Functions.
+Evidence-focused literature search app built with React + Vite + Supabase Edge Functions.
 
-## What this implementation provides
+## Architecture (Feature-Based)
 
-- Live federated retrieval across OpenAlex, Semantic Scholar, PubMed, and arXiv.
-- Query normalization + source-specific query compilation (`query-processing v2`).
-- Canonicalization with DOI/PMID/arXiv priority and provenance merging.
-- Recall-first retrieval with OpenAlex citation-graph expansion.
-- Hard quality gating with weighted scoring and rejection rules.
-- Structured outputs:
-  - Evidence table (`evidence_table`)
-  - Citation-anchored brief (`brief_json`)
-  - Coverage + latency stats (`coverage_report`, `search_stats`)
-- Supabase-backed caches:
-  - `lit_query_cache` (6h)
-  - `lit_paper_cache` (30d)
+Frontend source is organized by app layer and feature ownership:
 
-## Edge Function API
+- `src/app`: global app wiring (providers + routes)
+- `src/features`: user-facing feature modules
+- `src/entities`: domain data hooks/models shared across features
+- `src/shared`: reusable UI primitives, generic libs, types, shared hooks
 
-Base function path: `/functions/v1/research-async`
+Current route URLs are unchanged:
+
+- `/`
+- `/auth`
+- `/app`
+- `/reports`
+- `/reports/:id`
+
+See `docs/architecture.md` for ownership and cleanup conventions.
+
+## Active Edge Functions
+
+The active backend function surface is:
+
+- `research-async`
+- `chat-papers`
+- `add-study`
+- `synthesize-papers`
+- `coci`
+- `scihub-download`
+
+Shared runtime logic remains in `supabase/functions/_shared/*`.
+
+Base API path:
+
+- `/functions/v1/research-async`
+
+Supported endpoints:
 
 - `POST /v1/lit/search`
 - `GET /v1/lit/search/{search_id}`
 - `GET /v1/lit/paper/{paper_id}`
 - `GET /v1/lit/providers/health`
 
-Legacy compatibility is preserved:
+Legacy compatibility:
 
-- `POST /functions/v1/research-async` with `{ "question": "..." }` still returns `{ "report_id": "..." }`.
+- `POST /functions/v1/research-async` with `{ "question": "..." }` returns `{ "report_id": "..." }`.
 
-## Local development
+## Local Development
+
+This repo uses `npm` as package manager of record.
 
 ```bash
 npm install
 npm run dev
 ```
 
-Run tests:
+Validation commands:
 
 ```bash
 npm test
+npm run build
+npm run lint
 ```
-
-## Supabase migrations added
-
-- `20260215143000_lit_search_api.sql`
-
-Apply migrations before deploying the updated edge function.
