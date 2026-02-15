@@ -16,6 +16,14 @@ export function SourceBadge({ source, citationCount }: SourceBadgeProps) {
       </Badge>
     );
   }
+
+  if (source === "pubmed") {
+    return (
+      <Badge className="bg-green-100 text-green-800 border-green-300 dark:bg-green-900 dark:text-green-100">
+        PubMed{citationText}
+      </Badge>
+    );
+  }
   
   return (
     <Badge className="bg-cyan-100 text-cyan-800 border-cyan-300 dark:bg-cyan-900 dark:text-cyan-100">

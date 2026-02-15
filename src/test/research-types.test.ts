@@ -61,14 +61,14 @@ describe("Research Types", () => {
       abstract_excerpt: "This study examined...",
       preprint_status: "Peer-reviewed",
       review_type: "None",
-      source: "openalex",
+      source: "pubmed",
       citationCount: 42
     };
     
     expect(study.outcomes).toBeInstanceOf(Array);
     expect(study.outcomes.length).toBeGreaterThan(0);
     expect(study.preprint_status).toBe("Peer-reviewed");
-    expect(study.source).toBe("openalex");
+    expect(study.source).toBe("pubmed");
   });
 
   it("should allow multiple outcomes per study", () => {

@@ -45,6 +45,7 @@ export type Database = {
           narrative_synthesis: string | null
           normalized_query: string | null
           openalex_count: number | null
+          pubmed_count: number | null
           question: string
           results: Json | null
           semantic_scholar_count: number | null
@@ -61,6 +62,7 @@ export type Database = {
           narrative_synthesis?: string | null
           normalized_query?: string | null
           openalex_count?: number | null
+          pubmed_count?: number | null
           question: string
           results?: Json | null
           semantic_scholar_count?: number | null
@@ -77,6 +79,7 @@ export type Database = {
           narrative_synthesis?: string | null
           normalized_query?: string | null
           openalex_count?: number | null
+          pubmed_count?: number | null
           question?: string
           results?: Json | null
           semantic_scholar_count?: number | null

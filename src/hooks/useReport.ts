@@ -12,6 +12,7 @@ interface Report {
   openalex_count: number;
   semantic_scholar_count: number;
   arxiv_count: number;
+  pubmed_count: number;
   error_message: string | null;
   created_at: string;
   completed_at: string | null;
