@@ -455,50 +455,121 @@ async function searchArxiv(query: string, mode: ExpansionMode = "balanced"): Pro
 }
 
 // Deduplicate and merge papers from both sources (Semantic Scholar preferred)
+function normalizeTitleForDedup(title: string): string {
+  return title
+    .toLowerCase()
+    .replace(/[^\p{L}\p{N}\s]/gu, " ")
+    .split(/\s+/)
+    .filter(Boolean)
+    .sort()
+    .join(" ");
+}
+
+function levenshteinDistance(a: string, b: string): number {
+  if (a === b) return 0;
+  if (!a.length) return b.length;
+  if (!b.length) return a.length;
+
+  const prev = Array.from({ length: b.length + 1 }, (_, i) => i);
+  const curr = new Array<number>(b.length + 1);
+
+  for (let i = 1; i <= a.length; i++) {
+    curr[0] = i;
+    for (let j = 1; j <= b.length; j++) {
+      const cost = a[i - 1] === b[j - 1] ? 0 : 1;
+      curr[j] = Math.min(
+        curr[j - 1] + 1,
+        prev[j] + 1,
+        prev[j - 1] + cost,
+      );
+    }
+    for (let j = 0; j <= b.length; j++) prev[j] = curr[j];
+  }
+  return prev[b.length];
+}
+
+function fuzzyTitleThreshold(title: string): number {
+  if (title.length <= 40) return 2;
+  return 3;
+}
+
+function mergePaperMetadata(existingPaper: UnifiedPaper, incomingPaper: UnifiedPaper): void {
+  if (incomingPaper.abstract && incomingPaper.abstract.length > (existingPaper.abstract?.length ?? 0)) {
+    existingPaper.abstract = incomingPaper.abstract;
+  }
+
+  if (
+    incomingPaper.citationCount !== undefined
+    && (existingPaper.citationCount === undefined || incomingPaper.citationCount > existingPaper.citationCount)
+  ) {
+    existingPaper.citationCount = incomingPaper.citationCount;
+  }
+
+  if (incomingPaper.pubmed_id && !existingPaper.pubmed_id) existingPaper.pubmed_id = incomingPaper.pubmed_id;
+  if (incomingPaper.openalex_id && !existingPaper.openalex_id) existingPaper.openalex_id = incomingPaper.openalex_id;
+  if (incomingPaper.doi && !existingPaper.doi) existingPaper.doi = incomingPaper.doi;
+  if (incomingPaper.pdfUrl && !existingPaper.pdfUrl) existingPaper.pdfUrl = incomingPaper.pdfUrl;
+  if (incomingPaper.landingPageUrl && !existingPaper.landingPageUrl) existingPaper.landingPageUrl = incomingPaper.landingPageUrl;
+}
+
 function deduplicateAndMerge(s2Papers: UnifiedPaper[], openAlexPapers: UnifiedPaper[], arxivPapers: UnifiedPaper[]): UnifiedPaper[] {
   const doiMap = new Map<string, UnifiedPaper>();
   const titleMap = new Map<string, UnifiedPaper>();
   const uniquePapers = new Set<UnifiedPaper>();
-  
-  // Process Semantic Scholar first so it takes priority
   const allPapers = [...s2Papers, ...openAlexPapers, ...arxivPapers];
-  
+
   for (const paper of allPapers) {
-    const normalizedTitle = paper.title.toLowerCase().trim();
+    const normalizedTitle = normalizeTitleForDedup(paper.title);
     const doi = paper.doi?.toLowerCase().trim();
 
-    // Try to find existing paper by DOI or Title
-    const existingPaper = (doi ? doiMap.get(doi) : undefined) || titleMap.get(normalizedTitle);
-    
-    if (existingPaper) {
-      // Merge: combine metadata from current paper into existingPaper
-      // Prefer Semantic Scholar for citation count
-      if (paper.source === "semantic_scholar" && paper.citationCount !== undefined) {
-        existingPaper.citationCount = paper.citationCount;
-      }
-      // Merge identifiers - prefer non-null values
-      if (paper.pubmed_id && !existingPaper.pubmed_id) {
-        existingPaper.pubmed_id = paper.pubmed_id;
-      }
-      if (paper.openalex_id && !existingPaper.openalex_id) {
-        existingPaper.openalex_id = paper.openalex_id;
-      }
-      // If we found it by title but now have a DOI, update doiMap
-      if (doi && !existingPaper.doi) {
-        existingPaper.doi = paper.doi;
-        doiMap.set(doi, existingPaper);
-      }
-    } else {
-      // New unique paper
-      uniquePapers.add(paper);
-      if (doi) doiMap.set(doi, paper);
-      titleMap.set(normalizedTitle, paper);
+    let existingPaper: UnifiedPaper | undefined;
+    let dedupeReason: "doi_match" | "title_exact" | "title_fuzzy" | null = null;
+
+    if (doi) {
+      existingPaper = doiMap.get(doi);
+      if (existingPaper) dedupeReason = "doi_match";
     }
+
+    if (!existingPaper) {
+      existingPaper = titleMap.get(normalizedTitle);
+      if (existingPaper) dedupeReason = "title_exact";
+    }
+
+    if (!existingPaper) {
+      let bestMatch: { paper: UnifiedPaper; distance: number } | null = null;
+      const threshold = fuzzyTitleThreshold(normalizedTitle);
+
+      for (const [knownTitle, knownPaper] of titleMap.entries()) {
+        const distance = levenshteinDistance(normalizedTitle, knownTitle);
+        if (distance <= threshold && (!bestMatch || distance < bestMatch.distance)) {
+          bestMatch = { paper: knownPaper, distance };
+          if (distance === 0) break;
+        }
+      }
+
+      if (bestMatch) {
+        existingPaper = bestMatch.paper;
+        dedupeReason = "title_fuzzy";
+      }
+    }
+
+    if (existingPaper && dedupeReason) {
+      mergePaperMetadata(existingPaper, paper);
+      if (doi) doiMap.set(doi, existingPaper);
+      titleMap.set(normalizedTitle, existingPaper);
+      console.log(`[Deduplication] Merged "${paper.title}" via ${dedupeReason}`);
+      continue;
+    }
+
+    uniquePapers.add(paper);
+    if (doi) doiMap.set(doi, paper);
+    titleMap.set(normalizedTitle, paper);
   }
-  
+
   console.log(`[Deduplication] ${allPapers.length} total -> ${uniquePapers.size} unique papers`);
   return Array.from(uniquePapers);
 }
+
 
 // Enrich papers with Crossref metadata
 async function enrichWithCrossref(papers: UnifiedPaper[]): Promise<UnifiedPaper[]> {
@@ -599,6 +670,77 @@ async function enrichWithCrossref(papers: UnifiedPaper[]): Promise<UnifiedPaper[
   
   console.log(`[Crossref] Enrichment complete for ${enrichedPapers.length} papers`);
   return enrichedPapers;
+}
+
+function isCompleteStudy(study: any): boolean {
+  if (!study.title || !study.year) return false;
+  if (study.study_design === "unknown") return false;
+  if (!study.abstract_excerpt || study.abstract_excerpt.trim().length < 50) return false;
+  if (!study.outcomes || study.outcomes.length === 0) return false;
+  const hasCompleteOutcome = study.outcomes.some((o: any) =>
+    o.outcome_measured &&
+    (o.effect_size || o.p_value || o.intervention || o.comparator)
+  );
+  return hasCompleteOutcome;
+}
+
+function getQueryKeywordSet(query: string): Set<string> {
+  const keywords = extractSearchKeywords(query)
+    .split(/\s+/)
+    .map(k => k.trim())
+    .filter(Boolean);
+  return new Set(keywords);
+}
+
+function scorePaperCandidate(paper: UnifiedPaper, queryKeywords: Set<string>): number {
+  const text = `${paper.title} ${paper.abstract}`.toLowerCase();
+  const textTokens = new Set(text.split(/[^a-z0-9]+/).filter(Boolean));
+
+  let keywordOverlap = 0;
+  for (const keyword of queryKeywords) {
+    if (textTokens.has(keyword)) keywordOverlap += 1;
+  }
+
+  const overlapScore = queryKeywords.size > 0 ? keywordOverlap / queryKeywords.size : 0;
+  const abstractLengthScore = Math.min((paper.abstract.length || 0) / 2000, 1);
+  const citationScore = Math.min(Math.log10((paper.citationCount ?? 0) + 1) / 3, 1);
+
+  return overlapScore * 3 + abstractLengthScore + citationScore;
+}
+
+function mergeExtractedStudies(studies: StudyResult[]): StudyResult[] {
+  const byStudyId = new Map<string, StudyResult>();
+
+  for (const study of studies) {
+    if (!study?.study_id) continue;
+
+    const existing = byStudyId.get(study.study_id);
+    if (!existing) {
+      byStudyId.set(study.study_id, study);
+      continue;
+    }
+
+    const combinedOutcomes = [...(existing.outcomes || []), ...(study.outcomes || [])];
+    const seenOutcomes = new Set<string>();
+    const dedupedOutcomes = combinedOutcomes.filter((outcome: any) => {
+      const key = `${outcome?.outcome_measured || ""}|${outcome?.citation_snippet || ""}|${outcome?.key_result || ""}`;
+      if (seenOutcomes.has(key)) return false;
+      seenOutcomes.add(key);
+      return true;
+    });
+
+    byStudyId.set(study.study_id, {
+      ...existing,
+      ...study,
+      outcomes: dedupedOutcomes,
+      citationCount: Math.max(existing.citationCount ?? 0, study.citationCount ?? 0) || undefined,
+      abstract_excerpt: existing.abstract_excerpt?.length >= (study.abstract_excerpt?.length || 0)
+        ? existing.abstract_excerpt
+        : study.abstract_excerpt,
+    });
+  }
+
+  return Array.from(byStudyId.values());
 }
 
 // Extract data using LLM with strict prompting per meta prompt
@@ -744,11 +886,7 @@ Extract structured data from each paper's abstract following the strict rules. R
     const results = JSON.parse(jsonStr.trim());
     console.log(`[LLM] Parsed ${results.length} study results`);
 
-    // Post-extraction filter: exclude studies with unknown/ineligible designs
-    const allowedDesigns = new Set(["RCT", "cohort", "cross-sectional", "review"]);
-    const filtered = results.filter((s: any) => allowedDesigns.has(s.study_design));
-    console.log(`[LLM] Filtered: ${results.length} -> ${filtered.length} (removed ${results.length - filtered.length} unknown/ineligible)`);
-    return filtered;
+    return results;
   } catch (parseError) {
     console.error(`[LLM] JSON parse error:`, parseError);
     console.error(`[LLM] Content was:`, jsonStr.slice(0, 500));
@@ -822,34 +960,17 @@ serve(async (req) => {
       console.log(`[Research] Query normalized: "${question}" -> "${normalized}"`);
     }
 
-    const runSearchPass = async (mode: ExpansionMode, label: string) => {
-      console.log(`[Research] Running ${label} search pass (mode=${mode})`);
-      const s2 = await searchSemanticScholar(searchQuery, mode);
-      const openAlex = await searchOpenAlex(searchQuery, mode);
-      const arxiv = await searchArxiv(searchQuery, mode);
-      const deduped = deduplicateAndMerge(s2, openAlex, arxiv);
-      const usableCount = deduped.filter(p => p.abstract.length > 50).length;
-      console.log(`[Research] ${label} pass usable papers: ${usableCount}`);
-      return { s2, openAlex, arxiv, usableCount };
-    };
-
-    const firstPass = await runSearchPass("balanced", "primary");
-    let combinedS2 = firstPass.s2;
-    let combinedOpenAlex = firstPass.openAlex;
-    let combinedArxiv = firstPass.arxiv;
-
-    const LOW_USABLE_THRESHOLD = 5;
-    if (firstPass.usableCount < LOW_USABLE_THRESHOLD) {
-      console.log(`[Research] Usable count ${firstPass.usableCount} < ${LOW_USABLE_THRESHOLD}; rerunning with broader expansion`);
-      const fallbackPass = await runSearchPass("broad", "fallback");
-      combinedS2 = [...combinedS2, ...fallbackPass.s2];
-      combinedOpenAlex = [...combinedOpenAlex, ...fallbackPass.openAlex];
-      combinedArxiv = [...combinedArxiv, ...fallbackPass.arxiv];
-    }
+    // Step 2: Search Semantic Scholar first (primary), then OpenAlex (secondary)
+    const s2Papers = await searchSemanticScholar(searchQuery);
+    const openAlexPapers = await searchOpenAlex(searchQuery);
+    const arxivPapers = await searchArxiv(searchQuery);
+    const totalFetched = s2Papers.length + openAlexPapers.length + arxivPapers.length;
+    console.log(`[Research] Stage stats: fetched=${totalFetched} (s2=${s2Papers.length}, openalex=${openAlexPapers.length}, arxiv=${arxivPapers.length})`);
 
     // Step 3: Deduplicate and merge (Semantic Scholar results prioritized)
-    const allPapers = deduplicateAndMerge(combinedS2, combinedOpenAlex, combinedArxiv);
-
+    const allPapers = deduplicateAndMerge(s2Papers, openAlexPapers, arxivPapers);
+    console.log(`[Research] Stage stats: deduped=${allPapers.length}`);
+    
     if (allPapers.length === 0) {
       return new Response(
         JSON.stringify({ 
@@ -871,7 +992,7 @@ serve(async (req) => {
 
     // Filter papers with sufficient abstracts
     const papersWithAbstracts = enrichedPapers.filter(p => p.abstract.length > 50);
-    console.log(`[Research] ${papersWithAbstracts.length} papers with valid abstracts`);
+    console.log(`[Research] Stage stats: abstract-qualified=${papersWithAbstracts.length}`);
 
     if (papersWithAbstracts.length === 0) {
       return new Response(
@@ -889,16 +1010,27 @@ serve(async (req) => {
       );
     }
 
-    // Step 4: Rerank - prioritize direct exposure-outcome match, then population match
-    // For now, take top 15 by relevance (already sorted by API)
-    const topPapers = papersWithAbstracts.slice(0, 15);
-
-    // Step 5: Extract structured data using LLM
-    const results = await extractStudyData(
-      topPapers,
-      question,
-      GOOGLE_GEMINI_API_KEY
+    const queryKeywords = getQueryKeywordSet(searchQuery);
+    const rankedCandidates = [...papersWithAbstracts].sort(
+      (a, b) => scorePaperCandidate(b, queryKeywords) - scorePaperCandidate(a, queryKeywords)
     );
+
+    const stagedCandidateCount = Math.min(45, Math.max(30, rankedCandidates.length));
+    const stagedCandidates = rankedCandidates.slice(0, stagedCandidateCount);
+    const batchSize = 15;
+
+    let extractedAcrossBatches: StudyResult[] = [];
+    for (let i = 0; i < stagedCandidates.length; i += batchSize) {
+      const batch = stagedCandidates.slice(i, i + batchSize);
+      const batchNumber = Math.floor(i / batchSize) + 1;
+      const batchResults = await extractStudyData(batch, question, GOOGLE_GEMINI_API_KEY);
+      extractedAcrossBatches = extractedAcrossBatches.concat(batchResults);
+      console.log(`[Research] Stage stats: batch=${batchNumber} candidates=${batch.length} extracted=${batchResults.length}`);
+    }
+
+    const mergedByStudy = mergeExtractedStudies(extractedAcrossBatches);
+    const results = mergedByStudy.filter((s: any) => isCompleteStudy(s));
+    console.log(`[Research] Stage stats: extracted_total=${extractedAcrossBatches.length}, merged_unique=${mergedByStudy.length}, post-filter=${results.length}`);
 
     console.log(`[Research] Returning ${results.length} structured results`);
 
