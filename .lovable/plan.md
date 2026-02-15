@@ -1,124 +1,54 @@
 
 
-# Include Tables and Cards in the UI Primitive Extraction
+# Filter Incomplete Papers and Refine Table Columns
 
 ## Overview
 
-In addition to the previously planned primitives (PageHeader, IconBox, FeatureCard, PageShell, GradientText), this plan adds dedicated primitives for the repeated table and card patterns found across `PaperResultsTable`, `TableView`, `SynthesisView`, `StudyCard`, `ReportCard`, and `FilterBar`.
+Apply the existing `isCompleteStudy` filter consistently across all views, and refine the `PaperResultsTable` columns to match the requested structure exactly.
 
-## Patterns Found
+## What Changes
 
-### Tables
-Both `PaperResultsTable` and `TableView` share:
-- Identical sort button markup (icon + label + arrow indicator)
-- Identical selection toolbar (count + Compare/Export/Clear buttons)
-- Same `thead` styling (`bg-muted/50`, `border-b p-2.5`)
-- Same row hover/selection classes
+### 1. Stricter Filtering in ResultsTable
 
-### Cards
-- `StudyCard` and the nested cards inside `SynthesisView` both render study title + citation + outcomes + external links with near-identical markup
-- `ReportCard` uses a simpler card pattern (icon + title + badges + arrow)
-- `FilterBar` is a self-contained bar but could benefit from a shared "toolbar card" wrapper
+Currently, `ResultsTable.tsx` only filters papers by abstract length (>=50 chars). The `isCompleteStudy` filter is applied in `ReportDetail.tsx` before passing data, but not inside `ResultsTable` itself. This means if `ResultsTable` is used elsewhere without pre-filtering, incomplete papers slip through.
 
-### Badges
-- Direction badges (`DirectionBadge` in `TableView`) and score badges (`getScoreBadgeClass` in `StudyCard`) are reused across views
-- Study design pills (`rounded-full bg-muted px-2 py-0.5 text-xs font-medium`) appear in 4+ places
+**Fix**: Apply `isCompleteStudy` as the primary filter inside `ResultsTable.tsx` (line 62-64), replacing the weaker abstract-length check.
 
-## New Primitives to Create
+### 2. Refined PaperResultsTable Columns
 
-### 1. `src/components/ui/data-table.tsx` -- Composable table shell
+The current table already has columns close to the spec but needs adjustments:
 
-Wraps the repeated table chrome: overflow container, rounded border, muted header row, hover/selection row styles, and the sort button component.
+| Current Column | Change |
+|---|---|
+| Paper (title + author + year + DOI) | Add citation count and abstract availability badge -- already present, just ensure consistent display |
+| Study Method (design + N + population) | Already correct as bullet points -- no change needed |
+| Outcomes (bullet list) | Already correct -- no change needed |
+| Results (key_result + effect size + p-value) | Already correct -- no change needed |
+| Limitations (filtered from key_result) | Current approach greps for "limit" in key_result, which is fragile. Keep as-is but improve the fallback label |
+| Conclusion | Currently picks the first `key_result` or falls back to abstract. Improve to generate a one-line summary from the abstract excerpt instead |
+| PDF | Keep as-is |
 
-```
-Exports:
-- DataTable: outer container (overflow-x-auto + rounded-lg border)
-- DataTableHeader: styled thead
-- DataTableRow: tr with hover + selection state
-- SortButton: sort label + directional arrow icon
-- SelectionToolbar: "{n} selected" bar with action slots
-```
+The main refinements:
+- **Paper column**: Ensure citation count always shows (even as "0 cit." if zero) and abstract availability badge is always rendered
+- **Conclusions column**: Use the first ~120 characters of the abstract excerpt as the concise summary, rather than re-using a key_result (which is already shown in the Results column)
+- **Limitations column**: Keep the current heuristic but show "Not explicitly reported" instead of "Not reported" for clarity
 
-Replaces duplicated markup in `PaperResultsTable` and `TableView`.
+## Technical Details
 
-### 2. `src/components/ui/study-meta.tsx` -- Study title + citation block
+### Files Modified
 
-The "Paper" column cell appears identically in `PaperResultsTable`, `TableView`, and `SynthesisView`: title, author/year line, optional preprint badge, optional DOI link.
+| File | Change |
+|---|---|
+| `src/components/ResultsTable.tsx` | Replace abstract-length filter (line 62-64) with `isCompleteStudy` import and usage |
+| `src/components/PaperResultsTable.tsx` | Refine Paper column to always show citation count; fix Conclusion column to use abstract excerpt; improve Limitations fallback text |
 
-```
-Props:
-- title: string
-- citation: string
-- year: number
-- preprintStatus?: string
-- doi?: string
-- className?: string
-```
+### ResultsTable.tsx Changes
+- Add `import { isCompleteStudy } from '@/utils/isCompleteStudy'`
+- Change `filteredByAbstract` to use `results.filter(isCompleteStudy)` instead of the abstract-length check
+- Rename the variable from `filteredByAbstract` to `completeStudies` for clarity
 
-### 3. `src/components/ui/direction-badge.tsx` -- Effect direction indicator
-
-Currently defined inline in `TableView` and as `EffectDirectionIcon` in `SynthesisView`. Consolidate into one shared component.
-
-```
-Props:
-- direction: EffectDirection
-- variant?: 'badge' | 'icon' (badge = pill with label, icon = just the arrow)
-```
-
-### 4. `src/components/ui/score-badge.tsx` -- Relevance score pill
-
-The score badge with color-coded background (emerald/blue/amber) appears in `StudyCard` and could be used in table views too.
-
-```
-Props:
-- score: number
-- showTooltip?: boolean
-```
-
-### 5. `src/components/ui/pdf-link.tsx` -- PDF availability indicator
-
-The PDF link/status logic (downloaded -> link, pending -> spinner, not_found -> icon) repeats across `PaperResultsTable`, `TableView`, `SynthesisView`, and `StudyCard`.
-
-```
-Props:
-- pdfData?: StudyPdf
-- links?: { label: string; url: string }[]
-- compact?: boolean
-```
-
-## Files Changed
-
-| File | Action |
-|------|--------|
-| `src/components/ui/data-table.tsx` | **New** -- Composable table primitives + SortButton + SelectionToolbar |
-| `src/components/ui/study-meta.tsx` | **New** -- Study title/citation/year block |
-| `src/components/ui/direction-badge.tsx` | **New** -- Consolidated effect direction badge/icon |
-| `src/components/ui/score-badge.tsx` | **New** -- Relevance score pill |
-| `src/components/ui/pdf-link.tsx` | **New** -- PDF availability indicator |
-| `src/components/ui/page-header.tsx` | **New** -- Sticky header (from prior plan) |
-| `src/components/ui/icon-box.tsx` | **New** -- Icon container (from prior plan) |
-| `src/components/ui/feature-card.tsx` | **New** -- Feature card (from prior plan) |
-| `src/components/ui/page-shell.tsx` | **New** -- Page layout shell (from prior plan) |
-| `src/components/ui/gradient-text.tsx` | **New** -- Gradient text (from prior plan) |
-| `src/components/PaperResultsTable.tsx` | Refactor to use DataTable, StudyMeta, PdfLink |
-| `src/components/TableView.tsx` | Refactor to use DataTable, StudyMeta, DirectionBadge |
-| `src/components/SynthesisView.tsx` | Refactor to use StudyMeta, DirectionBadge, PdfLink |
-| `src/components/StudyCard.tsx` | Refactor to use StudyMeta, ScoreBadge, DirectionBadge, PdfLink |
-| `src/components/ReportCard.tsx` | Minor -- use IconBox for status icons |
-| `src/components/FilterBar.tsx` | No change needed (already clean) |
-| `src/pages/Index.tsx` | Refactor to use PageShell, PageHeader |
-| `src/pages/Reports.tsx` | Refactor to use PageShell, PageHeader |
-| `src/pages/Landing.tsx` | Refactor to use PageShell, FeatureCard, IconBox |
-| `src/pages/Auth.tsx` | Refactor to use PageShell |
-| `src/components/EmptyState.tsx` | Refactor to use IconBox, FeatureCard |
-
-## Approach
-
-1. Create all 10 new UI primitive files
-2. Refactor table components (`PaperResultsTable`, `TableView`) to use `DataTable`, `StudyMeta`, `DirectionBadge`, `PdfLink`
-3. Refactor card components (`StudyCard`, `SynthesisView`) to use `StudyMeta`, `DirectionBadge`, `ScoreBadge`, `PdfLink`
-4. Refactor page-level components to use `PageShell`, `PageHeader`, `IconBox`, `FeatureCard`
-5. Verify no visual regressions -- output should look identical before and after
-
-This sets the foundation so the visual revamp (gradients, animations, hover effects) can be applied once per primitive rather than in 10+ files.
+### PaperResultsTable.tsx Changes
+- **Paper column**: Always render citation count (show "0 cit." when `citationCount` is 0 or undefined)
+- **Conclusion column**: Use `study.abstract_excerpt` truncated to 120 chars as the concise summary, removing the fallback to `key_result` (which duplicates the Results column)
+- **Limitations column**: Change fallback from "Not reported" to "Not explicitly reported"
 
