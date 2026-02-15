@@ -6,7 +6,6 @@ import { SearchProgress } from '@/components/SearchProgress';
 import { ResultsTable } from '@/components/ResultsTable';
 import { PaperChat } from '@/components/PaperChat';
 import { Skeleton } from '@/components/ui/skeleton';
-import { isCompleteStudy } from '@/utils/isCompleteStudy';
 import type { StudyResult } from '@/types/research';
 
 const ReportDetail = () => {
@@ -87,13 +86,12 @@ const ReportDetail = () => {
 
             {/* Completed state - show results */}
             {report.status === 'completed' && report.results && (() => {
-              const completeResults = (report.results as unknown as StudyResult[]).filter(isCompleteStudy);
               return (
               <>
                 {/* Results */}
                 <section>
                   <ResultsTable
-                    results={completeResults}
+                    results={report.results as unknown as StudyResult[]}
                     query={report.question}
                     normalizedQuery={report.normalized_query || undefined}
                     totalPapersSearched={report.total_papers_searched}
@@ -102,7 +100,7 @@ const ReportDetail = () => {
                     arxivCount={report.arxiv_count}
                     pdfsByDoi={pdfsByDoi}
                     reportId={id}
-                    cachedSynthesis={(report as any).narrative_synthesis}
+                    cachedSynthesis={report.narrative_synthesis}
                   />
                 </section>
 

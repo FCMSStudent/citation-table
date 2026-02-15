@@ -16,6 +16,7 @@ interface Report {
   error_message: string | null;
   created_at: string;
   completed_at: string | null;
+  narrative_synthesis?: string | null;
 }
 
 interface UseReportReturn {
