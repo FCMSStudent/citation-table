@@ -2,3 +2,6 @@ fastapi==0.115.0
 uvicorn[standard]==0.32.0
 scidownl @ git+https://github.com/Tishacy/SciDownl.git@main#egg=scidownl
 python-multipart==0.0.22
+pypdf==5.1.0
+pdfplumber==0.11.4
+httpx==0.27.2

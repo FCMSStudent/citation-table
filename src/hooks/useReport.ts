@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import { getSupabase } from '@/integrations/supabase/fallback';
-import type { CoverageReport, EvidenceRow, QueryProcessingMeta, SearchStats, StudyResult, ClaimSentence } from '@/types/research';
+import type { CoverageReport, EvidenceRow, QueryProcessingMeta, SearchStats, StudyResult, ClaimSentence, ExtractionStats } from '@/types/research';
 
 interface Report {
   id: string;
@@ -8,6 +8,8 @@ interface Report {
   normalized_query: string | null;
   status: 'processing' | 'completed' | 'failed';
   results: StudyResult[] | null;
+  partial_results?: StudyResult[] | null;
+  extraction_stats?: ExtractionStats | null;
   total_papers_searched: number;
   openalex_count: number;
   semantic_scholar_count: number;

@@ -41,10 +41,12 @@ export type Database = {
           completed_at: string | null
           created_at: string
           error_message: string | null
+          extraction_stats: Json
           id: string
           narrative_synthesis: string | null
           normalized_query: string | null
           openalex_count: number | null
+          partial_results: Json
           pubmed_count: number | null
           question: string
           results: Json | null
@@ -58,10 +60,12 @@ export type Database = {
           completed_at?: string | null
           created_at?: string
           error_message?: string | null
+          extraction_stats?: Json
           id?: string
           narrative_synthesis?: string | null
           normalized_query?: string | null
           openalex_count?: number | null
+          partial_results?: Json
           pubmed_count?: number | null
           question: string
           results?: Json | null
@@ -75,10 +79,12 @@ export type Database = {
           completed_at?: string | null
           created_at?: string
           error_message?: string | null
+          extraction_stats?: Json
           id?: string
           narrative_synthesis?: string | null
           normalized_query?: string | null
           openalex_count?: number | null
+          partial_results?: Json
           pubmed_count?: number | null
           question?: string
           results?: Json | null
