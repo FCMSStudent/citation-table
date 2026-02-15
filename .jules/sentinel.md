@@ -12,3 +12,8 @@
 **Vulnerability:** Potential resource abuse and URL manipulation in Edge Functions due to lack of input validation and direct string concatenation in API calls.
 **Learning:** Even simple proxy-like Edge Functions (e.g., COCI) require strict input validation. Lack of `encodeURIComponent` on user-supplied path segments allows for path traversal or URL manipulation attacks against external APIs.
 **Prevention:** Implement input length limits (e.g., 500 chars), validate expected patterns (e.g., DOI prefix), and always use `encodeURIComponent` for dynamic URL segments. Ensure catch blocks return generic error messages to avoid information leakage.
+
+## 2026-02-15 - [Python Microservice Hardening]
+**Vulnerability:** Unbounded in-memory task storage, lack of concurrency control, and race conditions in file downloads within the Python microservice.
+**Learning:** Microservices using background threads for file operations without isolation or concurrency limits are vulnerable to both DoS (resource exhaustion) and race conditions (file collision). In-memory stores must implement explicit eviction policies (e.g., FIFO) to prevent OOM.
+**Prevention:** Enforce strict Pydantic input validation (max_length, Literal types), implement a global semaphore for background thread concurrency, and use task-specific unique subdirectories for all concurrent file operations.
