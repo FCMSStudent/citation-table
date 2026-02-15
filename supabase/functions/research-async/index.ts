@@ -637,78 +637,68 @@ function deduplicateAndMerge(s2Papers: UnifiedPaper[], openAlexPapers: UnifiedPa
 
 // ─── Crossref Enrichment ─────────────────────────────────────────────────────
 
+async function enrichSinglePaper(paper: UnifiedPaper): Promise<void> {
+  try {
+    let crossrefData = null;
+    if (paper.doi) {
+      const encodedDoi = encodeURIComponent(paper.doi);
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 5000);
+      try {
+        const response = await fetch(`https://api.crossref.org/works/${encodedDoi}`, {
+          headers: { 'User-Agent': 'EurekaSearch/1.0 (mailto:research@eureka.app)' },
+          signal: controller.signal
+        });
+        clearTimeout(timeoutId);
+        if (response.ok) {
+          crossrefData = (await response.json()).message;
+        }
+      } catch (error) {
+        clearTimeout(timeoutId);
+      }
+    } else if (paper.title) {
+      const encodedTitle = encodeURIComponent(paper.title);
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 5000);
+      try {
+        const response = await fetch(
+          `https://api.crossref.org/works?query.bibliographic=${encodedTitle}&rows=1`,
+          {
+            headers: { 'User-Agent': 'EurekaSearch/1.0 (mailto:research@eureka.app)' },
+            signal: controller.signal
+          }
+        );
+        clearTimeout(timeoutId);
+        if (response.ok) {
+          const data = await response.json();
+          if (data.message.items?.length > 0) {
+            crossrefData = data.message.items[0];
+          }
+        }
+      } catch (error) {
+        clearTimeout(timeoutId);
+      }
+    }
+    if (crossrefData) {
+      paper.doi = crossrefData.DOI || paper.doi;
+      paper.year = crossrefData.issued?.['date-parts']?.[0]?.[0] || paper.year;
+      paper.citationCount = crossrefData['is-referenced-by-count'] ?? paper.citationCount;
+      if (crossrefData['container-title']?.[0]) {
+        paper.journal = crossrefData['container-title'][0];
+      }
+    }
+  } catch (_) {
+    // silently skip
+  }
+}
+
 async function enrichWithCrossref(papers: UnifiedPaper[]): Promise<UnifiedPaper[]> {
   const enrichedPapers = [...papers];
-  for (const paper of enrichedPapers) {
-    try {
-      let crossrefData = null;
-      if (paper.doi) {
-        const encodedDoi = encodeURIComponent(paper.doi);
-        const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 5000);
-        try {
-          const response = await fetch(`https://api.crossref.org/works/${encodedDoi}`, {
-            headers: { 'User-Agent': 'CitationTable/1.0 (https://github.com/FCMSStudent/citation-table)' },
-            signal: controller.signal
-          });
-          clearTimeout(timeoutId);
-          if (response.ok) {
-            const data = await response.json();
-            crossrefData = data.message;
-          } else if (response.status === 404) {
-            console.log(`[Crossref] DOI not found: ${paper.doi}`);
-          } else if (response.status === 429) {
-            console.warn(`[Crossref] Rate limit hit for DOI: ${paper.doi}`);
-          }
-        } catch (error) {
-          clearTimeout(timeoutId);
-          if ((error as Error).name === 'AbortError') {
-            console.warn(`[Crossref] Request timeout for DOI: ${paper.doi}`);
-          } else {
-            throw error;
-          }
-        }
-      } else if (paper.title) {
-        const encodedTitle = encodeURIComponent(paper.title);
-        const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 5000);
-        try {
-          const response = await fetch(
-            `https://api.crossref.org/works?query.bibliographic=${encodedTitle}&rows=1`,
-            {
-              headers: { 'User-Agent': 'CitationTable/1.0 (https://github.com/FCMSStudent/citation-table)' },
-              signal: controller.signal
-            }
-          );
-          clearTimeout(timeoutId);
-          if (response.ok) {
-            const data = await response.json();
-            if (data.message.items && data.message.items.length > 0) {
-              crossrefData = data.message.items[0];
-            }
-          }
-        } catch (error) {
-          clearTimeout(timeoutId);
-          if ((error as Error).name === 'AbortError') {
-            console.warn(`[Crossref] Request timeout for title search: ${paper.title}`);
-          } else {
-            throw error;
-          }
-        }
-      }
-      if (crossrefData) {
-        paper.doi = crossrefData.DOI || paper.doi;
-        paper.year = crossrefData.issued?.['date-parts']?.[0]?.[0] || paper.year;
-        paper.citationCount = crossrefData['is-referenced-by-count'] ?? paper.citationCount;
-        if (crossrefData['container-title']?.[0]) {
-          paper.journal = crossrefData['container-title'][0];
-        }
-        console.log(`[Crossref] Enriched "${paper.title}" with citation count: ${crossrefData['is-referenced-by-count']}`);
-      }
-      await new Promise(resolve => setTimeout(resolve, 100));
-    } catch (error) {
-      console.error(`[Crossref] Enrichment failed for paper "${paper.title}":`, error);
-    }
+  // Process in parallel batches of 10 to avoid rate limits
+  const CONCURRENCY = 10;
+  for (let i = 0; i < enrichedPapers.length; i += CONCURRENCY) {
+    const batch = enrichedPapers.slice(i, i + CONCURRENCY);
+    await Promise.all(batch.map(enrichSinglePaper));
   }
   console.log(`[Crossref] Enrichment complete for ${enrichedPapers.length} papers`);
   return enrichedPapers;
@@ -950,10 +940,13 @@ async function runResearchPipeline(question: string): Promise<PipelineResult> {
   const searchQuery = wasNormalized ? normalized : question;
   if (wasNormalized) console.log(`[Pipeline] Query normalized: "${question}" -> "${normalized}"`);
 
-  const s2Papers = await searchSemanticScholar(searchQuery);
-  const openAlexPapers = await searchOpenAlex(searchQuery);
-  const arxivPapers = await searchArxiv(searchQuery);
-  const pubmedPapers = await searchPubMed(searchQuery);
+  // Run all API searches in parallel
+  const [s2Papers, openAlexPapers, arxivPapers, pubmedPapers] = await Promise.all([
+    searchSemanticScholar(searchQuery).catch(e => { console.error("[Pipeline] S2 failed:", e); return [] as UnifiedPaper[]; }),
+    searchOpenAlex(searchQuery).catch(e => { console.error("[Pipeline] OpenAlex failed:", e); return [] as UnifiedPaper[]; }),
+    searchArxiv(searchQuery).catch(e => { console.error("[Pipeline] ArXiv failed:", e); return [] as UnifiedPaper[]; }),
+    searchPubMed(searchQuery).catch(e => { console.error("[Pipeline] PubMed failed:", e); return [] as UnifiedPaper[]; }),
+  ]);
   const totalFetched = s2Papers.length + openAlexPapers.length + arxivPapers.length + pubmedPapers.length;
   console.log(`[Pipeline] Stage stats: fetched=${totalFetched} (s2=${s2Papers.length}, openalex=${openAlexPapers.length}, arxiv=${arxivPapers.length}, pubmed=${pubmedPapers.length})`);
 
@@ -993,18 +986,24 @@ async function runResearchPipeline(question: string): Promise<PipelineResult> {
     (a, b) => scorePaperCandidate(b, queryKeywords) - scorePaperCandidate(a, queryKeywords)
   );
 
-  const stagedCandidateCount = Math.min(45, Math.max(30, rankedCandidates.length));
+  // Reduce to top 30 candidates, process in 2 parallel LLM batches
+  const stagedCandidateCount = Math.min(30, rankedCandidates.length);
   const stagedCandidates = rankedCandidates.slice(0, stagedCandidateCount);
   const batchSize = 15;
 
-  let extractedAcrossBatches: StudyResult[] = [];
+  const batchPromises: Promise<StudyResult[]>[] = [];
   for (let i = 0; i < stagedCandidates.length; i += batchSize) {
     const batch = stagedCandidates.slice(i, i + batchSize);
     const batchNumber = Math.floor(i / batchSize) + 1;
-    const batchResults = await extractStudyData(batch, question, GOOGLE_GEMINI_API_KEY);
-    extractedAcrossBatches = extractedAcrossBatches.concat(batchResults);
-    console.log(`[Pipeline] Stage stats: batch=${batchNumber} candidates=${batch.length} extracted=${batchResults.length}`);
+    batchPromises.push(
+      extractStudyData(batch, question, GOOGLE_GEMINI_API_KEY).then(results => {
+        console.log(`[Pipeline] Stage stats: batch=${batchNumber} candidates=${batch.length} extracted=${results.length}`);
+        return results;
+      })
+    );
   }
+  const batchResults = await Promise.all(batchPromises);
+  const extractedAcrossBatches = batchResults.flat();
 
   const mergedByStudy = mergeExtractedStudies(extractedAcrossBatches);
   const results = mergedByStudy.filter((s: any) => isCompleteStudy(s));
