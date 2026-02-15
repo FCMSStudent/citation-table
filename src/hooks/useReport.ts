@@ -31,6 +31,7 @@ interface UseReportReturn {
   report: Report | null;
   isLoading: boolean;
   error: string | null;
+  refetch: () => void;
 }
 
 export function useReport(reportId: string | undefined): UseReportReturn {
@@ -70,5 +71,5 @@ export function useReport(reportId: string | undefined): UseReportReturn {
     return () => clearInterval(interval);
   }, [reportId, report?.status, fetchReport]);
 
-  return { report, isLoading, error };
+  return { report, isLoading, error, refetch: fetchReport };
 }

@@ -1521,7 +1521,7 @@ function scheduleBackgroundWork(work: Promise<void>): void {
 
 // ─── Rate Limiting ───────────────────────────────────────────────────────────
 
-type SupabaseClientLike = ReturnType<typeof createClient>;
+type SupabaseClientLike = any;
 
 async function checkRateLimit(
   supabase: SupabaseClientLike,
@@ -1655,7 +1655,7 @@ async function readCachedSearch(
     return null;
   }
 
-  return data?.response_payload || null;
+  return (data?.response_payload as SearchResponsePayload) || null;
 }
 
 async function writeSearchCache(
@@ -1695,7 +1695,10 @@ async function upsertPaperCache(supabase: SupabaseClientLike, papers: CanonicalP
 }
 
 function getPathParts(req: Request): string[] {
-  const path = new URL(req.url).pathname.replace(/^\/functions\/v1\/research-async/, "");
+  const path = new URL(req.url).pathname
+    .replace(/^\/functions\/v1\/research-async\/?/, "")
+    .replace(/^\/research-async\/?/, "")
+    .replace(/^\/+/, "");
   return path.split("/").filter(Boolean);
 }
 
@@ -1899,7 +1902,6 @@ serve(async (req) => {
         question,
         status: "processing",
         user_id: userId,
-        lit_request: litRequest,
       })
       .select("id")
       .single();
@@ -1919,11 +1921,6 @@ serve(async (req) => {
           .from("research_reports")
           .update({
             status: "completed",
-            lit_response: replayed,
-            coverage_report: replayed.coverage,
-            evidence_table: replayed.evidence_table,
-            brief_json: replayed.brief,
-            search_stats: replayed.stats,
             completed_at: new Date().toISOString(),
           })
           .eq("id", reportId);
@@ -1961,20 +1958,12 @@ serve(async (req) => {
           .update({
             status: "completed",
             results: data.results || [],
-            partial_results: data.partial_results || [],
-            extraction_stats: data.extraction_stats || {},
             normalized_query: data.normalized_query || null,
-            query_processing_meta: data.query_processing || null,
             total_papers_searched: data.total_papers_searched || 0,
             openalex_count: data.openalex_count || 0,
             semantic_scholar_count: data.semantic_scholar_count || 0,
             arxiv_count: data.arxiv_count || 0,
             pubmed_count: data.pubmed_count || 0,
-            lit_response: litResponse,
-            coverage_report: data.coverage,
-            evidence_table: data.evidence_table,
-            brief_json: data.brief,
-            search_stats: data.stats,
             completed_at: new Date().toISOString(),
           })
           .eq("id", reportId);
@@ -2049,24 +2038,6 @@ serve(async (req) => {
           .update({
             status: "failed",
             error_message: errorMessage,
-            lit_response: {
-              search_id: reportId,
-              status: "failed",
-              coverage: {
-                providers_queried: 0,
-                providers_failed: 0,
-                failed_provider_names: [],
-                degraded: false,
-              },
-              evidence_table: [],
-              brief: { sentences: [] },
-              stats: {
-                latency_ms: 0,
-                candidates_total: 0,
-                candidates_filtered: 0,
-              },
-              error: errorMessage,
-            },
             completed_at: new Date().toISOString(),
           })
           .eq("id", reportId);

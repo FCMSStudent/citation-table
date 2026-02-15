@@ -38,25 +38,16 @@ export type Database = {
       research_reports: {
         Row: {
           arxiv_count: number | null
-          brief_json: Json | null
           completed_at: string | null
-          coverage_report: Json | null
           created_at: string
-          evidence_table: Json | null
           error_message: string | null
-          extraction_stats: Json
           id: string
-          lit_request: Json | null
-          lit_response: Json | null
           narrative_synthesis: string | null
           normalized_query: string | null
           openalex_count: number | null
-          partial_results: Json
           pubmed_count: number | null
-          query_processing_meta: Json | null
           question: string
           results: Json | null
-          search_stats: Json | null
           semantic_scholar_count: number | null
           status: string
           total_papers_searched: number | null
@@ -64,25 +55,16 @@ export type Database = {
         }
         Insert: {
           arxiv_count?: number | null
-          brief_json?: Json | null
           completed_at?: string | null
-          coverage_report?: Json | null
           created_at?: string
-          evidence_table?: Json | null
           error_message?: string | null
-          extraction_stats?: Json
           id?: string
-          lit_request?: Json | null
-          lit_response?: Json | null
           narrative_synthesis?: string | null
           normalized_query?: string | null
           openalex_count?: number | null
-          partial_results?: Json
           pubmed_count?: number | null
-          query_processing_meta?: Json | null
           question: string
           results?: Json | null
-          search_stats?: Json | null
           semantic_scholar_count?: number | null
           status?: string
           total_papers_searched?: number | null
@@ -90,80 +72,20 @@ export type Database = {
         }
         Update: {
           arxiv_count?: number | null
-          brief_json?: Json | null
           completed_at?: string | null
-          coverage_report?: Json | null
           created_at?: string
-          evidence_table?: Json | null
           error_message?: string | null
-          extraction_stats?: Json
           id?: string
-          lit_request?: Json | null
-          lit_response?: Json | null
           narrative_synthesis?: string | null
           normalized_query?: string | null
           openalex_count?: number | null
-          partial_results?: Json
           pubmed_count?: number | null
-          query_processing_meta?: Json | null
           question?: string
           results?: Json | null
-          search_stats?: Json | null
           semantic_scholar_count?: number | null
           status?: string
           total_papers_searched?: number | null
           user_id?: string | null
-        }
-        Relationships: []
-      }
-      lit_paper_cache: {
-        Row: {
-          created_at: string
-          expires_at: string
-          paper_id: string
-          paper_payload: Json
-          updated_at: string
-        }
-        Insert: {
-          created_at?: string
-          expires_at: string
-          paper_id: string
-          paper_payload: Json
-          updated_at?: string
-        }
-        Update: {
-          created_at?: string
-          expires_at?: string
-          paper_id?: string
-          paper_payload?: Json
-          updated_at?: string
-        }
-        Relationships: []
-      }
-      lit_query_cache: {
-        Row: {
-          cache_key: string
-          created_at: string
-          expires_at: string
-          request_payload: Json
-          response_payload: Json
-          updated_at: string
-        }
-        Insert: {
-          cache_key: string
-          created_at?: string
-          expires_at: string
-          request_payload: Json
-          response_payload: Json
-          updated_at?: string
-        }
-        Update: {
-          cache_key?: string
-          created_at?: string
-          expires_at?: string
-          request_payload?: Json
-          response_payload?: Json
-          updated_at?: string
         }
         Relationships: []
       }
