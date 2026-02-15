@@ -1,10 +1,37 @@
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useEffect } from 'react';
 import { getSupabase } from '@/integrations/supabase/fallback';
 
 export type ChatMessage = {
   role: 'user' | 'assistant';
   content: string;
 };
+
+function getChatStorageKey(reportId: string): string {
+  return `paper-chat:${reportId}`;
+}
+
+function parseStoredMessages(raw: string | null): ChatMessage[] {
+  if (!raw) return [];
+  try {
+    const parsed = JSON.parse(raw) as unknown;
+    if (!Array.isArray(parsed)) return [];
+    return parsed
+      .filter((item): item is ChatMessage => {
+        return !!item &&
+          typeof item === 'object' &&
+          ('role' in item) &&
+          ('content' in item) &&
+          ((item as ChatMessage).role === 'user' || (item as ChatMessage).role === 'assistant') &&
+          typeof (item as ChatMessage).content === 'string';
+      })
+      .map((item) => ({
+        role: item.role,
+        content: item.content,
+      }));
+  } catch {
+    return [];
+  }
+}
 
 const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL || 'https://amzlrrrhjsqjndbrdume.supabase.co';
 const CHAT_URL = `${SUPABASE_URL}/functions/v1/chat-papers`;
@@ -13,6 +40,21 @@ export function usePaperChat(reportId: string | undefined) {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [isStreaming, setIsStreaming] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!reportId) {
+      setMessages([]);
+      return;
+    }
+    const key = getChatStorageKey(reportId);
+    setMessages(parseStoredMessages(localStorage.getItem(key)));
+  }, [reportId]);
+
+  useEffect(() => {
+    if (!reportId) return;
+    const key = getChatStorageKey(reportId);
+    localStorage.setItem(key, JSON.stringify(messages));
+  }, [messages, reportId]);
 
   const sendMessage = useCallback(async (input: string) => {
     if (!reportId || !input.trim() || isStreaming) return;
@@ -136,7 +178,10 @@ export function usePaperChat(reportId: string | undefined) {
   const clearChat = useCallback(() => {
     setMessages([]);
     setError(null);
-  }, []);
+    if (reportId) {
+      localStorage.removeItem(getChatStorageKey(reportId));
+    }
+  }, [reportId]);
 
   return { messages, isStreaming, error, sendMessage, clearChat };
 }
