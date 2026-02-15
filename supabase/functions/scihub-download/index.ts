@@ -163,6 +163,27 @@ serve(async (req) => {
   const supabase = createClient(supabaseUrl, supabaseKey);
 
   try {
+    // Validate authentication
+    const authHeader = req.headers.get("Authorization");
+    if (!authHeader?.startsWith("Bearer ")) {
+      return new Response(
+        JSON.stringify({ error: "Authentication required" }),
+        { status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    }
+
+    const anonClient = createClient(supabaseUrl, Deno.env.get("SUPABASE_ANON_KEY")!, {
+      global: { headers: { Authorization: authHeader } },
+    });
+    const { data: userData, error: userError } = await anonClient.auth.getUser();
+    if (userError || !userData?.user?.id) {
+      return new Response(
+        JSON.stringify({ error: "Invalid or expired token" }),
+        { status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    }
+    const userId = userData.user.id;
+
     // Rate limit: 15 download requests per IP per hour
     const clientIp = req.headers.get("x-forwarded-for")?.split(",")[0]?.trim() || "unknown";
     const allowed = await checkRateLimit(supabase, "scihub-download", clientIp, 15, 60);
@@ -173,12 +194,26 @@ serve(async (req) => {
       );
     }
 
-    const { report_id, dois, user_id }: DownloadRequest = await req.json();
+    const { report_id, dois }: { report_id: string; dois: string[] } = await req.json();
 
     if (!report_id || !dois || !Array.isArray(dois)) {
       return new Response(
         JSON.stringify({ error: "Invalid request: report_id and dois array required" }),
         { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    }
+
+    // Verify report ownership
+    const { data: report, error: reportError } = await supabase
+      .from("research_reports")
+      .select("user_id")
+      .eq("id", report_id)
+      .single();
+
+    if (reportError || !report || report.user_id !== userId) {
+      return new Response(
+        JSON.stringify({ error: "Report not found or access denied" }),
+        { status: 404, headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
     }
 
@@ -191,7 +226,7 @@ serve(async (req) => {
         report_id,
         doi: normalizeDoi(doi),
         status: "pending",
-        ...(user_id ? { user_id } : {}),
+        user_id: userId,
       }));
 
     if (pendingEntries.length > 0) {
