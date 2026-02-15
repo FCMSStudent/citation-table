@@ -335,36 +335,121 @@ async function searchArxiv(query: string): Promise<UnifiedPaper[]> {
 
 // ─── Deduplication ───────────────────────────────────────────────────────────
 
+function normalizeTitleForDedup(title: string): string {
+  return title
+    .toLowerCase()
+    .replace(/[^\p{L}\p{N}\s]/gu, " ")
+    .split(/\s+/)
+    .filter(Boolean)
+    .sort()
+    .join(" ");
+}
+
+function levenshteinDistance(a: string, b: string): number {
+  if (a === b) return 0;
+  if (!a.length) return b.length;
+  if (!b.length) return a.length;
+
+  const prev = Array.from({ length: b.length + 1 }, (_, i) => i);
+  const curr = new Array<number>(b.length + 1);
+
+  for (let i = 1; i <= a.length; i++) {
+    curr[0] = i;
+    for (let j = 1; j <= b.length; j++) {
+      const cost = a[i - 1] === b[j - 1] ? 0 : 1;
+      curr[j] = Math.min(
+        curr[j - 1] + 1,
+        prev[j] + 1,
+        prev[j - 1] + cost,
+      );
+    }
+    for (let j = 0; j <= b.length; j++) prev[j] = curr[j];
+  }
+  return prev[b.length];
+}
+
+function fuzzyTitleThreshold(title: string): number {
+  if (title.length <= 40) return 2;
+  return 3;
+}
+
+function mergePaperMetadata(existingPaper: UnifiedPaper, incomingPaper: UnifiedPaper): void {
+  if (incomingPaper.abstract && incomingPaper.abstract.length > (existingPaper.abstract?.length ?? 0)) {
+    existingPaper.abstract = incomingPaper.abstract;
+  }
+
+  if (
+    incomingPaper.citationCount !== undefined
+    && (existingPaper.citationCount === undefined || incomingPaper.citationCount > existingPaper.citationCount)
+  ) {
+    existingPaper.citationCount = incomingPaper.citationCount;
+  }
+
+  if (incomingPaper.pubmed_id && !existingPaper.pubmed_id) existingPaper.pubmed_id = incomingPaper.pubmed_id;
+  if (incomingPaper.openalex_id && !existingPaper.openalex_id) existingPaper.openalex_id = incomingPaper.openalex_id;
+  if (incomingPaper.doi && !existingPaper.doi) existingPaper.doi = incomingPaper.doi;
+  if (incomingPaper.pdfUrl && !existingPaper.pdfUrl) existingPaper.pdfUrl = incomingPaper.pdfUrl;
+  if (incomingPaper.landingPageUrl && !existingPaper.landingPageUrl) existingPaper.landingPageUrl = incomingPaper.landingPageUrl;
+}
+
 function deduplicateAndMerge(s2Papers: UnifiedPaper[], openAlexPapers: UnifiedPaper[], arxivPapers: UnifiedPaper[]): UnifiedPaper[] {
   const doiMap = new Map<string, UnifiedPaper>();
   const titleMap = new Map<string, UnifiedPaper>();
   const uniquePapers = new Set<UnifiedPaper>();
   const allPapers = [...s2Papers, ...openAlexPapers, ...arxivPapers];
+
   for (const paper of allPapers) {
-    const normalizedTitle = paper.title.toLowerCase().trim();
+    const normalizedTitle = normalizeTitleForDedup(paper.title);
     const doi = paper.doi?.toLowerCase().trim();
-    const existingPaper = (doi ? doiMap.get(doi) : undefined) || titleMap.get(normalizedTitle);
-    if (existingPaper) {
-      if (paper.source === "semantic_scholar" && paper.citationCount !== undefined) {
-        existingPaper.citationCount = paper.citationCount;
-      }
-      if (paper.pubmed_id && !existingPaper.pubmed_id) existingPaper.pubmed_id = paper.pubmed_id;
-      if (paper.openalex_id && !existingPaper.openalex_id) existingPaper.openalex_id = paper.openalex_id;
-      if (paper.pdfUrl && !existingPaper.pdfUrl) existingPaper.pdfUrl = paper.pdfUrl;
-      if (paper.landingPageUrl && !existingPaper.landingPageUrl) existingPaper.landingPageUrl = paper.landingPageUrl;
-      if (doi && !existingPaper.doi) {
-        existingPaper.doi = paper.doi;
-        doiMap.set(doi, existingPaper);
-      }
-    } else {
-      uniquePapers.add(paper);
-      if (doi) doiMap.set(doi, paper);
-      titleMap.set(normalizedTitle, paper);
+
+    let existingPaper: UnifiedPaper | undefined;
+    let dedupeReason: "doi_match" | "title_exact" | "title_fuzzy" | null = null;
+
+    if (doi) {
+      existingPaper = doiMap.get(doi);
+      if (existingPaper) dedupeReason = "doi_match";
     }
+
+    if (!existingPaper) {
+      existingPaper = titleMap.get(normalizedTitle);
+      if (existingPaper) dedupeReason = "title_exact";
+    }
+
+    if (!existingPaper) {
+      let bestMatch: { paper: UnifiedPaper; distance: number } | null = null;
+      const threshold = fuzzyTitleThreshold(normalizedTitle);
+
+      for (const [knownTitle, knownPaper] of titleMap.entries()) {
+        const distance = levenshteinDistance(normalizedTitle, knownTitle);
+        if (distance <= threshold && (!bestMatch || distance < bestMatch.distance)) {
+          bestMatch = { paper: knownPaper, distance };
+          if (distance === 0) break;
+        }
+      }
+
+      if (bestMatch) {
+        existingPaper = bestMatch.paper;
+        dedupeReason = "title_fuzzy";
+      }
+    }
+
+    if (existingPaper && dedupeReason) {
+      mergePaperMetadata(existingPaper, paper);
+      if (doi) doiMap.set(doi, existingPaper);
+      titleMap.set(normalizedTitle, existingPaper);
+      console.log(`[Deduplication] Merged "${paper.title}" via ${dedupeReason}`);
+      continue;
+    }
+
+    uniquePapers.add(paper);
+    if (doi) doiMap.set(doi, paper);
+    titleMap.set(normalizedTitle, paper);
   }
+
   console.log(`[Deduplication] ${allPapers.length} total -> ${uniquePapers.size} unique papers`);
   return Array.from(uniquePapers);
 }
+
 
 // ─── Crossref Enrichment ─────────────────────────────────────────────────────
 
