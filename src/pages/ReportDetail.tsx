@@ -1,3 +1,4 @@
+import { useEffect, useState } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import { BookOpen, ArrowLeft, FileText } from 'lucide-react';
 import { useReport } from '@/hooks/useReport';
@@ -7,17 +8,34 @@ import { ResultsTable } from '@/components/ResultsTable';
 import { PaperChat } from '@/components/PaperChat';
 import { Skeleton } from '@/components/ui/skeleton';
 import type { StudyResult } from '@/types/research';
+import { cn } from '@/lib/utils';
 
 const ReportDetail = () => {
   const { id } = useParams<{ id: string }>();
   const { report, isLoading, error } = useReport(id);
   const { pdfs: pdfsByDoi } = useStudyPdfs(id);
+  const [isScrolled, setIsScrolled] = useState(false);
+
+  useEffect(() => {
+    const onScroll = () => {
+      setIsScrolled(window.scrollY > 12);
+    };
+    onScroll();
+    window.addEventListener('scroll', onScroll, { passive: true });
+    return () => window.removeEventListener('scroll', onScroll);
+  }, []);
 
   return (
     <div className="min-h-screen bg-background">
       {/* Header */}
-      <header className="border-b border-border sticky top-0 z-10 bg-background/95 backdrop-blur-sm">
-        <div className="container max-w-7xl mx-auto px-4 py-4">
+      <header className={cn(
+        "border-b border-border sticky top-0 z-10 bg-background/95 backdrop-blur-sm transition-all duration-200",
+        isScrolled ? 'shadow-sm' : ''
+      )}>
+        <div className={cn(
+          "container max-w-7xl mx-auto px-4 transition-all duration-200",
+          isScrolled ? 'py-3' : 'py-4',
+        )}>
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-3">
               <div className="p-2 rounded-lg bg-primary/10">
@@ -61,10 +79,9 @@ const ReportDetail = () => {
           <div>
             {/* Question header */}
             <div className="mb-6">
-              <h2 className="text-xl font-semibold text-foreground">{report.question}</h2>
-              <p className="mt-1 text-xs text-muted-foreground">
-                Started {new Date(report.created_at).toLocaleString()}
-              </p>
+              <h2 className="text-xl font-semibold text-foreground truncate" title={report.question}>
+                {report.question}
+              </h2>
             </div>
 
             {/* Processing state */}
@@ -109,16 +126,16 @@ const ReportDetail = () => {
                   />
                 </section>
 
-                {/* Chat with Papers */}
-                <section className="mt-8">
-                  <PaperChat reportId={id!} />
-                </section>
               </>
               );
             })()}
           </div>
         ) : null}
       </main>
+
+      {report?.status === 'completed' && id && (
+        <PaperChat reportId={id} mode="modal" defaultOpen />
+      )}
     </div>
   );
 };
