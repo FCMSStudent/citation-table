@@ -4,8 +4,6 @@ import { useReport } from '@/hooks/useReport';
 import { useStudyPdfs } from '@/hooks/useStudyPdfs';
 import { SearchProgress } from '@/components/SearchProgress';
 import { ResultsTable } from '@/components/ResultsTable';
-import { MedicalDisclaimer } from '@/components/MedicalDisclaimer';
-import { QueryNormalizationNotice } from '@/components/QueryNormalizationNotice';
 import { PaperChat } from '@/components/PaperChat';
 import { Skeleton } from '@/components/ui/skeleton';
 import { isCompleteStudy } from '@/utils/isCompleteStudy';
@@ -92,21 +90,6 @@ const ReportDetail = () => {
               const completeResults = (report.results as unknown as StudyResult[]).filter(isCompleteStudy);
               return (
               <>
-                {/* Medical disclaimer */}
-                <section className="mb-6">
-                  <MedicalDisclaimer />
-                </section>
-
-                {/* Query normalization notice */}
-                {report.normalized_query && report.question && (
-                  <section className="mb-6">
-                    <QueryNormalizationNotice
-                      originalQuery={report.question}
-                      normalizedQuery={report.normalized_query}
-                    />
-                  </section>
-                )}
-
                 {/* Results */}
                 <section>
                   <ResultsTable
