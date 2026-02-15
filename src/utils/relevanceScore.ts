@@ -1,4 +1,4 @@
-import type { StudyResult } from '@/types/research';
+import type { StudyResult } from '@/shared/types/research';
 import { getScoreBreakdown } from './explainScore';
 
 const outcomeTextCache = new WeakMap<StudyResult, string>();

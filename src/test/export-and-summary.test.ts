@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
-import { generateRISFile } from "../lib/risExport";
-import { generateNarrativeSummary } from "../lib/narrativeSummary";
-import type { StudyResult } from "../types/research";
+import { generateRISFile } from "../shared/lib/risExport";
+import { generateNarrativeSummary } from "../shared/lib/narrativeSummary";
+import type { StudyResult } from "../shared/types/research";
 
 const picoDefaults = { intervention: null, comparator: null, effect_size: null, p_value: null };
 

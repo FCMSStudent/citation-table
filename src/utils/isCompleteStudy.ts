@@ -1,4 +1,4 @@
-import type { StudyResult } from "@/types/research";
+import type { StudyResult } from "@/shared/types/research";
 
 /**
  * Returns true only if the study has title, year, a known design,

@@ -1,4 +1,4 @@
-import type { StudyResult } from '@/types/research';
+import type { StudyResult } from '@/shared/types/research';
 import { extractKeywords } from './highlightTerms';
 import { getOutcomeText } from './relevanceScore';
 
