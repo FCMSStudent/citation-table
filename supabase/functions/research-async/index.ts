@@ -144,43 +144,102 @@ function normalizeQuery(query: string): { normalized: string; wasNormalized: boo
   return { normalized: normalized.trim(), wasNormalized };
 }
 
-function extractSearchKeywords(query: string): string {
-  const STOP_WORDS = new Set([
-    "what", "are", "is", "the", "a", "an", "of", "for", "with", "to", "in", "on",
-    "and", "or", "how", "does", "do", "can", "could", "would", "should", "will",
-    "that", "this", "these", "those", "it", "its", "be", "been", "being", "was",
-    "were", "has", "have", "had", "not", "no", "but", "by", "from", "at", "as",
-    "into", "through", "between", "about", "their", "there", "than",
-    "reported", "outcomes", "associated", "effects", "effect", "impact",
-    "relationship", "role", "influence", "evidence", "studies", "study",
-  ]);
-  const keywords = query
-    .toLowerCase()
-    .replace(/[^a-z0-9\s]/g, " ")
+const STOP_WORDS = new Set([
+  "what", "are", "is", "the", "a", "an", "of", "for", "with", "to", "in", "on",
+  "and", "or", "how", "does", "do", "can", "could", "would", "should", "will",
+  "that", "this", "these", "those", "it", "its", "be", "been", "being", "was",
+  "were", "has", "have", "had", "not", "no", "but", "by", "from", "at", "as",
+  "into", "through", "between", "about", "their", "there", "than",
+  "reported", "outcomes", "associated", "effects", "effect", "impact",
+  "relationship", "role", "influence", "evidence", "studies", "study",
+]);
+
+const BIOMEDICAL_SYNONYMS: Record<string, string[]> = {
+  "sleep deprivation": ["sleep restriction", "sleep loss", "partial sleep deprivation"],
+  "cognitive performance": ["attention", "working memory", "executive function", "reaction time"],
+  "insomnia": ["sleep initiation", "sleep maintenance", "sleeplessness"],
+  "anxiety": ["anxious symptoms", "anxiety disorder", "state anxiety"],
+  "depression": ["depressive symptoms", "major depressive disorder", "mood symptoms"],
+  "blood pressure": ["hypertension", "systolic blood pressure", "diastolic blood pressure"],
+};
+
+type ExpansionMode = "balanced" | "broad";
+type SearchSource = "semantic_scholar" | "openalex" | "arxiv";
+
+interface PreparedSourceQuery {
+  source: SearchSource;
+  originalKeywordQuery: string;
+  expandedKeywordQuery: string;
+  apiQuery: string;
+}
+
+function extractSearchKeywords(query: string, mode: ExpansionMode = "balanced"): { originalTerms: string[]; expandedTerms: string[] } {
+  const sanitized = query.toLowerCase().replace(/[^a-z0-9\s]/g, " ");
+  const keywords = sanitized
     .split(/\s+/)
     .filter(w => w.length >= 1 && !STOP_WORDS.has(w));
+
   const seen = new Set<string>();
-  const unique = keywords.filter(w => {
+  const originalTerms = keywords.filter(w => {
     if (seen.has(w)) return false;
     seen.add(w);
     return true;
-  });
-  const result = unique.slice(0, 6).join(" ");
-  console.log(`[Keywords] "${query}" -> "${result}"`);
-  return result;
+  }).slice(0, 8);
+
+  const expandedCandidates: string[] = [];
+  for (const [concept, synonyms] of Object.entries(BIOMEDICAL_SYNONYMS)) {
+    if (sanitized.includes(concept)) {
+      expandedCandidates.push(concept, ...synonyms);
+    }
+  }
+
+  const expandedSet = new Set<string>();
+  for (const term of [...originalTerms, ...expandedCandidates]) {
+    if (!term || STOP_WORDS.has(term)) continue;
+    expandedSet.add(term);
+  }
+
+  const expandedTerms = Array.from(expandedSet).filter(term => !originalTerms.includes(term));
+  const expandedLimit = mode === "broad" ? 12 : 6;
+
+  const limitedExpanded = expandedTerms.slice(0, expandedLimit);
+  console.log(`[Keywords] mode=${mode} "${query}" -> original="${originalTerms.join(" ")}" expanded="${limitedExpanded.join(" ")}"`);
+  return { originalTerms, expandedTerms: limitedExpanded };
+}
+
+function buildSourceQuery(query: string, source: SearchSource, mode: ExpansionMode = "balanced"): PreparedSourceQuery {
+  const { originalTerms, expandedTerms } = extractSearchKeywords(query, mode);
+  const originalKeywordQuery = originalTerms.join(" ");
+  const expandedKeywordQuery = [...originalTerms, ...expandedTerms].join(" ");
+
+  const quoteIfPhrase = (term: string) => term.includes(" ") ? `"${term}"` : term;
+  let apiQuery = originalKeywordQuery;
+
+  if (source === "semantic_scholar") {
+    const semanticExpanded = expandedTerms.slice(0, mode === "broad" ? 10 : 5);
+    const origClause = originalTerms.map(quoteIfPhrase).join(" OR ");
+    const expandedClause = semanticExpanded.map(quoteIfPhrase).join(" OR ");
+    apiQuery = expandedClause ? `(${origClause}) OR (${expandedClause})` : origClause;
+  } else {
+    const balancedExpanded = expandedTerms.slice(0, mode === "broad" ? 6 : 3);
+    apiQuery = [originalKeywordQuery, ...balancedExpanded].filter(Boolean).join(" ");
+  }
+
+  return { source, originalKeywordQuery, expandedKeywordQuery, apiQuery: apiQuery.trim() };
 }
 
 // ─── API Search Functions ────────────────────────────────────────────────────
 
-async function searchOpenAlex(query: string): Promise<UnifiedPaper[]> {
-  const encodedQuery = encodeURIComponent(query);
+async function searchOpenAlex(query: string, mode: ExpansionMode = "balanced"): Promise<UnifiedPaper[]> {
+  const prepared = buildSourceQuery(query, "openalex", mode);
+  const encodedQuery = encodeURIComponent(prepared.apiQuery);
   const apiKey = Deno.env.get("OPENALEX_API_KEY");
   let url = `https://api.openalex.org/works?search=${encodedQuery}&filter=has_abstract:true&per_page=25&sort=relevance_score:desc`;
   if (apiKey) {
     url += `&api_key=${apiKey}`;
     console.log(`[OpenAlex] Using API key for polite pool access`);
   }
-  console.log(`[OpenAlex] Searching: ${query}`);
+  console.log(`[OpenAlex] Searching original="${prepared.originalKeywordQuery}" expanded="${prepared.expandedKeywordQuery}" api="${prepared.apiQuery}"`);
   try {
     const response = await fetch(url, {
       headers: {
@@ -227,14 +286,14 @@ async function s2RateLimit() {
   lastS2RequestTime = Date.now();
 }
 
-async function searchSemanticScholar(query: string): Promise<UnifiedPaper[]> {
-  const keywords = extractSearchKeywords(query);
-  if (!keywords) return [];
-  const encodedQuery = encodeURIComponent(keywords);
+async function searchSemanticScholar(query: string, mode: ExpansionMode = "balanced"): Promise<UnifiedPaper[]> {
+  const prepared = buildSourceQuery(query, "semantic_scholar", mode);
+  if (!prepared.apiQuery) return [];
+  const encodedQuery = encodeURIComponent(prepared.apiQuery);
   const fields = "paperId,title,abstract,year,authors,venue,citationCount,publicationTypes,externalIds,openAccessPdf,url";
   const url = `https://api.semanticscholar.org/graph/v1/paper/search/bulk?query=${encodedQuery}&fields=${fields}`;
   const apiKey = Deno.env.get("SEMANTIC_SCHOLAR_API_KEY");
-  console.log(`[SemanticScholar] Searching: ${query}${apiKey ? ' (with API key)' : ' (public tier)'}`);
+  console.log(`[SemanticScholar] Searching original="${prepared.originalKeywordQuery}" expanded="${prepared.expandedKeywordQuery}" api="${prepared.apiQuery}"${apiKey ? ' (with API key)' : ' (public tier)'}`);
   try {
     await s2RateLimit();
     const headers: Record<string, string> = { "Accept": "application/json" };
@@ -272,12 +331,12 @@ async function searchSemanticScholar(query: string): Promise<UnifiedPaper[]> {
   }
 }
 
-async function searchArxiv(query: string): Promise<UnifiedPaper[]> {
-  const keywords = extractSearchKeywords(query);
-  if (!keywords) return [];
-  const encodedQuery = encodeURIComponent(keywords);
+async function searchArxiv(query: string, mode: ExpansionMode = "balanced"): Promise<UnifiedPaper[]> {
+  const prepared = buildSourceQuery(query, "arxiv", mode);
+  if (!prepared.apiQuery) return [];
+  const encodedQuery = encodeURIComponent(prepared.apiQuery);
   const url = `https://export.arxiv.org/api/query?search_query=all:${encodedQuery}&max_results=25&sortBy=relevance&sortOrder=descending`;
-  console.log(`[ArXiv] Searching: ${keywords}`);
+  console.log(`[ArXiv] Searching original="${prepared.originalKeywordQuery}" expanded="${prepared.expandedKeywordQuery}" api="${prepared.apiQuery}"`);
   try {
     const response = await fetch(url);
     if (!response.ok) {
@@ -794,9 +853,9 @@ async function runResearchPipeline(question: string): Promise<PipelineResult> {
       results: [],
       normalized_query: wasNormalized ? normalized : undefined,
       total_papers_searched: allPapers.length,
-      openalex_count: openAlexPapers.length,
-      semantic_scholar_count: s2Papers.length,
-      arxiv_count: arxivPapers.length,
+      openalex_count: combinedOpenAlex.length,
+      semantic_scholar_count: combinedS2.length,
+      arxiv_count: combinedArxiv.length,
     };
   }
 
@@ -828,9 +887,9 @@ async function runResearchPipeline(question: string): Promise<PipelineResult> {
     results,
     normalized_query: wasNormalized ? normalized : undefined,
     total_papers_searched: allPapers.length,
-    openalex_count: openAlexPapers.length,
-    semantic_scholar_count: s2Papers.length,
-    arxiv_count: arxivPapers.length,
+    openalex_count: combinedOpenAlex.length,
+    semantic_scholar_count: combinedS2.length,
+    arxiv_count: combinedArxiv.length,
   };
 }
 
