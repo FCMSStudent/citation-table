@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useMemo, useState, useEffect } from 'react';
 import { Code, Download, Eye, EyeOff, FileText, Table2, List, ChevronLeft, ChevronRight, Grid3X3 } from 'lucide-react';
 import type { StudyResult, StudyPdf } from '@/types/research';
 import { StudyCard } from './StudyCard';
@@ -11,7 +11,7 @@ import { Button } from './ui/button';
 import { downloadRISFile } from '@/lib/risExport';
 import { downloadCSV } from '@/lib/csvExport';
 import { downloadPaperCSV } from '@/lib/csvPaperExport';
-import { sortByRelevance, isLowValueStudy, getOutcomeText } from '@/utils/relevanceScore';
+import { calculateRelevanceScore, isLowValueStudy, getOutcomeText } from '@/utils/relevanceScore';
 import { isCompleteStudy } from '@/utils/isCompleteStudy';
 import { FilterBar, type SortOption, type StudyDesignFilter } from './FilterBar';
 import { Tabs, TabsList, TabsTrigger } from './ui/tabs';
@@ -60,22 +60,36 @@ export function ResultsTable({
 
   const activeQuery = normalizedQuery || query;
 
-  const completeStudies = useMemo(() =>
-    results.filter(isCompleteStudy),
-    [results]
-  );
+  // Combined data processing: filter, score, categorize, and aggregate in fewer passes
+  const { mainStudies, excludedStudies, outcomeAggregation } = useMemo(() => {
+    // 1. Initial pass: Filter by completeness and calculate relevance scores
+    // O(N) pass to minimize work in subsequent steps
+    const scored: Array<StudyResult & { relevanceScore: number }> = [];
+    results.forEach(study => {
+      if (isCompleteStudy(study)) {
+        scored.push({
+          ...study,
+          relevanceScore: calculateRelevanceScore(study, activeQuery),
+        });
+      }
+    });
 
-  const scoredResults = useMemo(() => sortByRelevance(completeStudies, activeQuery), [completeStudies, activeQuery]);
+    // 2. Sort the base list once according to user preference
+    // O(N log N)
+    if (sortBy === 'year') {
+      scored.sort((a, b) => b.year - a.year);
+    } else {
+      scored.sort((a, b) => b.relevanceScore - a.relevanceScore);
+    }
 
-  const { mainStudies, excludedStudies } = useMemo(() => {
-    const main: typeof scoredResults = [];
-    const excluded: typeof scoredResults = [];
+    const main: typeof scored = [];
+    const excluded: typeof scored = [];
+    const outcomeMap = new Map<string, Array<{ study: StudyResult; result: string }>>();
 
-    const base = sortBy === 'year'
-      ? [...scoredResults].sort((a, b) => b.year - a.year)
-      : scoredResults;
-
-    base.forEach((study) => {
+    // 3. Final categorization and outcome aggregation
+    // O(N) pass to split results and collect stats simultaneously
+    scored.forEach((study) => {
+      // Study Design Filter
       if (studyDesign !== 'all') {
         const matchesDesign =
           (studyDesign === 'meta' && study.review_type === 'Meta-analysis') ||
@@ -87,43 +101,42 @@ export function ResultsTable({
         if (!matchesDesign) return;
       }
 
+      // Explicit Match Filter
       const outcomesText = getOutcomeText(study);
       const isExplicitMatch = (study.outcomes?.length || 0) > 0 && !outcomesText.includes('no outcomes reported');
       if (explicitOnly && !isExplicitMatch) return;
 
+      // Categorize into main and excluded
       if (isLowValueStudy(study, study.relevanceScore)) {
         excluded.push(study);
       } else {
         main.push(study);
+
+        // Aggregate outcomes only for main studies to avoid unnecessary processing
+        study.outcomes?.forEach(outcome => {
+          if (outcome.key_result) {
+            const normalized = outcome.outcome_measured.toLowerCase().replace(OUTCOME_NORM_REGEX, '').trim();
+            if (!outcomeMap.has(normalized)) outcomeMap.set(normalized, []);
+            outcomeMap.get(normalized)!.push({ study, result: outcome.key_result });
+          }
+        });
       }
     });
 
-    return { mainStudies: main, excludedStudies: excluded };
-  }, [scoredResults, sortBy, studyDesign, explicitOnly]);
+    const aggregated = Array.from(outcomeMap.entries())
+      .map(([outcome, studies]) => ({ outcome, studyCount: studies.length, studies }))
+      .sort((a, b) => b.studyCount - a.studyCount);
+
+    return { mainStudies: main, excludedStudies: excluded, outcomeAggregation: aggregated };
+  }, [results, activeQuery, sortBy, studyDesign, explicitOnly]);
 
   // Reset page when filters change
-  useMemo(() => setCurrentPage(1), [studyDesign, explicitOnly, sortBy]);
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [studyDesign, explicitOnly, sortBy]);
 
   const totalPages = Math.ceil(mainStudies.length / PAGE_SIZE);
   const paginatedStudies = mainStudies.slice((currentPage - 1) * PAGE_SIZE, currentPage * PAGE_SIZE);
-
-  // narrativeSummary removed -- replaced by LLM-generated NarrativeSynthesis component
-
-  const outcomeAggregation = useMemo(() => {
-    const outcomeMap = new Map<string, Array<{ study: StudyResult; result: string }>>();
-    mainStudies.forEach(study => {
-      study.outcomes?.forEach(outcome => {
-        if (outcome.key_result) {
-          const normalized = outcome.outcome_measured.toLowerCase().replace(OUTCOME_NORM_REGEX, '').trim();
-          if (!outcomeMap.has(normalized)) outcomeMap.set(normalized, []);
-          outcomeMap.get(normalized)!.push({ study, result: outcome.key_result });
-        }
-      });
-    });
-    return Array.from(outcomeMap.entries())
-      .map(([outcome, studies]) => ({ outcome, studyCount: studies.length, studies }))
-      .sort((a, b) => b.studyCount - a.studyCount);
-  }, [mainStudies]);
 
   const handleExportRIS = () => downloadRISFile(mainStudies, `research-${Date.now()}.ris`);
   const handleExportCSVOutcomes = () => downloadCSV(mainStudies, `research-outcomes-${Date.now()}.csv`);
