@@ -797,8 +797,8 @@ function isCompleteStudy(study: any): boolean {
 }
 
 function getQueryKeywordSet(query: string): Set<string> {
-  const keywords = extractSearchKeywords(query)
-    .split(/\s+/)
+  const { originalTerms, expandedTerms } = extractSearchKeywords(query);
+  const keywords = [...originalTerms, ...expandedTerms]
     .map(k => k.trim())
     .filter(Boolean);
   return new Set(keywords);
