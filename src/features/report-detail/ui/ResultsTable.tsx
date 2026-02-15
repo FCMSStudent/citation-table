@@ -160,6 +160,17 @@ function buildSearchBlob(study: StudyResult): string {
     .toLowerCase();
 }
 
+const searchBlobCache = new WeakMap<StudyResult, string>();
+
+function getSearchBlob(study: StudyResult): string {
+  const cached = searchBlobCache.get(study);
+  if (cached !== undefined) return cached;
+  const blob = buildSearchBlob(study);
+  // Perf: cache the lowercased search blob to avoid recomputation on filter/sort changes.
+  searchBlobCache.set(study, blob);
+  return blob;
+}
+
 function matchesStudyDesign(study: StudyResult, design: StudyDesignFilter): boolean {
   if (design === 'all') return true;
   if (design === 'meta') return study.review_type === 'Meta-analysis';
@@ -300,7 +311,7 @@ export function ResultsTable({
       if (explicitOnly && !isExplicitMatch) return false;
 
       if (debouncedFind) {
-        const haystack = buildSearchBlob(study);
+        const haystack = getSearchBlob(study);
         if (!haystack.includes(debouncedFind)) return false;
       }
 
