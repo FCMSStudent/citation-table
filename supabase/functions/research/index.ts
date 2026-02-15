@@ -464,7 +464,11 @@ async function searchPubMed(query: string, mode: ExpansionMode = "balanced"): Pr
   console.log(`[PubMed] Searching original="${prepared.originalKeywordQuery}" expanded="${prepared.expandedKeywordQuery}" api="${prepared.apiQuery}"`);
 
   try {
-    const esearchUrl = `https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esearch.fcgi?db=pubmed&term=${encodedQuery}&retmax=25&retmode=json`;
+    const ncbiApiKey = Deno.env.get("NCBI_API_KEY");
+    const apiKeyParam = ncbiApiKey ? `&api_key=${ncbiApiKey}` : "";
+    if (ncbiApiKey) console.log(`[PubMed] Using NCBI API key for enhanced rate limits`);
+
+    const esearchUrl = `https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esearch.fcgi?db=pubmed&term=${encodedQuery}&retmax=25&retmode=json${apiKeyParam}`;
     const esearchRes = await fetch(esearchUrl);
     if (!esearchRes.ok) {
       console.error(`[PubMed] ESearch error: ${esearchRes.status}`);
@@ -480,7 +484,7 @@ async function searchPubMed(query: string, mode: ExpansionMode = "balanced"): Pr
 
     await new Promise(resolve => setTimeout(resolve, 350));
 
-    const efetchUrl = `https://eutils.ncbi.nlm.nih.gov/entrez/eutils/efetch.fcgi?db=pubmed&id=${pmids.join(",")}&rettype=xml`;
+    const efetchUrl = `https://eutils.ncbi.nlm.nih.gov/entrez/eutils/efetch.fcgi?db=pubmed&id=${pmids.join(",")}&rettype=xml${apiKeyParam}`;
     const efetchRes = await fetch(efetchUrl);
     if (!efetchRes.ok) {
       console.error(`[PubMed] EFetch error: ${efetchRes.status}`);
