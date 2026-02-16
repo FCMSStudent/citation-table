@@ -294,46 +294,42 @@ WARNING FIELD RULES:
 
 Return ONLY valid JSON, no markdown fences or extra text`;
 
-    const GEMINI_API_KEY = Deno.env.get("GOOGLE_GEMINI_API_KEY");
-    if (!GEMINI_API_KEY) {
+    const OPENAI_API_KEY = Deno.env.get("OPENAI_API_KEY");
+    if (!OPENAI_API_KEY) {
       return new Response(
-        JSON.stringify({ error: "GOOGLE_GEMINI_API_KEY is not configured" }),
+        JSON.stringify({ error: "OPENAI_API_KEY is not configured" }),
         { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
     }
 
-    const response = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${GEMINI_API_KEY}`,
-      {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          contents: [
-            {
-              role: "user",
-              parts: [{ text: systemPrompt }],
-            },
-          ],
-          generationConfig: {
-            temperature: 0.3,
-            maxOutputTokens: 8000,
-            responseMimeType: "application/json",
-          },
-        }),
-      }
-    );
+    const response = await fetch("https://api.openai.com/v1/chat/completions", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${OPENAI_API_KEY}`,
+      },
+      body: JSON.stringify({
+        model: "gpt-4o-mini",
+        messages: [
+          { role: "system", content: systemPrompt },
+        ],
+        temperature: 0.3,
+        max_tokens: 8000,
+        response_format: { type: "json_object" },
+      }),
+    });
 
     if (!response.ok) {
       const text = await response.text();
-      console.error("Gemini API error:", response.status, text);
+      console.error("OpenAI API error:", response.status, text);
       return new Response(
-        JSON.stringify({ error: `Gemini API error (${response.status})` }),
+        JSON.stringify({ error: `OpenAI API error (${response.status})` }),
         { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
     }
 
     const aiResult = await response.json();
-    const rawText = aiResult.candidates?.[0]?.content?.parts?.[0]?.text || "";
+    const rawText = aiResult.choices?.[0]?.message?.content || "";
 
     if (!rawText) {
       return new Response(
