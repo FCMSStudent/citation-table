@@ -1,5 +1,6 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.49.1";
+import { persistExtractionRun } from "../_shared/extraction-runs.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -38,11 +39,38 @@ interface StudyResult {
   citationCount?: number;
 }
 
+interface CrossrefAuthor {
+  given?: string;
+  family?: string;
+}
+
+interface CrossrefWork {
+  title?: string[];
+  abstract?: string;
+  author?: CrossrefAuthor[];
+  published?: { "date-parts"?: number[][] };
+  "published-print"?: { "date-parts"?: number[][] };
+  "published-online"?: { "date-parts"?: number[][] };
+  "container-title"?: string[];
+  "is-referenced-by-count"?: number;
+}
+
 function normalizeDoi(doi: string): string {
   return doi
     .trim()
     .replace(/^https?:\/\/(dx\.)?doi\.org\//i, "")
     .replace(/^doi:\s*/i, "");
+}
+
+function stripControlChars(value: string): string {
+  let output = "";
+  for (const char of value) {
+    const code = char.charCodeAt(0);
+    if (code === 9 || code === 10 || code === 13 || (code >= 32 && code !== 127)) {
+      output += char;
+    }
+  }
+  return output;
 }
 
 serve(async (req) => {
@@ -99,7 +127,7 @@ serve(async (req) => {
     // Verify report ownership
     const { data: report, error: reportError } = await supabase
       .from("research_reports")
-      .select("user_id, results, question")
+      .select("user_id, question, normalized_query, results, partial_results, extraction_stats, evidence_table, brief_json, coverage_report, search_stats, lit_request, lit_response")
       .eq("id", report_id)
       .single();
 
@@ -132,8 +160,8 @@ serve(async (req) => {
       );
     }
 
-    const crossrefData = await crossrefResp.json();
-    const work = crossrefData.message;
+    const crossrefData = await crossrefResp.json() as { message?: CrossrefWork };
+    const work = crossrefData.message || {};
 
     const title = Array.isArray(work.title) ? work.title[0] : work.title || "Unknown";
     const year =
@@ -142,9 +170,7 @@ serve(async (req) => {
       work["published-online"]?.["date-parts"]?.[0]?.[0] ||
       new Date().getFullYear();
     const abstract = work.abstract?.replace(/<[^>]+>/g, "") || "";
-    const authors = (work.author || []).map(
-      (a: any) => `${a.given || ""} ${a.family || ""}`.trim()
-    );
+    const authors = (work.author || []).map((author) => `${author.given || ""} ${author.family || ""}`.trim());
     const venue = work["container-title"]?.[0] || "";
 
     if (!abstract || abstract.length < 20) {
@@ -166,13 +192,52 @@ serve(async (req) => {
         abstract_excerpt: abstract || "No abstract available",
         preprint_status: "Peer-reviewed",
         review_type: "None",
-        source: "manual" as any,
+        source: "manual",
       };
 
       const updatedResults = [...existingResults, manualStudy];
-      await supabase
+      const { error: reportUpdateError } = await supabase
         .from("research_reports")
         .update({ results: updatedResults })
+        .eq("id", report_id);
+      if (reportUpdateError) {
+        return new Response(JSON.stringify({ error: "Failed to save study" }), {
+          status: 500,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+
+      const litResponse = typeof report.lit_response === "object" && report.lit_response
+        ? { ...(report.lit_response as Record<string, unknown>) }
+        : {};
+      const runSnapshot = await persistExtractionRun(supabase, {
+        reportId: report_id,
+        userId,
+        trigger: "add_study",
+        status: "completed",
+        engine: "manual",
+        question: report.question,
+        normalizedQuery: report.normalized_query ?? null,
+        litRequest: (report.lit_request as Record<string, unknown>) || {},
+        litResponse,
+        results: updatedResults,
+        partialResults: (report.partial_results as unknown[]) || [],
+        evidenceTable: Array.isArray(report.evidence_table) ? report.evidence_table : [],
+        briefJson: (report.brief_json as Record<string, unknown>) || {},
+        coverageReport: (report.coverage_report as Record<string, unknown>) || {},
+        searchStats: (report.search_stats as Record<string, unknown>) || {},
+        extractionStats: (report.extraction_stats as Record<string, unknown>) || {},
+        canonicalPapers: [],
+      });
+      litResponse.active_run_id = runSnapshot.runId;
+      litResponse.run_version = runSnapshot.runIndex;
+      await supabase
+        .from("research_reports")
+        .update({
+          lit_response: litResponse,
+          active_extraction_run_id: runSnapshot.runId,
+          extraction_run_count: runSnapshot.runIndex,
+        })
         .eq("id", report_id);
 
       return new Response(JSON.stringify({ study: manualStudy }), {
@@ -258,7 +323,7 @@ Extract structured data from this paper's abstract.`;
 
     let cleaned = rawText.trim();
     cleaned = cleaned.replace(/```json\s*/gi, "").replace(/```\s*/g, "").trim();
-    cleaned = cleaned.replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, "");
+    cleaned = stripControlChars(cleaned);
 
     let study: StudyResult;
     try {
@@ -272,7 +337,7 @@ Extract structured data from this paper's abstract.`;
     }
 
     // Ensure source is "manual"
-    study.source = "manual" as any;
+    study.source = "manual";
     study.study_id = study.study_id || doi;
 
     // Append to results
@@ -289,6 +354,39 @@ Extract structured data from this paper's abstract.`;
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }
+
+    const litResponse = typeof report.lit_response === "object" && report.lit_response
+      ? { ...(report.lit_response as Record<string, unknown>) }
+      : {};
+    const runSnapshot = await persistExtractionRun(supabase, {
+      reportId: report_id,
+      userId,
+      trigger: "add_study",
+      status: "completed",
+      engine: "manual",
+      question: report.question,
+      normalizedQuery: report.normalized_query ?? null,
+      litRequest: (report.lit_request as Record<string, unknown>) || {},
+      litResponse,
+      results: updatedResults,
+      partialResults: (report.partial_results as unknown[]) || [],
+      evidenceTable: Array.isArray(report.evidence_table) ? report.evidence_table : [],
+      briefJson: (report.brief_json as Record<string, unknown>) || {},
+      coverageReport: (report.coverage_report as Record<string, unknown>) || {},
+      searchStats: (report.search_stats as Record<string, unknown>) || {},
+      extractionStats: (report.extraction_stats as Record<string, unknown>) || {},
+      canonicalPapers: [],
+    });
+    litResponse.active_run_id = runSnapshot.runId;
+    litResponse.run_version = runSnapshot.runIndex;
+    await supabase
+      .from("research_reports")
+      .update({
+        lit_response: litResponse,
+        active_extraction_run_id: runSnapshot.runId,
+        extraction_run_count: runSnapshot.runIndex,
+      })
+      .eq("id", report_id);
 
     console.log(`[add-study] Successfully added study: ${study.title}`);
     return new Response(JSON.stringify({ study }), {

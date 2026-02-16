@@ -110,6 +110,54 @@ export interface EvidenceRow {
   provenance: ProviderProvenance[];
 }
 
+export interface ColumnInstruction {
+  id: string;
+  column_key: string;
+  label: string;
+  data_type: "text" | "number" | "integer" | "boolean" | "date" | "enum" | "json";
+  extract_prompt: string;
+  required: boolean;
+  nullable: boolean;
+  regex_pattern: string | null;
+  enum_values: string[];
+  source_priority: string[];
+  normalizer: Record<string, unknown>;
+  display_order: number;
+  is_enabled: boolean;
+}
+
+export interface ColumnInstructionSet {
+  id: string;
+  name: string;
+  scope: "system" | "user";
+  domain: string;
+  version: number;
+  is_active: boolean;
+  created_by: string | null;
+  created_at: string;
+  updated_at: string;
+  instructions: ColumnInstruction[];
+}
+
+export interface ExtractionRunSummary {
+  id: string;
+  report_id: string;
+  run_index: number;
+  parent_run_id: string | null;
+  trigger: "initial_pipeline" | "initial_pipeline_cached" | "pdf_reextract" | "add_study" | "manual_rerun" | "backfill";
+  status: "processing" | "completed" | "failed";
+  engine: "llm" | "scripted" | "hybrid" | "manual" | "unknown";
+  created_at: string;
+  completed_at: string | null;
+  is_active: boolean;
+}
+
+export interface ExtractionRunDetail {
+  run: Record<string, unknown>;
+  columns: Record<string, unknown>[];
+  rows: Array<Record<string, unknown> & { cells: Record<string, unknown>[] }>;
+}
+
 export interface CoverageReport {
   providers_queried: number;
   providers_failed: number;
@@ -140,6 +188,8 @@ export interface SearchResponsePayload {
   evidence_table: EvidenceRow[];
   brief: BriefPayload;
   stats: SearchStats;
+  active_run_id?: string;
+  run_version?: number;
   error?: string;
 }
 

@@ -6,6 +6,8 @@ interface Report {
   id: string;
   question: string;
   normalized_query: string | null;
+  active_extraction_run_id?: string | null;
+  extraction_run_count?: number | null;
   status: 'processing' | 'completed' | 'failed';
   results: StudyResult[] | null;
   partial_results?: StudyResult[] | null;

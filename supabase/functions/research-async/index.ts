@@ -32,6 +32,11 @@ import {
   type DeterministicExtractionInput,
   type DeterministicStudyResult,
 } from "../_shared/study-extraction.ts";
+import {
+  getExtractionRunDetail,
+  listExtractionRuns,
+  persistExtractionRun,
+} from "../_shared/extraction-runs.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -992,6 +997,7 @@ function runningSearchResponse(searchId: string): SearchResponsePayload {
       candidates_total: 0,
       candidates_filtered: 0,
     },
+    run_version: 0,
   };
 }
 
@@ -999,6 +1005,8 @@ function mapReportToSearchResponse(report: {
   id?: string;
   status?: string;
   error_message?: string | null;
+  active_extraction_run_id?: string | null;
+  extraction_run_count?: number | null;
   lit_response?: Partial<SearchResponsePayload> & { error?: string };
 }): SearchResponsePayload {
   const payload = report?.lit_response || {};
@@ -1024,6 +1032,8 @@ function mapReportToSearchResponse(report: {
       candidates_total: 0,
       candidates_filtered: 0,
     },
+    active_run_id: report?.active_extraction_run_id || payload.active_run_id || undefined,
+    run_version: report?.extraction_run_count ?? payload.run_version ?? undefined,
     error: report?.error_message || payload.error || undefined,
   };
 }
@@ -1066,6 +1076,54 @@ async function writeSearchCache(
   if (error) {
     console.warn("[cache] write failed:", error.message);
   }
+}
+
+async function createExtractionRunForSearch(
+  supabase: SupabaseClientLike,
+  params: {
+    reportId: string;
+    userId?: string;
+    trigger: "initial_pipeline" | "initial_pipeline_cached";
+    engine: "llm" | "scripted" | "hybrid" | "unknown";
+    question: string;
+    normalizedQuery?: string;
+    litRequest?: SearchRequestPayload;
+    litResponse?: SearchResponsePayload;
+    results?: StudyResult[];
+    partialResults?: StudyResult[];
+    evidenceTable?: SearchResponsePayload["evidence_table"];
+    brief?: SearchResponsePayload["brief"];
+    coverage?: CoverageReport;
+    stats?: SearchStats;
+    extractionStats?: Record<string, unknown>;
+    canonicalPapers?: CanonicalPaper[];
+  },
+): Promise<{ runId: string; runIndex: number }> {
+  const persisted = await persistExtractionRun(supabase, {
+    reportId: params.reportId,
+    userId: params.userId,
+    trigger: params.trigger,
+    status: "completed",
+    engine: params.engine,
+    question: params.question,
+    normalizedQuery: params.normalizedQuery ?? null,
+    litRequest: (params.litRequest as unknown as Record<string, unknown>) || {},
+    litResponse: (params.litResponse as unknown as Record<string, unknown>) || {},
+    results: params.results || [],
+    partialResults: params.partialResults || [],
+    evidenceTable: params.evidenceTable || [],
+    briefJson: (params.brief as unknown as Record<string, unknown>) || {},
+    coverageReport: (params.coverage as unknown as Record<string, unknown>) || {},
+    searchStats: (params.stats as unknown as Record<string, unknown>) || {},
+    extractionStats: params.extractionStats || {},
+    canonicalPapers: params.canonicalPapers || [],
+    completedAt: new Date().toISOString(),
+  });
+
+  return {
+    runId: persisted.runId,
+    runIndex: persisted.runIndex,
+  };
 }
 
 async function upsertPaperCache(supabase: SupabaseClientLike, papers: CanonicalPaper[]): Promise<void> {
@@ -1139,11 +1197,77 @@ serve(async (req) => {
       });
     }
 
+    if (req.method === "GET" && isLitRoute && pathParts[2] === "search" && pathParts[3] && pathParts[4] === "runs" && pathParts[5]) {
+      const searchId = pathParts[3];
+      const runId = pathParts[5];
+      const { data: report, error } = await supabase
+        .from("research_reports")
+        .select("id,user_id")
+        .eq("id", searchId)
+        .eq("user_id", userId)
+        .maybeSingle();
+
+      if (error) {
+        return new Response(JSON.stringify({ error: "Failed to load search" }), {
+          status: 500,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+      if (!report) {
+        return new Response(JSON.stringify({ error: "search_id not found" }), {
+          status: 404,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+
+      const detail = await getExtractionRunDetail(supabase, searchId, runId);
+      if (!detail) {
+        return new Response(JSON.stringify({ error: "run_id not found" }), {
+          status: 404,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+
+      return new Response(JSON.stringify(detail), {
+        status: 200,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
+    if (req.method === "GET" && isLitRoute && pathParts[2] === "search" && pathParts[3] && pathParts[4] === "runs") {
+      const searchId = pathParts[3];
+      const { data: report, error } = await supabase
+        .from("research_reports")
+        .select("id,user_id,active_extraction_run_id")
+        .eq("id", searchId)
+        .eq("user_id", userId)
+        .maybeSingle();
+
+      if (error) {
+        return new Response(JSON.stringify({ error: "Failed to load search" }), {
+          status: 500,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+      if (!report) {
+        return new Response(JSON.stringify({ error: "search_id not found" }), {
+          status: 404,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+
+      const runs = await listExtractionRuns(supabase, searchId, report.active_extraction_run_id || null);
+      return new Response(JSON.stringify({ search_id: searchId, runs }), {
+        status: 200,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
     if (req.method === "GET" && isLitRoute && pathParts[2] === "search" && pathParts[3]) {
       const searchId = pathParts[3];
       const { data: report, error } = await supabase
         .from("research_reports")
-        .select("id,status,error_message,lit_response,user_id")
+        .select("id,status,error_message,lit_response,user_id,active_extraction_run_id,extraction_run_count")
         .eq("id", searchId)
         .eq("user_id", userId)
         .maybeSingle();
@@ -1257,11 +1381,34 @@ serve(async (req) => {
     if (isLitRoute) {
       const cached = await readCachedSearch(supabase, cacheKey);
       if (cached && cached.status === "completed") {
-        const replayed = { ...cached, search_id: reportId };
+        const replayed: SearchResponsePayload = { ...cached, search_id: reportId };
+        const runSnapshot = await createExtractionRunForSearch(supabase, {
+          reportId,
+          userId,
+          trigger: "initial_pipeline_cached",
+          engine: "unknown",
+          question,
+          normalizedQuery: null,
+          litRequest,
+          litResponse: replayed,
+          results: [],
+          partialResults: [],
+          evidenceTable: replayed.evidence_table || [],
+          brief: replayed.brief || { sentences: [] },
+          coverage: replayed.coverage,
+          stats: replayed.stats,
+          extractionStats: {},
+          canonicalPapers: [],
+        });
+        replayed.active_run_id = runSnapshot.runId;
+        replayed.run_version = runSnapshot.runIndex;
+
         await supabase
           .from("research_reports")
           .update({
             status: "completed",
+            active_extraction_run_id: runSnapshot.runId,
+            extraction_run_count: runSnapshot.runIndex,
             lit_request: litRequest,
             lit_response: replayed,
             coverage_report: replayed.coverage,
@@ -1299,11 +1446,38 @@ serve(async (req) => {
           brief: data.brief,
           stats: data.stats,
         };
+        const extractionEngine = (() => {
+          const raw = String((data.extraction_stats || {}).engine || "unknown").toLowerCase();
+          if (raw === "llm" || raw === "scripted" || raw === "hybrid" || raw === "manual") return raw;
+          return "unknown";
+        })();
+        const runSnapshot = await createExtractionRunForSearch(supabase, {
+          reportId,
+          userId,
+          trigger: "initial_pipeline",
+          engine: extractionEngine,
+          question,
+          normalizedQuery: data.normalized_query || null,
+          litRequest,
+          litResponse,
+          results: data.results || [],
+          partialResults: data.partial_results || [],
+          evidenceTable: data.evidence_table || [],
+          brief: data.brief,
+          coverage: data.coverage,
+          stats: data.stats,
+          extractionStats: data.extraction_stats || {},
+          canonicalPapers: data.canonical_papers || [],
+        });
+        litResponse.active_run_id = runSnapshot.runId;
+        litResponse.run_version = runSnapshot.runIndex;
 
         const { error: updateError } = await supabase
           .from("research_reports")
           .update({
             status: "completed",
+            active_extraction_run_id: runSnapshot.runId,
+            extraction_run_count: runSnapshot.runIndex,
             results: data.results || [],
             partial_results: data.partial_results || [],
             extraction_stats: data.extraction_stats || {},

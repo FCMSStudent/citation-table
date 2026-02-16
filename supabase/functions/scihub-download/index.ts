@@ -1,5 +1,6 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.49.1";
+import { persistExtractionRun } from "../_shared/extraction-runs.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -51,6 +52,8 @@ interface ReportStudy {
   pdf_url?: string | null;
   landing_page_url?: string | null;
 }
+
+type SupabaseClientLike = ReturnType<typeof createClient>;
 
 /**
  * Helper to use EdgeRuntime.waitUntil if available, otherwise use fire-and-forget
@@ -118,7 +121,7 @@ async function reExtractStudyFromPdf(
 
   const { data: report, error: reportError } = await supabase
     .from("research_reports")
-    .select("question, results")
+    .select("user_id, question, normalized_query, lit_request, lit_response, results, partial_results, extraction_stats, evidence_table, brief_json, coverage_report, search_stats")
     .eq("id", reportId)
     .single();
 
@@ -241,6 +244,54 @@ ${JSON.stringify(study, null, 2)}`;
 
   if (updateError) {
     console.error("[scihub-download] Failed to persist PDF re-extracted studies:", updateError);
+    return;
+  }
+
+  const priorExtractionStats = (report.extraction_stats && typeof report.extraction_stats === "object")
+    ? { ...(report.extraction_stats as Record<string, unknown>) }
+    : {};
+  const previousCount = Number(priorExtractionStats.pdf_reextract_count || 0);
+  const extractionStats = {
+    ...priorExtractionStats,
+    pdf_reextract_count: Number.isFinite(previousCount) ? previousCount + matchingStudies.length : matchingStudies.length,
+  };
+  const litResponse = typeof report.lit_response === "object" && report.lit_response
+    ? { ...(report.lit_response as Record<string, unknown>) }
+    : {};
+
+  try {
+    const runSnapshot = await persistExtractionRun(supabase, {
+      reportId,
+      userId: report.user_id || undefined,
+      trigger: "pdf_reextract",
+      status: "completed",
+      engine: "manual",
+      question: report.question,
+      normalizedQuery: report.normalized_query ?? null,
+      litRequest: (report.lit_request as Record<string, unknown>) || {},
+      litResponse,
+      results: updatedResults,
+      partialResults: (report.partial_results as unknown[]) || [],
+      evidenceTable: Array.isArray(report.evidence_table) ? report.evidence_table : [],
+      briefJson: (report.brief_json as Record<string, unknown>) || {},
+      coverageReport: (report.coverage_report as Record<string, unknown>) || {},
+      searchStats: (report.search_stats as Record<string, unknown>) || {},
+      extractionStats,
+      canonicalPapers: [],
+    });
+    litResponse.active_run_id = runSnapshot.runId;
+    litResponse.run_version = runSnapshot.runIndex;
+    await supabase
+      .from("research_reports")
+      .update({
+        extraction_stats: extractionStats,
+        lit_response: litResponse,
+        active_extraction_run_id: runSnapshot.runId,
+        extraction_run_count: runSnapshot.runIndex,
+      })
+      .eq("id", reportId);
+  } catch (error) {
+    console.error("[scihub-download] Failed to persist extraction run snapshot:", error);
   }
 }
 
@@ -341,7 +392,7 @@ async function downloadPdfFromScihub(doi: string): Promise<{ success: boolean; p
 }
 
 async function checkRateLimit(
-  supabase: any, functionName: string, clientIp: string, maxRequests: number, windowMinutes: number
+  supabase: SupabaseClientLike, functionName: string, clientIp: string, maxRequests: number, windowMinutes: number
 ): Promise<boolean> {
   const windowStart = new Date(Date.now() - windowMinutes * 60_000).toISOString();
   const { count, error } = await supabase
