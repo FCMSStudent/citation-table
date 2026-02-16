@@ -27,7 +27,7 @@ export function calculateRelevanceScore(study: StudyResult, query: string): numb
  */
 export function isLowValueStudy(study: StudyResult, relevanceScore: number): boolean {
   const outcomesText = getOutcomeText(study);
-  return relevanceScore <= 0 || outcomesText.includes('no outcomes reported');
+  return relevanceScore < 0 || outcomesText.includes('no outcomes reported');
 }
 
 export function sortByRelevance(
