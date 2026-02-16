@@ -2,6 +2,36 @@
 declare const Deno: any;
 import type { ExpansionMode, UnifiedPaper } from "./types.ts";
 import { resolvePreparedQuery } from "./query-builder.ts";
+import { fetchWithRetry, sleep } from "./http.ts";
+
+const PUBMED_BASE_URL = "https://eutils.ncbi.nlm.nih.gov/entrez/eutils";
+const PUBMED_TIMEOUT_MS = 8_000;
+const PUBMED_MAX_RETRIES = 4;
+
+let lastPubMedRequestTime = 0;
+
+function getPubMedMinIntervalMs(hasApiKey: boolean): number {
+  return hasApiKey ? 120 : 350;
+}
+
+async function pubMedRateLimit(hasApiKey: boolean): Promise<void> {
+  const minIntervalMs = getPubMedMinIntervalMs(hasApiKey);
+  const elapsedMs = Date.now() - lastPubMedRequestTime;
+  if (elapsedMs < minIntervalMs) {
+    await sleep(minIntervalMs - elapsedMs);
+  }
+  lastPubMedRequestTime = Date.now();
+}
+
+function buildPubMedParams(params: Record<string, string>, apiKey?: string): URLSearchParams {
+  const searchParams = new URLSearchParams(params);
+  const tool = Deno.env.get("NCBI_TOOL") || "research-async";
+  const email = Deno.env.get("NCBI_EMAIL") || "research@example.com";
+  searchParams.set("tool", tool);
+  searchParams.set("email", email);
+  if (apiKey) searchParams.set("api_key", apiKey);
+  return searchParams;
+}
 
 export async function searchPubMed(
   query: string,
@@ -11,24 +41,46 @@ export async function searchPubMed(
   const prepared = resolvePreparedQuery(query, "pubmed", mode, precompiledQuery);
   if (!prepared.apiQuery) return [];
 
-  const encodedQuery = encodeURIComponent(prepared.apiQuery);
+  const apiQuery = prepared.apiQuery;
   console.log(
     `[PubMed] Searching original="${prepared.originalKeywordQuery}" expanded="${prepared.expandedKeywordQuery}" api="${prepared.apiQuery}"`,
   );
 
   try {
-    const ncbiApiKey = Deno.env.get("NCBI_API_KEY");
-    const apiKeyParam = ncbiApiKey ? `&api_key=${ncbiApiKey}` : "";
+    const ncbiApiKey = Deno.env.get("NCBI_API_KEY") || undefined;
+    const hasApiKey = Boolean(ncbiApiKey);
     if (ncbiApiKey) console.log("[PubMed] Using NCBI API key for enhanced rate limits");
 
-    const esearchUrl = `https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esearch.fcgi?db=pubmed&term=${encodedQuery}&retmax=25&retmode=json${apiKeyParam}`;
-    const esearchRes = await fetch(esearchUrl);
+    const esearchParams = buildPubMedParams({
+      db: "pubmed",
+      term: apiQuery,
+      retmax: "25",
+      retmode: "json",
+    }, ncbiApiKey);
+    const esearchUrl = `${PUBMED_BASE_URL}/esearch.fcgi?${esearchParams.toString()}`;
+    await pubMedRateLimit(hasApiKey);
+    const esearchRes = await fetchWithRetry(
+      esearchUrl,
+      { headers: { Accept: "application/json" } },
+      {
+        label: "pubmed-esearch",
+        timeoutMs: PUBMED_TIMEOUT_MS,
+        maxRetries: PUBMED_MAX_RETRIES,
+        onRetry: ({ attempt, delayMs, reason }) => {
+          console.warn(`[PubMed] ESearch retry #${attempt} in ${delayMs}ms (${reason})`);
+        },
+      },
+    );
     if (!esearchRes.ok) {
       console.error(`[PubMed] ESearch error: ${esearchRes.status}`);
       return [];
     }
 
     const esearchData = await esearchRes.json();
+    if (esearchData?.error) {
+      console.error(`[PubMed] ESearch API error: ${esearchData.error}`);
+      return [];
+    }
     const pmids: string[] = esearchData?.esearchresult?.idlist || [];
     if (pmids.length === 0) {
       console.log("[PubMed] No results found");
@@ -36,10 +88,26 @@ export async function searchPubMed(
     }
     console.log(`[PubMed] ESearch returned ${pmids.length} PMIDs`);
 
-    await new Promise((resolve) => setTimeout(resolve, 350));
-
-    const efetchUrl = `https://eutils.ncbi.nlm.nih.gov/entrez/eutils/efetch.fcgi?db=pubmed&id=${pmids.join(",")}&rettype=xml${apiKeyParam}`;
-    const efetchRes = await fetch(efetchUrl);
+    const efetchParams = buildPubMedParams({
+      db: "pubmed",
+      id: pmids.join(","),
+      rettype: "xml",
+      retmode: "xml",
+    }, ncbiApiKey);
+    const efetchUrl = `${PUBMED_BASE_URL}/efetch.fcgi?${efetchParams.toString()}`;
+    await pubMedRateLimit(hasApiKey);
+    const efetchRes = await fetchWithRetry(
+      efetchUrl,
+      { headers: { Accept: "application/xml,text/xml;q=0.9,*/*;q=0.8" } },
+      {
+        label: "pubmed-efetch",
+        timeoutMs: PUBMED_TIMEOUT_MS,
+        maxRetries: PUBMED_MAX_RETRIES,
+        onRetry: ({ attempt, delayMs, reason }) => {
+          console.warn(`[PubMed] EFetch retry #${attempt} in ${delayMs}ms (${reason})`);
+        },
+      },
+    );
     if (!efetchRes.ok) {
       console.error(`[PubMed] EFetch error: ${efetchRes.status}`);
       return [];

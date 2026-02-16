@@ -2,8 +2,18 @@
 declare const Deno: any;
 import type { ExpansionMode, SemanticScholarPaper, UnifiedPaper } from "./types.ts";
 import { resolvePreparedQuery } from "./query-builder.ts";
+import { fetchWithRetry } from "./http.ts";
 
 let lastS2RequestTime = 0;
+const SEMANTIC_SCHOLAR_TIMEOUT_MS = 8_000;
+const SEMANTIC_SCHOLAR_MAX_RETRIES = 4;
+const SEMANTIC_SCHOLAR_MAX_PAGES = 5;
+const SEMANTIC_SCHOLAR_RESULT_CAP = 50;
+
+interface SemanticScholarBulkSearchResponse {
+  data?: SemanticScholarPaper[];
+  token?: string;
+}
 
 async function s2RateLimit() {
   const now = Date.now();
@@ -22,9 +32,10 @@ export async function searchSemanticScholar(
   const prepared = resolvePreparedQuery(query, "semantic_scholar", mode, precompiledQuery);
   if (!prepared.apiQuery) return [];
 
-  const encodedQuery = encodeURIComponent(prepared.apiQuery);
   const fields = "paperId,title,abstract,year,authors,venue,citationCount,publicationTypes,externalIds,openAccessPdf,url,isRetracted,references.paperId";
-  const url = `https://api.semanticscholar.org/graph/v1/paper/search/bulk?query=${encodedQuery}&fields=${fields}`;
+  const baseUrl = new URL("https://api.semanticscholar.org/graph/v1/paper/search/bulk");
+  baseUrl.searchParams.set("query", prepared.apiQuery);
+  baseUrl.searchParams.set("fields", fields);
   const apiKey = Deno.env.get("SEMANTIC_SCHOLAR_API_KEY");
 
   console.log(
@@ -32,23 +43,51 @@ export async function searchSemanticScholar(
   );
 
   try {
-    await s2RateLimit();
     const headers: Record<string, string> = { Accept: "application/json" };
     if (apiKey) headers["x-api-key"] = apiKey;
 
-    const response = await fetch(url, { headers });
-    if (!response.ok) {
-      console.error(`[SemanticScholar] API error: ${response.status}`);
-      return [];
+    const papers: SemanticScholarPaper[] = [];
+    let token: string | undefined;
+
+    for (let page = 0; page < SEMANTIC_SCHOLAR_MAX_PAGES; page += 1) {
+      const pageUrl = new URL(baseUrl.toString());
+      if (token) pageUrl.searchParams.set("token", token);
+
+      await s2RateLimit();
+      const response = await fetchWithRetry(
+        pageUrl.toString(),
+        { headers },
+        {
+          label: "semantic-scholar-search",
+          timeoutMs: SEMANTIC_SCHOLAR_TIMEOUT_MS,
+          maxRetries: SEMANTIC_SCHOLAR_MAX_RETRIES,
+          onRetry: ({ attempt, delayMs, reason }) => {
+            console.warn(`[SemanticScholar] Retry #${attempt} in ${delayMs}ms (${reason})`);
+          },
+        },
+      );
+
+      if (!response.ok) {
+        console.error(`[SemanticScholar] API error: ${response.status}`);
+        break;
+      }
+
+      const data = await response.json() as SemanticScholarBulkSearchResponse;
+      const batch = data.data || [];
+      for (const paper of batch) {
+        if (!paper.abstract || paper.abstract.length <= 50) continue;
+        papers.push(paper);
+        if (papers.length >= SEMANTIC_SCHOLAR_RESULT_CAP) break;
+      }
+      if (papers.length >= SEMANTIC_SCHOLAR_RESULT_CAP) break;
+      if (!data.token) break;
+      token = data.token;
     }
 
-    const data = await response.json();
-    const papers: SemanticScholarPaper[] = data.data || [];
     console.log(`[SemanticScholar] Found ${papers.length} papers`);
 
     return papers
-      .filter((paper) => paper.abstract && paper.abstract.length > 50)
-      .slice(0, 50)
+      .slice(0, SEMANTIC_SCHOLAR_RESULT_CAP)
       .map((paper, idx) => ({
         id: paper.paperId,
         title: paper.title || "Untitled",

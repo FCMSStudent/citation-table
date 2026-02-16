@@ -3,9 +3,31 @@ declare const Deno: any;
 import type { ExpansionMode, OpenAlexWork, UnifiedPaper } from "./types.ts";
 import { resolvePreparedQuery } from "./query-builder.ts";
 import { normalizeDoi, reconstructAbstract } from "./normalization.ts";
-import { withTimeout } from "./http.ts";
+import { fetchWithRetry } from "./http.ts";
 
 const OPENALEX_PROVIDER_TIMEOUT_MS = 8_000;
+const OPENALEX_PROVIDER_RETRIES = 4;
+const OPENALEX_BATCH_LOOKUP_SIZE = 50;
+const OPENALEX_SELECT_FIELDS =
+  "id,title,publication_year,abstract_inverted_index,authorships,primary_location,best_oa_location,doi,type,cited_by_count,referenced_works,is_retracted";
+
+interface OpenAlexListResponse {
+  results?: OpenAlexWork[];
+}
+
+function buildOpenAlexHeaders(): Record<string, string> {
+  return {
+    Accept: "application/json",
+    "User-Agent": Deno.env.get("OPENALEX_USER_AGENT") || "ResearchAssistant/1.0 (mailto:research@example.com)",
+  };
+}
+
+function normalizeOpenAlexWorkId(rawRef: string): string {
+  return rawRef
+    .trim()
+    .replace(/^https?:\/\/openalex\.org\//i, "")
+    .toUpperCase();
+}
 
 function toUnifiedFromOpenAlex(work: OpenAlexWork, rankSignal: number): UnifiedPaper {
   return {
@@ -36,12 +58,16 @@ export async function searchOpenAlex(
   precompiledQuery?: string,
 ): Promise<UnifiedPaper[]> {
   const prepared = resolvePreparedQuery(query, "openalex", mode, precompiledQuery);
-  const encodedQuery = encodeURIComponent(prepared.apiQuery);
   const apiKey = Deno.env.get("OPENALEX_API_KEY");
-  let url = `https://api.openalex.org/works?search=${encodedQuery}&filter=has_abstract:true&per_page=25&sort=relevance_score:desc`;
+  const url = new URL("https://api.openalex.org/works");
+  url.searchParams.set("search", prepared.apiQuery);
+  url.searchParams.set("filter", "has_abstract:true");
+  url.searchParams.set("per-page", "25");
+  url.searchParams.set("sort", "relevance_score:desc");
+  url.searchParams.set("select", OPENALEX_SELECT_FIELDS);
 
   if (apiKey) {
-    url += `&api_key=${apiKey}`;
+    url.searchParams.set("api_key", apiKey);
     console.log("[OpenAlex] Using API key for polite pool access");
   }
 
@@ -50,19 +76,25 @@ export async function searchOpenAlex(
   );
 
   try {
-    const response = await fetch(url, {
-      headers: {
-        Accept: "application/json",
-        "User-Agent": "ResearchAssistant/1.0 (mailto:research@example.com)",
+    const response = await fetchWithRetry(
+      url.toString(),
+      { headers: buildOpenAlexHeaders() },
+      {
+        label: "openalex-search",
+        timeoutMs: OPENALEX_PROVIDER_TIMEOUT_MS,
+        maxRetries: OPENALEX_PROVIDER_RETRIES,
+        onRetry: ({ attempt, delayMs, reason }) => {
+          console.warn(`[OpenAlex] Retry #${attempt} in ${delayMs}ms (${reason})`);
+        },
       },
-    });
+    );
 
     if (!response.ok) {
       console.error(`[OpenAlex] API error: ${response.status}`);
       return [];
     }
 
-    const data = await response.json();
+    const data = await response.json() as OpenAlexListResponse;
     const works: OpenAlexWork[] = data.results || [];
     console.log(`[OpenAlex] Found ${works.length} papers`);
     return works.map((work, idx) => toUnifiedFromOpenAlex(work, 1 / (idx + 1)));
@@ -97,42 +129,60 @@ export async function expandOpenAlexCitationGraph(
 
   const uniqueRefs = Array.from(new Set(references)).slice(0, maxAdditional);
   const apiKey = Deno.env.get("OPENALEX_API_KEY");
+  const headers = buildOpenAlexHeaders();
 
   const batches: UnifiedPaper[] = [];
-  const concurrency = 12;
+  for (let i = 0; i < uniqueRefs.length; i += OPENALEX_BATCH_LOOKUP_SIZE) {
+    const chunk = uniqueRefs.slice(i, i + OPENALEX_BATCH_LOOKUP_SIZE);
+    const normalizedChunk = chunk.map(normalizeOpenAlexWorkId).filter(Boolean);
+    if (normalizedChunk.length === 0) continue;
 
-  for (let i = 0; i < uniqueRefs.length; i += concurrency) {
-    const chunk = uniqueRefs.slice(i, i + concurrency);
-    const fetched = await Promise.all(
-      chunk.map(async (rawRef, index) => {
-        const refId = rawRef.replace(/^https?:\/\/openalex\.org\//, "");
-        if (!refId) return null;
+    const queryUrl = new URL("https://api.openalex.org/works");
+    queryUrl.searchParams.set("filter", `openalex_id:${normalizedChunk.join("|")}`);
+    queryUrl.searchParams.set("per-page", String(normalizedChunk.length));
+    queryUrl.searchParams.set("select", OPENALEX_SELECT_FIELDS);
+    if (apiKey) queryUrl.searchParams.set("api_key", apiKey);
 
-        const baseUrl = `https://api.openalex.org/works/${encodeURIComponent(refId)}`;
-        const url = apiKey ? `${baseUrl}?api_key=${apiKey}` : baseUrl;
+    let response: Response;
+    try {
+      response = await fetchWithRetry(
+        queryUrl.toString(),
+        { headers },
+        {
+          label: "openalex-expand",
+          timeoutMs: OPENALEX_PROVIDER_TIMEOUT_MS,
+          maxRetries: OPENALEX_PROVIDER_RETRIES,
+          onRetry: ({ attempt, delayMs, reason }) => {
+            console.warn(`[OpenAlex] Expansion retry #${attempt} in ${delayMs}ms (${reason})`);
+          },
+        },
+      );
+    } catch {
+      continue;
+    }
 
-        try {
-          const response = await withTimeout(
-            fetch(url, { headers: { Accept: "application/json" } }),
-            OPENALEX_PROVIDER_TIMEOUT_MS,
-            "openalex-expand",
-          );
-          if (!response.ok) return null;
-          const work = (await response.json()) as OpenAlexWork;
-          return toUnifiedFromOpenAlex(work, 0.2 / (index + 1));
-        } catch {
-          return null;
-        }
-      }),
-    );
+    if (!response.ok) continue;
+    const payload = await response.json() as OpenAlexListResponse;
+    const byId = new Map<string, OpenAlexWork>();
+    for (const work of payload.results || []) {
+      const normalizedId = normalizeOpenAlexWorkId(work.id || "");
+      if (!normalizedId) continue;
+      byId.set(normalizedId, work);
+    }
 
-    for (const paper of fetched) {
-      if (!paper || !paper.abstract || paper.abstract.length < 50) continue;
+    for (let idx = 0; idx < normalizedChunk.length; idx += 1) {
+      const normalizedId = normalizedChunk[idx];
+      const work = byId.get(normalizedId);
+      if (!work) continue;
+      const paper = toUnifiedFromOpenAlex(work, 0.2 / (i + idx + 1));
+      if (!paper.abstract || paper.abstract.length < 50) continue;
       batches.push(paper);
       if (batches.length >= maxAdditional) break;
     }
 
-    if (batches.length >= maxAdditional) break;
+    if (batches.length >= maxAdditional) {
+      break;
+    }
   }
 
   return batches.slice(0, maxAdditional);

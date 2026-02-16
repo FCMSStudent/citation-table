@@ -2,9 +2,13 @@ import { describe, expect, it, vi } from "vitest";
 import { searchArxiv } from "../../supabase/functions/research-async/providers/arxiv.ts";
 
 describe("research provider: arxiv", () => {
-  it("parses arxiv XML and normalizes IDs", async () => {
+  it("parses arxiv XML, skips feed error entries, and normalizes IDs", async () => {
     const xml = `
       <feed>
+        <entry>
+          <title>Error</title>
+          <summary>This is an API-side error entry that should be ignored by the parser even when present in the feed.</summary>
+        </entry>
         <entry>
           <id>https://arxiv.org/abs/1234.5678v2</id>
           <title>Arxiv Study</title>

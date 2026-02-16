@@ -12,7 +12,11 @@ function mockEnv(values: Record<string, string | undefined>) {
 describe("research provider: pubmed", () => {
   beforeEach(() => {
     vi.restoreAllMocks();
-    mockEnv({ NCBI_API_KEY: "ncbi-key" });
+    mockEnv({
+      NCBI_API_KEY: "ncbi-key",
+      NCBI_TOOL: "citation-table-tests",
+      NCBI_EMAIL: "dev@example.com",
+    });
   });
 
   it("performs ESearch + EFetch and parses structured abstracts", async () => {
@@ -43,6 +47,12 @@ describe("research provider: pubmed", () => {
     const papers = await searchPubMed("blood pressure", "balanced");
 
     expect(fetchMock).toHaveBeenCalledTimes(2);
+    const esearchUrl = new URL(String(fetchMock.mock.calls[0][0]));
+    const efetchUrl = new URL(String(fetchMock.mock.calls[1][0]));
+    expect(esearchUrl.searchParams.get("tool")).toBe("citation-table-tests");
+    expect(esearchUrl.searchParams.get("email")).toBe("dev@example.com");
+    expect(esearchUrl.searchParams.get("api_key")).toBe("ncbi-key");
+    expect(efetchUrl.searchParams.get("retmode")).toBe("xml");
     expect(papers).toHaveLength(1);
     expect(papers[0].id).toBe("12345");
     expect(papers[0].doi).toBe("10.1000/pubmed.1");

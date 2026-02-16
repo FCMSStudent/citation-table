@@ -1,5 +1,20 @@
 import type { ExpansionMode, UnifiedPaper } from "./types.ts";
 import { resolvePreparedQuery } from "./query-builder.ts";
+import { fetchWithRetry, sleep } from "./http.ts";
+
+const ARXIV_TIMEOUT_MS = 8_000;
+const ARXIV_MAX_RETRIES = 4;
+const ARXIV_MIN_INTERVAL_MS = 3_000;
+
+let lastArxivRequestTime = 0;
+
+async function arxivRateLimit(): Promise<void> {
+  const elapsedMs = Date.now() - lastArxivRequestTime;
+  if (elapsedMs < ARXIV_MIN_INTERVAL_MS) {
+    await sleep(ARXIV_MIN_INTERVAL_MS - elapsedMs);
+  }
+  lastArxivRequestTime = Date.now();
+}
 
 export async function searchArxiv(
   query: string,
@@ -9,15 +24,32 @@ export async function searchArxiv(
   const prepared = resolvePreparedQuery(query, "arxiv", mode, precompiledQuery);
   if (!prepared.apiQuery) return [];
 
-  const encodedQuery = encodeURIComponent(prepared.apiQuery);
-  const url = `https://export.arxiv.org/api/query?search_query=all:${encodedQuery}&max_results=25&sortBy=relevance&sortOrder=descending`;
+  const url = new URL("https://export.arxiv.org/api/query");
+  url.searchParams.set("search_query", `all:${prepared.apiQuery}`);
+  url.searchParams.set("start", "0");
+  url.searchParams.set("max_results", "25");
+  url.searchParams.set("sortBy", "relevance");
+  url.searchParams.set("sortOrder", "descending");
 
   console.log(
     `[ArXiv] Searching original="${prepared.originalKeywordQuery}" expanded="${prepared.expandedKeywordQuery}" api="${prepared.apiQuery}"`,
   );
 
   try {
-    const response = await fetch(url);
+    await arxivRateLimit();
+    const response = await fetchWithRetry(
+      url.toString(),
+      { headers: { Accept: "application/atom+xml,text/xml;q=0.9,*/*;q=0.8" } },
+      {
+        label: "arxiv-search",
+        timeoutMs: ARXIV_TIMEOUT_MS,
+        maxRetries: ARXIV_MAX_RETRIES,
+        shouldRetryStatus: (status) => status === 429 || status >= 500,
+        onRetry: ({ attempt, delayMs, reason }) => {
+          console.warn(`[ArXiv] Retry #${attempt} in ${delayMs}ms (${reason})`);
+        },
+      },
+    );
     if (!response.ok) {
       console.error(`[ArXiv] API error: ${response.status}`);
       return [];
@@ -30,6 +62,11 @@ export async function searchArxiv(
 
     while ((match = entryRegex.exec(xmlText)) !== null) {
       const entry = match[1];
+      if (/<title[^>]*>\s*Error\s*<\/title>/i.test(entry)) {
+        const errorSummary = entry.match(/<summary[^>]*>([\s\S]*?)<\/summary>/i)?.[1]?.trim().replace(/\s+/g, " ");
+        console.error(`[ArXiv] API feed error: ${errorSummary || "Unknown error"}`);
+        continue;
+      }
       const getTag = (tag: string): string => {
         const tagMatch = entry.match(new RegExp(`<${tag}[^>]*>([\\s\\S]*?)<\\/${tag}>`));
         return tagMatch ? tagMatch[1].trim().replace(/\s+/g, " ") : "";
