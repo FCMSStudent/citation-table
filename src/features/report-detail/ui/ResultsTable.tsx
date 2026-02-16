@@ -1,4 +1,4 @@
-import { Fragment, useCallback, useEffect, useMemo, useState } from 'react';
+import { Fragment, memo, useCallback, useEffect, useMemo, useState } from 'react';
 import {
   ChevronDown,
   ChevronLeft,
@@ -195,6 +195,170 @@ function buildPageWindow(current: number, total: number, windowSize = 5): number
   return pages;
 }
 
+interface StudyRowProps {
+  study: ScoredStudy;
+  isExpanded: boolean;
+  onToggle: (id: string) => void;
+  highlightedStudyId: string | null;
+  pdf: StudyPdf | undefined;
+  expandedSnippetIndices: string; // Comma-separated indices of expanded snippets for this study
+  onToggleSnippet: (key: string) => void;
+}
+
+const StudyRow = memo(({
+  study,
+  isExpanded,
+  onToggle,
+  highlightedStudyId,
+  pdf,
+  expandedSnippetIndices,
+  onToggleSnippet,
+}: StudyRowProps) => {
+  const firstOutcomeResult = study.outcomes?.find((o) => o.key_result)?.key_result || '—';
+  const openAlexUrl = normalizeOpenAlexUrl(study.citation.openalex_id);
+  const doiUrl = study.citation.doi ? sanitizeUrl(`https://doi.org/${study.citation.doi}`) : null;
+  const expandedIndices = useMemo(() => new Set(expandedSnippetIndices.split(',')), [expandedSnippetIndices]);
+
+  return (
+    <Fragment>
+      <tr
+        id={`study-row-${study.study_id}`}
+        className={cn(
+          'border-b transition-colors',
+          highlightedStudyId === study.study_id && 'bg-primary/10',
+        )}
+      >
+        <td className="px-3 py-2 align-top">
+          <p className="font-medium text-foreground">{study.title}</p>
+          <p className="mt-0.5 text-xs text-muted-foreground">
+            {study.year}
+            {study.citation.formatted ? ` • ${study.citation.formatted}` : ''}
+          </p>
+        </td>
+        <td className="px-3 py-2 align-top text-muted-foreground">
+          <div className="space-y-1">
+            <Badge variant={study.completenessTier === 'strict' ? 'secondary' : 'outline'} className="w-fit text-[10px]">
+              {study.completenessTier === 'strict' ? 'Strict' : 'Partial'}
+            </Badge>
+            <span className="inline-flex rounded-full bg-muted px-2 py-0.5 text-xs font-medium text-foreground">
+              {study.review_type === 'Meta-analysis' ? 'Meta-analysis' : study.study_design || 'Unknown'}
+            </span>
+            <p className="text-xs">N={study.sample_size?.toLocaleString() || 'NR'}</p>
+            <p className="text-xs">{study.population || 'Population not reported'}</p>
+          </div>
+        </td>
+        <td className="px-3 py-2 align-top text-muted-foreground">
+          {study.outcomes?.length ? (
+            <p className="text-xs leading-relaxed">
+              {study.outcomes.map((o) => o.outcome_measured).filter(Boolean).join('; ')}
+            </p>
+          ) : (
+            <span className="text-xs italic">Not reported</span>
+          )}
+        </td>
+        <td className="px-3 py-2 align-top text-muted-foreground">
+          <p className="line-clamp-1 text-xs">{firstOutcomeResult}</p>
+        </td>
+        <td className="px-3 py-2 align-top">
+          <div className="flex flex-wrap items-center gap-2 text-xs">
+            {doiUrl && (
+              <a href={doiUrl} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1 text-primary hover:underline">
+                DOI <ExternalLink className="h-3 w-3" />
+              </a>
+            )}
+            {openAlexUrl && (
+              <a href={openAlexUrl} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1 text-primary hover:underline">
+                OpenAlex <ExternalLink className="h-3 w-3" />
+              </a>
+            )}
+            {pdf?.status === 'downloaded' && pdf.public_url && (
+              <a href={sanitizeUrl(pdf.public_url)} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1 text-primary hover:underline">
+                PDF <FileText className="h-3 w-3" />
+              </a>
+            )}
+            {pdf?.status === 'pending' && (
+              <span className="inline-flex items-center gap-1 text-muted-foreground">
+                <Loader2 className="h-3 w-3 animate-spin" />
+                PDF
+              </span>
+            )}
+          </div>
+        </td>
+        <td className="px-3 py-2 align-top text-right">
+          <button
+            type="button"
+            onClick={() => onToggle(study.study_id)}
+            className="inline-flex items-center gap-1 rounded px-2 py-1 text-xs hover:bg-muted"
+            aria-expanded={isExpanded}
+          >
+            {isExpanded ? 'Hide' : 'Show'}
+            {isExpanded ? <ChevronUp className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />}
+          </button>
+        </td>
+      </tr>
+
+      {isExpanded && (
+        <tr className="border-b bg-muted/20">
+          <td colSpan={6} className="px-3 py-3">
+            <div className="space-y-3 text-sm">
+              <div>
+                <h4 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Result evidence</h4>
+                <div className="mt-2 space-y-2">
+                  {(study.outcomes || []).map((outcome, idx) => {
+                    const snippetKey = `${study.study_id}-${idx}`;
+                    const snippetOpen = expandedIndices.has(String(idx));
+                    return (
+                      <div key={snippetKey} className="rounded-md border bg-background p-2">
+                        <p className="text-xs font-medium text-foreground">{outcome.outcome_measured || 'Outcome'}</p>
+                        <p className="mt-0.5 text-xs text-muted-foreground">{outcome.key_result || 'Not reported'}</p>
+                        {(outcome.effect_size || outcome.p_value) && (
+                          <p className="mt-1 text-[11px] font-mono text-muted-foreground">
+                            {outcome.effect_size || '—'} {outcome.p_value ? `| p=${outcome.p_value}` : ''}
+                          </p>
+                        )}
+                        {outcome.citation_snippet && (
+                          <div className="mt-1">
+                            <button
+                              type="button"
+                              onClick={() => onToggleSnippet(snippetKey)}
+                              className="text-[11px] text-primary hover:underline"
+                            >
+                              {snippetOpen ? 'Hide source quote' : 'Show source quote'}
+                            </button>
+                            {snippetOpen && (
+                              <blockquote className="mt-1 border-l-2 border-primary/30 pl-2 text-[11px] italic text-muted-foreground">
+                                {outcome.citation_snippet}
+                              </blockquote>
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                  {(!study.outcomes || study.outcomes.length === 0) && (
+                    <p className="text-xs text-muted-foreground italic">No outcomes reported.</p>
+                  )}
+                </div>
+              </div>
+
+              <div className="rounded-md border bg-background p-2">
+                <h4 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Study metadata</h4>
+                <p className="mt-1 text-xs text-muted-foreground">
+                  Design: {study.study_design || 'Unknown'} • Review type: {study.review_type || 'None'} • N={study.sample_size ?? 'NR'}
+                </p>
+                {study.abstract_excerpt && (
+                  <p className="mt-1 text-xs text-muted-foreground">{study.abstract_excerpt}</p>
+                )}
+              </div>
+            </div>
+          </td>
+        </tr>
+      )}
+    </Fragment>
+  );
+});
+StudyRow.displayName = 'StudyRow';
+
 export function ResultsTable({
   results,
   partialResults = [],
@@ -275,7 +439,9 @@ export function ResultsTable({
     trackReportEvent('report_first_interaction', { source });
   }, [firstInteractionTracked]);
 
-  const { mainStudies, excludedStudies } = useMemo(() => {
+  // Memoize scored studies to avoid re-calculating relevance scores on every filter/sort change.
+  // This isolates the O(N) scoring logic from the UI-state-driven sorting/filtering.
+  const scoredStudies = useMemo(() => {
     const scoredById = new Map<string, ScoredStudy>();
     for (const study of results) {
       if (!study?.study_id) continue;
@@ -293,41 +459,41 @@ export function ResultsTable({
         completenessTier: 'partial',
       });
     }
-    const scored = Array.from(scoredById.values());
+    return Array.from(scoredById.values());
+  }, [results, partialResults, query]);
 
-    scored.sort((a, b) => {
+  // Consolidate sorting, filtering, and tier separation into a single efficient pipeline.
+  // Combining these reduces the number of full passes over the dataset (O(N)).
+  const { mainStudies, excludedStudies } = useMemo(() => {
+    const sorted = [...scoredStudies].sort((a, b) => {
       if (a.completenessTier !== b.completenessTier) {
         return a.completenessTier === 'strict' ? -1 : 1;
       }
-      if (sortBy === 'year') return b.year - a.year;
-      return b.relevanceScore - a.relevanceScore;
-    });
-
-    const filtered = scored.filter((study) => {
-      if (!matchesStudyDesign(study, studyDesign)) return false;
-
-      const outcomesText = getOutcomeText(study);
-      const isExplicitMatch = (study.outcomes?.length || 0) > 0 && !outcomesText.includes('no outcomes reported');
-      if (explicitOnly && !isExplicitMatch) return false;
-
-      if (debouncedFind) {
-        const haystack = getSearchBlob(study);
-        if (!haystack.includes(debouncedFind)) return false;
-      }
-
-      return true;
+      return sortBy === 'year' ? b.year - a.year : b.relevanceScore - a.relevanceScore;
     });
 
     const main: ScoredStudy[] = [];
     const excluded: ScoredStudy[] = [];
 
-    for (const study of filtered) {
-      if (isLowValueStudy(study, study.relevanceScore)) excluded.push(study);
-      else main.push(study);
+    for (const study of sorted) {
+      if (!matchesStudyDesign(study, studyDesign)) continue;
+
+      const outcomesText = getOutcomeText(study);
+      const isExplicitMatch = (study.outcomes?.length || 0) > 0 && !outcomesText.includes('no outcomes reported');
+      if (explicitOnly && !isExplicitMatch) continue;
+
+      if (debouncedFind && !getSearchBlob(study).includes(debouncedFind)) continue;
+
+      // Single-pass separation into main and excluded (low-value) studies.
+      if (isLowValueStudy(study, study.relevanceScore)) {
+        excluded.push(study);
+      } else {
+        main.push(study);
+      }
     }
 
     return { mainStudies: main, excludedStudies: excluded };
-  }, [results, partialResults, query, sortBy, studyDesign, explicitOnly, debouncedFind]);
+  }, [scoredStudies, sortBy, studyDesign, explicitOnly, debouncedFind]);
 
   const totalPages = Math.max(1, Math.ceil(mainStudies.length / PAGE_SIZE));
 
@@ -465,28 +631,25 @@ export function ResultsTable({
     return () => window.clearTimeout(timer);
   }, [pendingScrollStudyId, viewMode, paginatedStudies]);
 
-  const toggleRow = (studyId: string) => {
+  const toggleRow = useCallback((studyId: string) => {
     trackFirstInteraction('row_expand_toggle');
-    trackReportEvent('study_row_toggle', {
-      studyId,
-      expanded: !expandedRows.has(studyId),
-    });
+    trackReportEvent('study_row_toggle', { studyId });
     setExpandedRows((prev) => {
       const next = new Set(prev);
       if (next.has(studyId)) next.delete(studyId);
       else next.add(studyId);
       return next;
     });
-  };
+  }, [trackFirstInteraction]);
 
-  const toggleSnippet = (key: string) => {
+  const toggleSnippet = useCallback((key: string) => {
     setExpandedSnippets((prev) => {
       const next = new Set(prev);
       if (next.has(key)) next.delete(key);
       else next.add(key);
       return next;
     });
-  };
+  }, []);
 
   if (totalInputStudies === 0) return null;
 
@@ -779,151 +942,21 @@ export function ResultsTable({
                 </tr>
               </thead>
               <tbody>
-                {paginatedStudies.map((study) => {
-                  const isExpanded = expandedRows.has(study.study_id);
-                  const firstOutcomeResult = study.outcomes?.find((o) => o.key_result)?.key_result || '—';
-                  const pdf = study.citation.doi ? pdfsByDoi[study.citation.doi] : undefined;
-                  const openAlexUrl = normalizeOpenAlexUrl(study.citation.openalex_id);
-                  const doiUrl = study.citation.doi ? sanitizeUrl(`https://doi.org/${study.citation.doi}`) : null;
-
-                  return (
-                    <Fragment key={study.study_id}>
-                      <tr
-                        id={`study-row-${study.study_id}`}
-                        className={cn(
-                          'border-b transition-colors',
-                          highlightedStudyId === study.study_id && 'bg-primary/10',
-                        )}
-                      >
-                        <td className="px-3 py-2 align-top">
-                          <p className="font-medium text-foreground">{study.title}</p>
-                          <p className="mt-0.5 text-xs text-muted-foreground">
-                            {study.year}
-                            {study.citation.formatted ? ` • ${study.citation.formatted}` : ''}
-                          </p>
-                        </td>
-                        <td className="px-3 py-2 align-top text-muted-foreground">
-                          <div className="space-y-1">
-                            <Badge variant={study.completenessTier === 'strict' ? 'secondary' : 'outline'} className="w-fit text-[10px]">
-                              {study.completenessTier === 'strict' ? 'Strict' : 'Partial'}
-                            </Badge>
-                            <span className="inline-flex rounded-full bg-muted px-2 py-0.5 text-xs font-medium text-foreground">
-                              {study.review_type === 'Meta-analysis' ? 'Meta-analysis' : study.study_design || 'Unknown'}
-                            </span>
-                            <p className="text-xs">N={study.sample_size?.toLocaleString() || 'NR'}</p>
-                            <p className="text-xs">{study.population || 'Population not reported'}</p>
-                          </div>
-                        </td>
-                        <td className="px-3 py-2 align-top text-muted-foreground">
-                          {study.outcomes?.length ? (
-                            <p className="text-xs leading-relaxed">
-                              {study.outcomes.map((o) => o.outcome_measured).filter(Boolean).join('; ')}
-                            </p>
-                          ) : (
-                            <span className="text-xs italic">Not reported</span>
-                          )}
-                        </td>
-                        <td className="px-3 py-2 align-top text-muted-foreground">
-                          <p className="line-clamp-1 text-xs">{firstOutcomeResult}</p>
-                        </td>
-                        <td className="px-3 py-2 align-top">
-                          <div className="flex flex-wrap items-center gap-2 text-xs">
-                            {doiUrl && (
-                              <a href={doiUrl} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1 text-primary hover:underline">
-                                DOI <ExternalLink className="h-3 w-3" />
-                              </a>
-                            )}
-                            {openAlexUrl && (
-                              <a href={openAlexUrl} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1 text-primary hover:underline">
-                                OpenAlex <ExternalLink className="h-3 w-3" />
-                              </a>
-                            )}
-                            {pdf?.status === 'downloaded' && pdf.public_url && (
-                              <a href={sanitizeUrl(pdf.public_url)} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1 text-primary hover:underline">
-                                PDF <FileText className="h-3 w-3" />
-                              </a>
-                            )}
-                            {pdf?.status === 'pending' && (
-                              <span className="inline-flex items-center gap-1 text-muted-foreground">
-                                <Loader2 className="h-3 w-3 animate-spin" />
-                                PDF
-                              </span>
-                            )}
-                          </div>
-                        </td>
-                        <td className="px-3 py-2 align-top text-right">
-                          <button
-                            type="button"
-                            onClick={() => toggleRow(study.study_id)}
-                            className="inline-flex items-center gap-1 rounded px-2 py-1 text-xs hover:bg-muted"
-                            aria-expanded={isExpanded}
-                          >
-                            {isExpanded ? 'Hide' : 'Show'}
-                            {isExpanded ? <ChevronUp className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />}
-                          </button>
-                        </td>
-                      </tr>
-
-                      {isExpanded && (
-                        <tr className="border-b bg-muted/20">
-                          <td colSpan={6} className="px-3 py-3">
-                            <div className="space-y-3 text-sm">
-                              <div>
-                                <h4 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Result evidence</h4>
-                                <div className="mt-2 space-y-2">
-                                  {(study.outcomes || []).map((outcome, idx) => {
-                                    const snippetKey = `${study.study_id}-${idx}`;
-                                    const snippetOpen = expandedSnippets.has(snippetKey);
-                                    return (
-                                      <div key={snippetKey} className="rounded-md border bg-background p-2">
-                                        <p className="text-xs font-medium text-foreground">{outcome.outcome_measured || 'Outcome'}</p>
-                                        <p className="mt-0.5 text-xs text-muted-foreground">{outcome.key_result || 'Not reported'}</p>
-                                        {(outcome.effect_size || outcome.p_value) && (
-                                          <p className="mt-1 text-[11px] font-mono text-muted-foreground">
-                                            {outcome.effect_size || '—'} {outcome.p_value ? `| p=${outcome.p_value}` : ''}
-                                          </p>
-                                        )}
-                                        {outcome.citation_snippet && (
-                                          <div className="mt-1">
-                                            <button
-                                              type="button"
-                                              onClick={() => toggleSnippet(snippetKey)}
-                                              className="text-[11px] text-primary hover:underline"
-                                            >
-                                              {snippetOpen ? 'Hide source quote' : 'Show source quote'}
-                                            </button>
-                                            {snippetOpen && (
-                                              <blockquote className="mt-1 border-l-2 border-primary/30 pl-2 text-[11px] italic text-muted-foreground">
-                                                {outcome.citation_snippet}
-                                              </blockquote>
-                                            )}
-                                          </div>
-                                        )}
-                                      </div>
-                                    );
-                                  })}
-                                  {(!study.outcomes || study.outcomes.length === 0) && (
-                                    <p className="text-xs text-muted-foreground italic">No outcomes reported.</p>
-                                  )}
-                                </div>
-                              </div>
-
-                              <div className="rounded-md border bg-background p-2">
-                                <h4 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Study metadata</h4>
-                                <p className="mt-1 text-xs text-muted-foreground">
-                                  Design: {study.study_design || 'Unknown'} • Review type: {study.review_type || 'None'} • N={study.sample_size ?? 'NR'}
-                                </p>
-                                {study.abstract_excerpt && (
-                                  <p className="mt-1 text-xs text-muted-foreground">{study.abstract_excerpt}</p>
-                                )}
-                              </div>
-                            </div>
-                          </td>
-                        </tr>
-                      )}
-                    </Fragment>
-                  );
-                })}
+                {paginatedStudies.map((study) => (
+                  <StudyRow
+                    key={study.study_id}
+                    study={study}
+                    isExpanded={expandedRows.has(study.study_id)}
+                    onToggle={toggleRow}
+                    highlightedStudyId={highlightedStudyId}
+                    pdf={study.citation.doi ? pdfsByDoi[study.citation.doi] : undefined}
+                    expandedSnippetIndices={Array.from(expandedSnippets)
+                      .filter(id => id.startsWith(`${study.study_id}-`))
+                      .map(id => id.split('-').pop())
+                      .join(',')}
+                    onToggleSnippet={toggleSnippet}
+                  />
+                ))}
               </tbody>
             </table>
           </div>
