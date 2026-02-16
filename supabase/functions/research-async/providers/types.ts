@@ -1,0 +1,63 @@
+import type { SearchSource } from "../../_shared/query-processing.ts";
+
+export type ExpansionMode = "balanced" | "broad";
+
+export interface PreparedSourceQuery {
+  source: SearchSource;
+  originalKeywordQuery: string;
+  expandedKeywordQuery: string;
+  apiQuery: string;
+}
+
+export interface OpenAlexWork {
+  id: string;
+  title: string;
+  publication_year: number;
+  abstract_inverted_index?: Record<string, number[]>;
+  authorships?: Array<{ author: { display_name: string } }>;
+  primary_location?: { source?: { display_name: string } };
+  best_oa_location?: { pdf_url?: string; landing_page_url?: string };
+  doi?: string;
+  type?: string;
+  cited_by_count?: number;
+  referenced_works?: string[];
+  is_retracted?: boolean;
+}
+
+export interface SemanticScholarPaper {
+  paperId: string;
+  title: string;
+  abstract: string | null;
+  year: number | null;
+  authors: Array<{ authorId: string; name: string }>;
+  venue: string;
+  citationCount: number;
+  publicationTypes: string[] | null;
+  externalIds: { DOI?: string; PubMed?: string };
+  openAccessPdf?: { url: string } | null;
+  url?: string;
+  isRetracted?: boolean;
+  references?: Array<{ paperId: string }>;
+}
+
+export interface UnifiedPaper {
+  id: string;
+  title: string;
+  year: number;
+  abstract: string;
+  authors: string[];
+  venue: string;
+  doi: string | null;
+  pubmed_id: string | null;
+  openalex_id: string | null;
+  source: "openalex" | "semantic_scholar" | "arxiv" | "pubmed";
+  citationCount?: number;
+  publicationTypes?: string[];
+  journal?: string;
+  pdfUrl?: string | null;
+  landingPageUrl?: string | null;
+  referenced_ids?: string[];
+  is_retracted?: boolean;
+  preprint_status?: "Preprint" | "Peer-reviewed";
+  rank_signal?: number;
+}
