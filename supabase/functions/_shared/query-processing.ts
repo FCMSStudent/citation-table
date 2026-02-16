@@ -352,7 +352,7 @@ function recordFallbackFailure(now: number): void {
   }
 }
 
-async function fetchGeminiRewrite(query: string, apiKey: string, timeoutMs: number): Promise<{ normalized_query: string; reason_codes?: string[] } | null> {
+async function fetchLlmRewrite(query: string, apiKey: string, timeoutMs: number): Promise<{ normalized_query: string; reason_codes?: string[] } | null> {
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
 
@@ -363,20 +363,20 @@ async function fetchGeminiRewrite(query: string, apiKey: string, timeoutMs: numb
   ].join(" ");
 
   try {
-    const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`, {
+    const response = await fetch("https://api.openai.com/v1/chat/completions", {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${apiKey}`,
+      },
       body: JSON.stringify({
-        contents: [
-          {
-            role: "user",
-            parts: [{ text: `${systemPrompt}\n\nQuery: ${query}` }],
-          },
+        model: "gpt-4o-mini",
+        messages: [
+          { role: "system", content: systemPrompt },
+          { role: "user", content: `Query: ${query}` },
         ],
-        generationConfig: {
-          temperature: 0,
-          responseMimeType: "application/json",
-        },
+        temperature: 0,
+        response_format: { type: "json_object" },
       }),
       signal: controller.signal,
     });
@@ -384,7 +384,7 @@ async function fetchGeminiRewrite(query: string, apiKey: string, timeoutMs: numb
     if (!response.ok) return null;
 
     const payload = await response.json();
-    const content = payload?.candidates?.[0]?.content?.parts?.[0]?.text;
+    const content = payload?.choices?.[0]?.message?.content;
     if (!content || typeof content !== "string") return null;
 
     const trimmed = content.trim().replace(/^```json/, "").replace(/^```/, "").replace(/```$/, "").trim();
@@ -472,7 +472,7 @@ export async function prepareQueryProcessingV2(query: string, options: PrepareQu
   let usedLlmFallback = false;
 
   const now = Date.now();
-  const fallbackApiKey = options.llmApiKey || getEnv("GOOGLE_GEMINI_API_KEY") || "";
+  const fallbackApiKey = options.llmApiKey || getEnv("OPENAI_API_KEY") || "";
   const shouldAttemptFallback = confidence < confidenceThreshold && !!fallbackApiKey;
 
   if (shouldAttemptFallback) {
@@ -480,7 +480,7 @@ export async function prepareQueryProcessingV2(query: string, options: PrepareQu
       reasonCodes.push("fallback_circuit_open");
     } else {
       recordFallbackAttempt(now);
-      const rewritten = await fetchGeminiRewrite(trimmedQuery, fallbackApiKey, fallbackTimeoutMs);
+      const rewritten = await fetchLlmRewrite(trimmedQuery, fallbackApiKey, fallbackTimeoutMs);
       if (rewritten?.normalized_query) {
         const deterministicFromRewrite = deterministicProcess(rewritten.normalized_query);
         normalizedQuery = deterministicFromRewrite.normalizedQuery;

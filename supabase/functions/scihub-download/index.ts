@@ -105,9 +105,9 @@ async function reExtractStudyFromPdf(
   doi: string,
   pdfData: ArrayBuffer,
 ): Promise<void> {
-  const geminiApiKey = Deno.env.get("GOOGLE_GEMINI_API_KEY");
-  if (!geminiApiKey) {
-    console.log("[scihub-download] GOOGLE_GEMINI_API_KEY not set; skipping PDF re-extraction");
+  const openaiApiKey = Deno.env.get("OPENAI_API_KEY");
+  if (!openaiApiKey) {
+    console.log("[scihub-download] OPENAI_API_KEY not set; skipping PDF re-extraction");
     return;
   }
 
@@ -133,7 +133,6 @@ async function reExtractStudyFromPdf(
     return;
   }
 
-  const geminiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${geminiApiKey}`;
   const pdfBase64 = arrayBufferToBase64(pdfData);
   const updatedResults = Array.isArray(report.results) ? [...report.results] : [];
 
@@ -181,31 +180,33 @@ Current extracted study JSON (update this with PDF evidence):
 ${JSON.stringify(study, null, 2)}`;
 
     try {
-      const response = await fetch(geminiUrl, {
+      const response = await fetch("https://api.openai.com/v1/chat/completions", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${openaiApiKey}`,
+        },
         body: JSON.stringify({
-          contents: [{
-            role: "user",
-            parts: [
-              { text: `${systemPrompt}\n\n${userPrompt}` },
-              { inlineData: { mimeType: "application/pdf", data: pdfBase64 } },
-            ],
-          }],
-          generationConfig: { temperature: 0.1, responseMimeType: "application/json" },
+          model: "gpt-4o-mini",
+          messages: [
+            { role: "system", content: systemPrompt },
+            { role: "user", content: userPrompt },
+          ],
+          temperature: 0.1,
+          response_format: { type: "json_object" },
         }),
       });
 
       if (!response.ok) {
         const errorText = await response.text();
-        console.error(`[scihub-download] Gemini PDF re-extraction failed (${response.status}):`, errorText);
+        console.error(`[scihub-download] OpenAI PDF re-extraction failed (${response.status}):`, errorText);
         continue;
       }
 
       const payload = await response.json();
-      const raw = payload?.candidates?.[0]?.content?.parts?.[0]?.text;
+      const raw = payload?.choices?.[0]?.message?.content;
       if (!raw || typeof raw !== "string") {
-        console.error("[scihub-download] Gemini returned no text for PDF re-extraction");
+        console.error("[scihub-download] OpenAI returned no text for PDF re-extraction");
         continue;
       }
 

@@ -449,7 +449,7 @@ function mergeExtractedStudies(studies: StudyResult[]): StudyResult[] {
 async function extractStudyData(
   papers: UnifiedPaper[],
   question: string,
-  geminiApiKey: string
+  openaiApiKey: string
 ): Promise<StudyResult[]> {
   const papersContext = papers.map((p, i) => ({
     index: i,
@@ -533,29 +533,35 @@ Extract structured data from each paper's abstract following the strict rules. R
 - No inference - null for missing data
 - Verbatim extraction for populations, numerical results, interventions, and comparators`;
 
-  console.log(`[LLM] Sending ${papers.length} papers for extraction via Google Gemini`);
+  console.log(`[LLM] Sending ${papers.length} papers for extraction via OpenAI`);
 
-  const geminiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${geminiApiKey}`;
-
-  const response = await fetch(geminiUrl, {
+  const response = await fetch("https://api.openai.com/v1/chat/completions", {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${openaiApiKey}`,
+    },
     body: JSON.stringify({
-      contents: [{ role: "user", parts: [{ text: `${systemPrompt}\n\n${userPrompt}` }] }],
-      generationConfig: { temperature: 0.1, responseMimeType: "application/json" },
+      model: "gpt-4o-mini",
+      messages: [
+        { role: "system", content: systemPrompt },
+        { role: "user", content: userPrompt },
+      ],
+      temperature: 0.1,
+      response_format: { type: "json_object" },
     }),
   });
 
   if (!response.ok) {
     const errorText = await response.text();
-    console.error(`[LLM] Gemini error: ${response.status}`, errorText);
+    console.error(`[LLM] OpenAI error: ${response.status}`, errorText);
     if (response.status === 429) throw new Error("Rate limit exceeded. Please try again in a moment.");
-    if (response.status === 403) throw new Error("Invalid Google Gemini API key.");
+    if (response.status === 401) throw new Error("Invalid OpenAI API key.");
     throw new Error(`LLM extraction failed: ${response.status}`);
   }
 
   const data = await response.json();
-  const content = data.candidates?.[0]?.content?.parts?.[0]?.text || "";
+  const content = data.choices?.[0]?.message?.content || "";
   console.log(`[LLM] Raw response length: ${content.length}`);
 
   let jsonStr = content.trim();
@@ -706,7 +712,7 @@ async function runResearchPipeline(
   enrichmentContext: MetadataEnrichmentContext,
 ): Promise<PipelineResult> {
   const pipelineStartedAt = Date.now();
-  const GOOGLE_GEMINI_API_KEY = Deno.env.get("GOOGLE_GEMINI_API_KEY") || "";
+  const OPENAI_API_KEY = Deno.env.get("OPENAI_API_KEY") || "";
   const extractionEngine = getExtractionEngine();
   const extractionMaxCandidates = getExtractionMaxCandidates();
   const pdfExtractorUrl = Deno.env.get("PDF_EXTRACTOR_URL") || "";
@@ -726,7 +732,7 @@ async function runResearchPipeline(
 
   if (queryPipelineMode === "v2") {
     const prepared = await prepareQueryProcessingV2(question, {
-      llmApiKey: GOOGLE_GEMINI_API_KEY || undefined,
+      llmApiKey: OPENAI_API_KEY || undefined,
       fallbackTimeoutMs: 350,
     });
     searchQuery = prepared.search_query;
@@ -739,7 +745,7 @@ async function runResearchPipeline(
     sourceQueryOverrides.arxiv = prepared.query_processing.source_queries.arxiv;
   } else if (queryPipelineMode === "shadow") {
     shadowPreparedPromise = prepareQueryProcessingV2(question, {
-      llmApiKey: GOOGLE_GEMINI_API_KEY || undefined,
+      llmApiKey: OPENAI_API_KEY || undefined,
       fallbackTimeoutMs: 350,
     });
   }
@@ -837,8 +843,8 @@ async function runResearchPipeline(
     const extractionStartedAt = Date.now();
 
     if (extractionEngine === "llm") {
-      if (!GOOGLE_GEMINI_API_KEY) {
-        throw new Error("GOOGLE_GEMINI_API_KEY required when EXTRACTION_ENGINE=llm");
+      if (!OPENAI_API_KEY) {
+        throw new Error("OPENAI_API_KEY required when EXTRACTION_ENGINE=llm");
       }
 
       try {
@@ -846,7 +852,7 @@ async function runResearchPipeline(
         const extractionBatches: Promise<StudyResult[]>[] = [];
         for (let i = 0; i < extractionCandidates.length; i += batchSize) {
           const batch = extractionCandidates.slice(i, i + batchSize);
-          extractionBatches.push(extractStudyData(batch, question, GOOGLE_GEMINI_API_KEY));
+          extractionBatches.push(extractStudyData(batch, question, OPENAI_API_KEY));
         }
         const extracted = (await Promise.all(extractionBatches)).flat();
         const mergedByStudy = mergeExtractedStudies(extracted);
@@ -888,13 +894,13 @@ async function runResearchPipeline(
       partial_results = deterministicTiers.partial as unknown as StudyResult[];
 
       let llmFallbackApplied = false;
-      if (extractionEngine === "hybrid" && results.length === 0 && GOOGLE_GEMINI_API_KEY) {
+      if (extractionEngine === "hybrid" && results.length === 0 && OPENAI_API_KEY) {
         try {
           const batchSize = 15;
           const llmBatches: Promise<StudyResult[]>[] = [];
           for (let i = 0; i < extractionCandidates.length; i += batchSize) {
             const batch = extractionCandidates.slice(i, i + batchSize);
-            llmBatches.push(extractStudyData(batch, question, GOOGLE_GEMINI_API_KEY));
+            llmBatches.push(extractStudyData(batch, question, OPENAI_API_KEY));
           }
           const llmExtracted = (await Promise.all(llmBatches)).flat();
           const llmMerged = mergeExtractedStudies(llmExtracted);

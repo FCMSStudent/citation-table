@@ -1,3 +1,5 @@
+// deno-lint-ignore-file
+declare const Deno: any;
 import type { ExpansionMode, UnifiedPaper } from "./types.ts";
 import { resolvePreparedQuery } from "./query-builder.ts";
 
