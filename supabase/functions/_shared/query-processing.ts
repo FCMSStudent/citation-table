@@ -129,17 +129,28 @@ interface DeterministicResult {
 }
 
 function getEnv(name: string): string | undefined {
+  const runtime = globalThis as typeof globalThis & {
+    Deno?: {
+      env?: {
+        get?: (key: string) => string | undefined;
+      };
+    };
+    process?: {
+      env?: Record<string, string | undefined>;
+    };
+  };
+
   try {
-    if (typeof (globalThis as any).Deno !== "undefined" && (globalThis as any).Deno?.env?.get) {
-      return (globalThis as any).Deno.env.get(name) ?? undefined;
+    if (runtime.Deno?.env?.get) {
+      return runtime.Deno.env.get(name) ?? undefined;
     }
   } catch (_) {
     // ignore
   }
 
   try {
-    if (typeof (globalThis as any).process !== "undefined") {
-      return (globalThis as any).process.env?.[name];
+    if (runtime.process?.env) {
+      return runtime.process.env[name];
     }
   } catch (_) {
     // ignore

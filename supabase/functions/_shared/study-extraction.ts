@@ -258,8 +258,8 @@ function inferOutcomeMeasured(sentence: string): string {
   const lowered = sentence.toLowerCase();
 
   const targeted = [
-    /(?:improv(?:ed|ement)?\s+in|increase(?:d)?\s+in|decrease(?:d)?\s+in|reduction\s+in|associated\s+with|effect\s+on)\s+([a-z0-9\s\-]{3,80})/i,
-    /([a-z0-9\s\-]{3,80})\s+(?:improved|increased|decreased|reduced|was\s+associated)/i,
+    /(?:improv(?:ed|ement)?\s+in|increase(?:d)?\s+in|decrease(?:d)?\s+in|reduction\s+in|associated\s+with|effect\s+on)\s+([a-z0-9\s-]{3,80})/i,
+    /([a-z0-9\s-]{3,80})\s+(?:improved|increased|decreased|reduced|was\s+associated)/i,
   ];
 
   for (const pattern of targeted) {

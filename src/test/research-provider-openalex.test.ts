@@ -2,8 +2,14 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { expandOpenAlexCitationGraph, searchOpenAlex } from "../../supabase/functions/research-async/providers/openalex.ts";
 import type { UnifiedPaper } from "../../supabase/functions/research-async/providers/types.ts";
 
+type DenoTestRuntime = {
+  env: {
+    get(name: string): string | undefined;
+  };
+};
+
 function mockEnv(values: Record<string, string | undefined>) {
-  (globalThis as any).Deno = {
+  (globalThis as typeof globalThis & { Deno?: DenoTestRuntime }).Deno = {
     env: {
       get: (name: string) => values[name],
     },

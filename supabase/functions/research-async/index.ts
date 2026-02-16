@@ -30,6 +30,7 @@ import {
   extractStudiesDeterministic,
   summarizeExtractionResults,
   type DeterministicExtractionInput,
+  type DeterministicStudyResult,
 } from "../_shared/study-extraction.ts";
 
 const corsHeaders = {
@@ -792,7 +793,7 @@ async function runResearchPipeline(
         }
         const extracted = (await Promise.all(extractionBatches)).flat();
         const mergedByStudy = mergeExtractedStudies(extracted);
-        const tiers = applyCompletenessTiers(mergedByStudy as any);
+        const tiers = applyCompletenessTiers(mergedByStudy as unknown as DeterministicStudyResult[]);
         results = tiers.complete as unknown as StudyResult[];
         partial_results = tiers.partial as unknown as StudyResult[];
       } catch (error) {
@@ -825,7 +826,7 @@ async function runResearchPipeline(
       const deterministicMerged = mergeExtractedStudies(
         deterministicResults.map((row) => row.study as unknown as StudyResult),
       );
-      const deterministicTiers = applyCompletenessTiers(deterministicMerged as any);
+      const deterministicTiers = applyCompletenessTiers(deterministicMerged as unknown as DeterministicStudyResult[]);
       results = deterministicTiers.complete as unknown as StudyResult[];
       partial_results = deterministicTiers.partial as unknown as StudyResult[];
 
@@ -840,7 +841,7 @@ async function runResearchPipeline(
           }
           const llmExtracted = (await Promise.all(llmBatches)).flat();
           const llmMerged = mergeExtractedStudies(llmExtracted);
-          const llmTiers = applyCompletenessTiers(llmMerged as any);
+          const llmTiers = applyCompletenessTiers(llmMerged as unknown as DeterministicStudyResult[]);
           if (llmTiers.complete.length > 0) {
             results = llmTiers.complete as unknown as StudyResult[];
             llmFallbackApplied = true;
@@ -910,7 +911,7 @@ function scheduleBackgroundWork(work: Promise<void>): void {
 
 // ─── Rate Limiting ───────────────────────────────────────────────────────────
 
-type SupabaseClientLike = any;
+type SupabaseClientLike = ReturnType<typeof createClient>;
 
 async function checkRateLimit(
   supabase: SupabaseClientLike,

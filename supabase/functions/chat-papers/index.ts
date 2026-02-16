@@ -11,26 +11,70 @@ const CHAT_MAX_CONTEXT_STUDIES = 15;
 const CHAT_STRICT_TARGET = 10;
 const CHAT_PARTIAL_TARGET = 5;
 
-type TieredStudy = Record<string, any> & {
+interface StudyOutcome {
+  outcome_measured?: string | null;
+  key_result?: string | null;
+  citation_snippet?: string | null;
+  intervention?: string | null;
+  comparator?: string | null;
+  effect_size?: string | null;
+  p_value?: string | null;
+}
+
+interface StudyCitation {
+  doi?: string | null;
+}
+
+interface ContextStudy {
+  study_id?: string;
+  title?: string | null;
+  year?: number | null;
+  study_design?: string | null;
+  sample_size?: number | null;
+  population?: string | null;
+  outcomes?: StudyOutcome[] | null;
+  citation?: StudyCitation | null;
+  abstract_excerpt?: string | null;
+  preprint_status?: string | null;
+  review_type?: string | null;
+  source?: string | null;
+  citationCount?: number | null;
+}
+
+interface ChatMessage {
+  role: string;
+  content: string;
+}
+
+interface ChatRequestPayload {
+  report_id?: string;
+  messages?: unknown;
+}
+
+type SupabaseClientLike = ReturnType<typeof createClient>;
+
+type TieredStudy = ContextStudy & {
   _score: number;
   _tier: "strict" | "partial";
 };
 
-function isCompleteStudy(study: any): boolean {
+function isCompleteStudy(study: ContextStudy): boolean {
   if (!study.title || !study.year) return false;
   if (study.study_design === "unknown") return false;
   if (!study.abstract_excerpt || study.abstract_excerpt.trim().length < 50) return false;
-  if (!study.outcomes || study.outcomes.length === 0) return false;
-  return study.outcomes.some((o: any) =>
+  const outcomes = Array.isArray(study.outcomes) ? study.outcomes : [];
+  if (outcomes.length === 0) return false;
+  return outcomes.some((o) =>
     o.outcome_measured && (o.effect_size || o.p_value || o.intervention || o.comparator)
   );
 }
 
-function scoreStudy(study: any, query: string): number {
+function scoreStudy(study: ContextStudy, query: string): number {
   let score = 0;
   const keywords = query.toLowerCase().split(/\s+/).filter((w: string) => w.length > 2);
-  const outcomesText = (study.outcomes || [])
-    .map((o: any) => `${o.outcome_measured} ${o.key_result || ""}`.toLowerCase())
+  const outcomes = Array.isArray(study.outcomes) ? study.outcomes : [];
+  const outcomesText = outcomes
+    .map((o) => `${o.outcome_measured || ""} ${o.key_result || ""}`.toLowerCase())
     .join(" ");
   const matches = keywords.filter((k: string) => outcomesText.includes(k)).length;
   if (keywords.length >= 2 && matches >= 2) score += 2;
@@ -38,15 +82,15 @@ function scoreStudy(study: any, query: string): number {
 
   if (study.review_type === "Meta-analysis" || study.review_type === "Systematic review") score += 1;
 
-  if (study.citationCount && study.citationCount > 0) {
+  if (typeof study.citationCount === "number" && study.citationCount > 0) {
     score += Math.min(3, Math.log2(study.citationCount));
   }
 
   return score;
 }
 
-function dedupeByStudyId(studies: any[]): any[] {
-  const byId = new Map<string, any>();
+function dedupeByStudyId(studies: ContextStudy[]): ContextStudy[] {
+  const byId = new Map<string, ContextStudy>();
   for (const study of studies || []) {
     const studyId = typeof study?.study_id === "string" ? study.study_id : null;
     if (!studyId || byId.has(studyId)) continue;
@@ -56,18 +100,18 @@ function dedupeByStudyId(studies: any[]): any[] {
 }
 
 function selectMixedContextStudies(
-  strictStudies: any[],
-  partialStudies: any[],
+  strictStudies: ContextStudy[],
+  partialStudies: ContextStudy[],
   query: string,
 ): { selected: TieredStudy[]; strict_total: number; partial_total: number } {
   const strictRanked = dedupeByStudyId(strictStudies)
-    .map((study) => ({ ...study, _score: scoreStudy(study, query), _tier: "strict" as const }))
+    .map((study): TieredStudy => ({ ...study, _score: scoreStudy(study, query), _tier: "strict" as const }))
     .sort((a, b) => b._score - a._score);
 
-  const strictIds = new Set(strictRanked.map((study) => study.study_id));
+  const strictIds = new Set(strictRanked.map((study) => study.study_id).filter((studyId): studyId is string => typeof studyId === "string"));
   const partialRanked = dedupeByStudyId(partialStudies)
-    .filter((study) => !strictIds.has(study.study_id))
-    .map((study) => ({ ...study, _score: scoreStudy(study, query), _tier: "partial" as const }))
+    .filter((study) => typeof study.study_id === "string" && !strictIds.has(study.study_id))
+    .map((study): TieredStudy => ({ ...study, _score: scoreStudy(study, query), _tier: "partial" as const }))
     .sort((a, b) => b._score - a._score);
 
   const selectedStrict = strictRanked.slice(0, CHAT_STRICT_TARGET);
@@ -98,7 +142,7 @@ function selectMixedContextStudies(
 }
 
 async function checkRateLimit(
-  supabase: any, functionName: string, clientIp: string, maxRequests: number, windowMinutes: number
+  supabase: SupabaseClientLike, functionName: string, clientIp: string, maxRequests: number, windowMinutes: number
 ): Promise<boolean> {
   const windowStart = new Date(Date.now() - windowMinutes * 60_000).toISOString();
   const { count, error } = await supabase
@@ -111,6 +155,16 @@ async function checkRateLimit(
   if ((count || 0) >= maxRequests) return false;
   await supabase.from("rate_limits").insert({ function_name: functionName, client_ip: clientIp });
   return true;
+}
+
+function asContextStudies(value: unknown): ContextStudy[] {
+  return Array.isArray(value) ? (value as ContextStudy[]) : [];
+}
+
+function isChatMessage(value: unknown): value is ChatMessage {
+  if (!value || typeof value !== "object") return false;
+  const candidate = value as { role?: unknown; content?: unknown };
+  return typeof candidate.role === "string" && typeof candidate.content === "string";
 }
 
 serve(async (req) => {
@@ -155,7 +209,11 @@ serve(async (req) => {
     }
     const userId = claimsData.claims.sub as string;
 
-    const { report_id, messages } = await req.json();
+    const requestPayload = await req.json() as ChatRequestPayload;
+    const report_id = requestPayload.report_id;
+    const messages = Array.isArray(requestPayload.messages)
+      ? requestPayload.messages.filter(isChatMessage)
+      : [];
 
     if (!report_id || !messages?.length) {
       return new Response(
@@ -178,8 +236,8 @@ serve(async (req) => {
       );
     }
 
-    const allStudies = report.results as any[];
-    const allPartialStudies = Array.isArray(report.partial_results) ? (report.partial_results as any[]) : [];
+    const allStudies = asContextStudies(report.results);
+    const allPartialStudies = asContextStudies(report.partial_results);
     const queryText = (report.normalized_query || report.question || "").toLowerCase();
 
     const strictStudies = allStudies.filter(isCompleteStudy);
@@ -189,9 +247,9 @@ serve(async (req) => {
     const partialIncluded = studies.filter((study) => study._tier === "partial").length;
 
     const studyContext = studies
-      .map((s: any, i: number) => {
-        const outcomes = (s.outcomes || [])
-          .map((o: any) => `  - ${o.outcome_measured}: ${o.key_result || "Not reported"} [Citation: "${o.citation_snippet || ""}"]`)
+      .map((s, i: number) => {
+        const outcomes = (Array.isArray(s.outcomes) ? s.outcomes : [])
+          .map((o) => `  - ${o.outcome_measured}: ${o.key_result || "Not reported"} [Citation: "${o.citation_snippet || ""}"]`)
           .join("\n");
         return `[Study ${i + 1}] "${s.title}" (${s.year})
   Evidence tier: ${s._tier === "strict" ? "Strict (high confidence)" : "Partial (lower confidence)"}

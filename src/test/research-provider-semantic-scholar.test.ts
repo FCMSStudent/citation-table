@@ -1,8 +1,14 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { searchSemanticScholar } from "../../supabase/functions/research-async/providers/semantic-scholar.ts";
 
+type DenoTestRuntime = {
+  env: {
+    get(name: string): string | undefined;
+  };
+};
+
 function mockEnv(values: Record<string, string | undefined>) {
-  (globalThis as any).Deno = {
+  (globalThis as typeof globalThis & { Deno?: DenoTestRuntime }).Deno = {
     env: {
       get: (name: string) => values[name],
     },

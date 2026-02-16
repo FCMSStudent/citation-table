@@ -1,5 +1,9 @@
 // deno-lint-ignore-file
-declare const Deno: any;
+declare const Deno: {
+  env: {
+    get(name: string): string | undefined;
+  };
+};
 import type { ExpansionMode, OpenAlexWork, UnifiedPaper } from "./types.ts";
 import { resolvePreparedQuery } from "./query-builder.ts";
 import { normalizeDoi, reconstructAbstract } from "./normalization.ts";

@@ -73,17 +73,43 @@ const DEFAULT_SOURCE_TRUST: Record<string, number> = {
   unknown: 0.5,
 };
 
+interface SupabaseErrorLike {
+  message: string;
+}
+
+interface SupabaseResponse<T> {
+  data: T | null;
+  error: SupabaseErrorLike | null;
+  count?: number | null;
+}
+
+interface SupabaseQueryBuilder<T = unknown> extends PromiseLike<SupabaseResponse<T>> {
+  select(columns: string, options?: Record<string, unknown>): SupabaseQueryBuilder<T>;
+  eq(column: string, value: unknown): SupabaseQueryBuilder<T>;
+  lte(column: string, value: string): SupabaseQueryBuilder<T>;
+  order(column: string, options?: { ascending?: boolean }): SupabaseQueryBuilder<T>;
+  limit(count: number): SupabaseQueryBuilder<T>;
+  maybeSingle(): SupabaseQueryBuilder<T | null>;
+  upsert(values: unknown, options?: Record<string, unknown>): SupabaseQueryBuilder<T>;
+  insert(values: unknown): SupabaseQueryBuilder<T>;
+  update(values: unknown): SupabaseQueryBuilder<T>;
+}
+
+interface SupabaseClientLike {
+  from<T = unknown>(table: string): SupabaseQueryBuilder<T>;
+}
+
 function backoffDelayMs(attemptCount: number): number {
   const capped = Math.max(1, Math.min(attemptCount, 7));
   return Math.min(60_000, 1_000 * (2 ** (capped - 1)));
 }
 
 export class MetadataEnrichmentStore {
-  constructor(private readonly client: any) {}
+  constructor(private readonly client: SupabaseClientLike) {}
 
   async getSourceTrustMap(): Promise<Record<string, number>> {
     const { data, error } = await this.client
-      .from("dedup_source_priority")
+      .from<{ source?: string; trust_score?: number }>("dedup_source_priority")
       .select("source,trust_score");
 
     if (error || !Array.isArray(data)) {
@@ -102,7 +128,7 @@ export class MetadataEnrichmentStore {
 
   async getCacheByLookupKey(lookupKey: string): Promise<MetadataEnrichmentCacheRecord | null> {
     const { data, error } = await this.client
-      .from("metadata_enrichment_cache")
+      .from<MetadataEnrichmentCacheRecord>("metadata_enrichment_cache")
       .select("*")
       .eq("lookup_key", lookupKey)
       .maybeSingle();
@@ -186,7 +212,7 @@ export class MetadataEnrichmentStore {
   async claimQueuedJobs(stack: MetadataEnrichmentJobRecord["stack"], batchSize: number): Promise<MetadataEnrichmentJobRecord[]> {
     const nowIso = new Date().toISOString();
     const { data, error } = await this.client
-      .from("metadata_enrichment_jobs")
+      .from<MetadataEnrichmentJobRecord>("metadata_enrichment_jobs")
       .select("*")
       .eq("stack", stack)
       .eq("status", "queued")
@@ -204,7 +230,7 @@ export class MetadataEnrichmentStore {
     for (const row of data) {
       const nextAttempt = Number(row.attempt_count || 0) + 1;
       const { data: picked, error: claimError } = await this.client
-        .from("metadata_enrichment_jobs")
+        .from<MetadataEnrichmentJobRecord>("metadata_enrichment_jobs")
         .update({
           status: "processing",
           attempt_count: nextAttempt,
@@ -275,9 +301,9 @@ export class MetadataEnrichmentStore {
     }
   }
 
-  async readReportResults(reportId: string): Promise<any[] | null> {
+  async readReportResults(reportId: string): Promise<Record<string, unknown>[] | null> {
     const { data, error } = await this.client
-      .from("research_reports")
+      .from<{ results?: unknown }>("research_reports")
       .select("results")
       .eq("id", reportId)
       .maybeSingle();
@@ -287,10 +313,10 @@ export class MetadataEnrichmentStore {
       return null;
     }
 
-    return Array.isArray(data?.results) ? data.results : [];
+    return Array.isArray(data?.results) ? (data.results as Record<string, unknown>[]) : [];
   }
 
-  async updateReportResults(reportId: string, results: any[]): Promise<void> {
+  async updateReportResults(reportId: string, results: Record<string, unknown>[]): Promise<void> {
     const { error } = await this.client
       .from("research_reports")
       .update({ results })

@@ -1,4 +1,5 @@
 import type {
+  MetadataEnrichmentCacheRecord,
   MetadataEnrichmentMode,
   MetadataEnrichmentOutcome,
   MetadataEnrichmentStore,
@@ -109,13 +110,81 @@ const DEFAULT_SOURCE_TRUST: Record<string, number> = {
   unknown: 0.5,
 };
 
+interface RuntimeEnvironment {
+  Deno?: {
+    env?: {
+      get?: (name: string) => string | undefined;
+    };
+  };
+  process?: {
+    env?: Record<string, string | undefined>;
+  };
+}
+
+interface CrossrefAuthor {
+  given?: string;
+  family?: string;
+}
+
+interface CrossrefDateParts {
+  "date-parts"?: Array<Array<number | string>>;
+}
+
+interface CrossrefWork {
+  author?: CrossrefAuthor[];
+  issued?: CrossrefDateParts;
+  published?: CrossrefDateParts;
+  "published-print"?: CrossrefDateParts;
+  "container-title"?: string[];
+  title?: string[];
+  DOI?: string;
+  "is-referenced-by-count"?: number | string | null;
+}
+
+interface CrossrefByDoiResponse {
+  message?: CrossrefWork;
+}
+
+interface CrossrefByTitleResponse {
+  message?: {
+    items?: CrossrefWork[];
+  };
+}
+
+interface OpenAlexAuthorship {
+  author?: {
+    display_name?: string;
+  };
+}
+
+interface OpenAlexPrimaryLocation {
+  source?: {
+    display_name?: string;
+  };
+}
+
+interface OpenAlexWorkLite {
+  authorships?: OpenAlexAuthorship[];
+  primary_location?: OpenAlexPrimaryLocation;
+  display_name?: string;
+  title?: string;
+  doi?: string | null;
+  publication_year?: number | string | null;
+  cited_by_count?: number | string | null;
+}
+
+interface OpenAlexListResponse {
+  results?: OpenAlexWorkLite[];
+}
+
 function envGet(name: string): string | undefined {
-  const denoEnv = (globalThis as any)?.Deno?.env?.get;
+  const runtime = globalThis as typeof globalThis & RuntimeEnvironment;
+  const denoEnv = runtime.Deno?.env?.get;
   if (typeof denoEnv === "function") {
     return denoEnv(name) ?? undefined;
   }
-  if (typeof (globalThis as any).process !== "undefined" && (globalThis as any).process?.env) {
-    return (globalThis as any).process.env[name];
+  if (runtime.process?.env) {
+    return runtime.process.env[name];
   }
   return undefined;
 }
@@ -263,10 +332,10 @@ async function titleFingerprint(paper: EnrichmentInputPaper): Promise<string> {
   return sha1Hex(`${title}|${leadAuthor}|${year}`);
 }
 
-function toCrossrefCandidate(item: any): EnrichmentCandidate {
+function toCrossrefCandidate(item: CrossrefWork): EnrichmentCandidate {
   const authors = (item?.author || [])
-    .map((author: any) => [author?.given, author?.family].filter(Boolean).join(" ").trim())
-    .filter(Boolean);
+    .map((author) => [author?.given, author?.family].filter((part): part is string => Boolean(part)).join(" ").trim())
+    .filter((name): name is string => Boolean(name));
 
   const issuedYear = item?.issued?.["date-parts"]?.[0]?.[0]
     ?? item?.published?.["date-parts"]?.[0]?.[0]
@@ -288,10 +357,10 @@ function toCrossrefCandidate(item: any): EnrichmentCandidate {
   };
 }
 
-function toOpenAlexCandidate(item: any): EnrichmentCandidate {
+function toOpenAlexCandidate(item: OpenAlexWorkLite): EnrichmentCandidate {
   const authors = (item?.authorships || [])
-    .map((entry: any) => entry?.author?.display_name)
-    .filter(Boolean);
+    .map((entry) => entry?.author?.display_name)
+    .filter((name): name is string => Boolean(name));
   const venue = item?.primary_location?.source?.display_name || null;
 
   return {
@@ -330,13 +399,13 @@ function retryDelayMs(attempt: number): number {
   return base + Math.floor(Math.random() * 101);
 }
 
-async function fetchJsonWithRetry(
+async function fetchJsonWithRetry<T>(
   url: string,
   init: RequestInit,
   providerName: string,
   retryMax: number,
   providerStatuses: Record<string, unknown>,
-): Promise<any | null> {
+): Promise<T | null> {
   let attempts = 0;
   let lastError = "";
 
@@ -357,7 +426,7 @@ async function fetchJsonWithRetry(
           http_status: response.status,
           latency_ms: Date.now() - startedAt,
         };
-        return await response.json();
+        return await response.json() as T;
       }
 
       const retriable = response.status === 429 || response.status >= 500;
@@ -417,7 +486,7 @@ async function fetchJsonWithRetry(
 async function fetchCrossrefByDoi(doi: string, retryMax: number, trace: FetchTrace): Promise<EnrichmentCandidate[]> {
   trace.providersAttempted.push("crossref");
   const encoded = encodeURIComponent(doi);
-  const payload = await fetchJsonWithRetry(
+  const payload = await fetchJsonWithRetry<CrossrefByDoiResponse>(
     `https://api.crossref.org/works/${encoded}`,
     {
       headers: {
@@ -436,7 +505,7 @@ async function fetchCrossrefByDoi(doi: string, retryMax: number, trace: FetchTra
 async function fetchCrossrefByTitle(title: string, retryMax: number, trace: FetchTrace): Promise<EnrichmentCandidate[]> {
   trace.providersAttempted.push("crossref");
   const encoded = encodeURIComponent(title);
-  const payload = await fetchJsonWithRetry(
+  const payload = await fetchJsonWithRetry<CrossrefByTitleResponse>(
     `https://api.crossref.org/works?query.bibliographic=${encoded}&rows=5`,
     {
       headers: {
@@ -456,7 +525,7 @@ async function fetchCrossrefByTitle(title: string, retryMax: number, trace: Fetc
 async function fetchOpenAlexByDoi(doi: string, retryMax: number, trace: FetchTrace): Promise<EnrichmentCandidate[]> {
   trace.providersAttempted.push("openalex");
   const filter = encodeURIComponent(`doi:https://doi.org/${doi}`);
-  const payload = await fetchJsonWithRetry(
+  const payload = await fetchJsonWithRetry<OpenAlexListResponse>(
     `https://api.openalex.org/works?filter=${filter}&per-page=5`,
     {},
     "openalex",
@@ -472,7 +541,7 @@ async function fetchOpenAlexByDoi(doi: string, retryMax: number, trace: FetchTra
 async function fetchOpenAlexByTitle(title: string, retryMax: number, trace: FetchTrace): Promise<EnrichmentCandidate[]> {
   trace.providersAttempted.push("openalex");
   const search = encodeURIComponent(title);
-  const payload = await fetchJsonWithRetry(
+  const payload = await fetchJsonWithRetry<OpenAlexListResponse>(
     `https://api.openalex.org/works?search=${search}&per-page=5&sort=relevance_score:desc`,
     {},
     "openalex",
@@ -680,7 +749,7 @@ function parseDateSafe(value: string | null | undefined): Date | null {
 }
 
 function shouldUseCachedRecord(
-  record: any,
+  record: MetadataEnrichmentCacheRecord | null | undefined,
   now: Date,
   mode: MetadataEnrichmentMode,
 ): { use: boolean; stale: boolean } {
@@ -706,19 +775,22 @@ function shouldUseCachedRecord(
 
 function hydrateFromCache(
   paper: EnrichmentInputPaper,
-  cacheRecord: any,
+  cacheRecord: MetadataEnrichmentCacheRecord,
   mode: MetadataEnrichmentMode,
   lookupKey: string,
   lookupKind: "doi" | "title",
   sourceTrust: Record<string, number>,
 ): CachedHydration {
-  const resolved = cacheRecord?.resolved_metadata || {};
-  const confidence = Number(cacheRecord?.confidence || 0);
-  const outcome = (cacheRecord?.status || "not_found") as MetadataEnrichmentOutcome;
+  const resolved = cacheRecord.resolved_metadata || {};
+  const confidence = Number(cacheRecord.confidence || 0);
+  const outcome = (cacheRecord.status || "not_found") as MetadataEnrichmentOutcome;
+  const resolvedAuthors = Array.isArray(resolved.authors)
+    ? resolved.authors.filter((name): name is string => typeof name === "string")
+    : (paper.authors || []);
   const selected: EnrichmentCandidate = {
     provider: String(resolved.provider || "crossref"),
     title: String(resolved.title || paper.title || ""),
-    authors: Array.isArray(resolved.authors) ? resolved.authors : paper.authors || [],
+    authors: resolvedAuthors,
     venue: (resolved.venue as string | undefined) || null,
     doi: (resolved.doi as string | undefined) || null,
     year: safeNumber(resolved.year),
@@ -735,8 +807,8 @@ function hydrateFromCache(
     lookup_kind: lookupKind,
     outcome,
     confidence,
-    reason_codes: [...(cacheRecord?.reason_codes || []), ...reasonCodes],
-    providers_attempted: Object.keys(cacheRecord?.provider_payloads || {}),
+    reason_codes: [...(cacheRecord.reason_codes || []), ...reasonCodes],
+    providers_attempted: Object.keys(cacheRecord.provider_payloads || {}),
     provider_statuses: { cache: "hit" },
     fields_applied: fieldsApplied,
     used_cache: true,

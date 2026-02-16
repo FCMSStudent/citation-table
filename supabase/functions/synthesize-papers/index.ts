@@ -11,26 +11,78 @@ const SYNTHESIS_MAX_CONTEXT_STUDIES = 15;
 const SYNTHESIS_STRICT_TARGET = 10;
 const SYNTHESIS_PARTIAL_TARGET = 5;
 
-type TieredStudy = Record<string, any> & {
+interface StudyOutcome {
+  outcome_measured?: string | null;
+  key_result?: string | null;
+  citation_snippet?: string | null;
+  intervention?: string | null;
+  comparator?: string | null;
+  effect_size?: string | null;
+  p_value?: string | null;
+}
+
+interface StudyCitation {
+  doi?: string | null;
+}
+
+interface ContextStudy {
+  study_id?: string;
+  title?: string | null;
+  year?: number | null;
+  study_design?: string | null;
+  sample_size?: number | null;
+  population?: string | null;
+  outcomes?: StudyOutcome[] | null;
+  citation?: StudyCitation | null;
+  abstract_excerpt?: string | null;
+  preprint_status?: string | null;
+  review_type?: string | null;
+  source?: string | null;
+  citationCount?: number | null;
+}
+
+interface WarningItem {
+  type: string;
+  text: string;
+}
+
+interface SynthesisPayload {
+  narrative: string;
+  warnings?: WarningItem[];
+}
+
+interface SynthesisCompletionResponse {
+  choices?: Array<{
+    message?: {
+      content?: string | null;
+    };
+  }>;
+}
+
+type SupabaseClientLike = ReturnType<typeof createClient>;
+
+type TieredStudy = ContextStudy & {
   _score: number;
   _tier: "strict" | "partial";
 };
 
-function isCompleteStudy(study: any): boolean {
+function isCompleteStudy(study: ContextStudy): boolean {
   if (!study.title || !study.year) return false;
   if (study.study_design === "unknown") return false;
   if (!study.abstract_excerpt || study.abstract_excerpt.trim().length < 50) return false;
-  if (!study.outcomes || study.outcomes.length === 0) return false;
-  return study.outcomes.some((o: any) =>
+  const outcomes = Array.isArray(study.outcomes) ? study.outcomes : [];
+  if (outcomes.length === 0) return false;
+  return outcomes.some((o) =>
     o.outcome_measured && (o.effect_size || o.p_value || o.intervention || o.comparator)
   );
 }
 
-function scoreStudy(study: any, query: string): number {
+function scoreStudy(study: ContextStudy, query: string): number {
   let score = 0;
   const keywords = query.toLowerCase().split(/\s+/).filter((w: string) => w.length > 2);
-  const outcomesText = (study.outcomes || [])
-    .map((o: any) => `${o.outcome_measured} ${o.key_result || ""}`.toLowerCase())
+  const outcomes = Array.isArray(study.outcomes) ? study.outcomes : [];
+  const outcomesText = outcomes
+    .map((o) => `${o.outcome_measured || ""} ${o.key_result || ""}`.toLowerCase())
     .join(" ");
   const matches = keywords.filter((k: string) => outcomesText.includes(k)).length;
   if (keywords.length >= 2 && matches >= 2) score += 2;
@@ -38,15 +90,15 @@ function scoreStudy(study: any, query: string): number {
 
   if (study.review_type === "Meta-analysis" || study.review_type === "Systematic review") score += 1;
 
-  if (study.citationCount && study.citationCount > 0) {
+  if (typeof study.citationCount === "number" && study.citationCount > 0) {
     score += Math.min(3, Math.log2(study.citationCount));
   }
 
   return score;
 }
 
-function dedupeByStudyId(studies: any[]): any[] {
-  const byId = new Map<string, any>();
+function dedupeByStudyId(studies: ContextStudy[]): ContextStudy[] {
+  const byId = new Map<string, ContextStudy>();
   for (const study of studies || []) {
     const studyId = typeof study?.study_id === "string" ? study.study_id : null;
     if (!studyId || byId.has(studyId)) continue;
@@ -56,18 +108,18 @@ function dedupeByStudyId(studies: any[]): any[] {
 }
 
 function selectMixedContextStudies(
-  strictStudies: any[],
-  partialStudies: any[],
+  strictStudies: ContextStudy[],
+  partialStudies: ContextStudy[],
   query: string,
 ): { selected: TieredStudy[]; strict_total: number; partial_total: number } {
   const strictRanked = dedupeByStudyId(strictStudies)
-    .map((study) => ({ ...study, _score: scoreStudy(study, query), _tier: "strict" as const }))
+    .map((study): TieredStudy => ({ ...study, _score: scoreStudy(study, query), _tier: "strict" as const }))
     .sort((a, b) => b._score - a._score);
 
-  const strictIds = new Set(strictRanked.map((study) => study.study_id));
+  const strictIds = new Set(strictRanked.map((study) => study.study_id).filter((studyId): studyId is string => typeof studyId === "string"));
   const partialRanked = dedupeByStudyId(partialStudies)
-    .filter((study) => !strictIds.has(study.study_id))
-    .map((study) => ({ ...study, _score: scoreStudy(study, query), _tier: "partial" as const }))
+    .filter((study) => typeof study.study_id === "string" && !strictIds.has(study.study_id))
+    .map((study): TieredStudy => ({ ...study, _score: scoreStudy(study, query), _tier: "partial" as const }))
     .sort((a, b) => b._score - a._score);
 
   const selectedStrict = strictRanked.slice(0, SYNTHESIS_STRICT_TARGET);
@@ -97,8 +149,8 @@ function selectMixedContextStudies(
   };
 }
 
-function computeWarnings(studies: any[]): { type: string; text: string }[] {
-  const warnings: { type: string; text: string }[] = [];
+function computeWarnings(studies: ContextStudy[]): WarningItem[] {
+  const warnings: WarningItem[] = [];
 
   const preprintCount = studies.filter((s) => s.preprint_status === "Preprint").length;
   if (preprintCount > 0) {
@@ -128,7 +180,7 @@ function computeWarnings(studies: any[]): { type: string; text: string }[] {
 }
 
 async function checkRateLimit(
-  supabase: any, functionName: string, clientIp: string, maxRequests: number, windowMinutes: number
+  supabase: SupabaseClientLike, functionName: string, clientIp: string, maxRequests: number, windowMinutes: number
 ): Promise<boolean> {
   const windowStart = new Date(Date.now() - windowMinutes * 60_000).toISOString();
   const { count, error } = await supabase
@@ -141,6 +193,42 @@ async function checkRateLimit(
   if ((count || 0) >= maxRequests) return false;
   await supabase.from("rate_limits").insert({ function_name: functionName, client_ip: clientIp });
   return true;
+}
+
+interface SynthesizeRequestPayload {
+  report_id?: string;
+}
+
+function asContextStudies(value: unknown): ContextStudy[] {
+  return Array.isArray(value) ? (value as ContextStudy[]) : [];
+}
+
+function sanitizeControlChars(value: string): string {
+  let sanitized = "";
+  for (let i = 0; i < value.length; i += 1) {
+    const char = value[i];
+    const code = value.charCodeAt(i);
+    if ((code >= 0 && code <= 31) || code === 127) {
+      if (char === "\n" || char === "\r" || char === "\t") sanitized += " ";
+      continue;
+    }
+    sanitized += char;
+  }
+  return sanitized;
+}
+
+function isWarningItem(value: unknown): value is WarningItem {
+  if (!value || typeof value !== "object") return false;
+  const candidate = value as { type?: unknown; text?: unknown };
+  return typeof candidate.type === "string" && typeof candidate.text === "string";
+}
+
+function isSynthesisPayload(value: unknown): value is SynthesisPayload {
+  if (!value || typeof value !== "object") return false;
+  const candidate = value as { narrative?: unknown; warnings?: unknown };
+  if (typeof candidate.narrative !== "string") return false;
+  if (candidate.warnings === undefined) return true;
+  return Array.isArray(candidate.warnings) && candidate.warnings.every(isWarningItem);
 }
 
 serve(async (req) => {
@@ -183,7 +271,8 @@ serve(async (req) => {
     }
     const userId = userData.user.id;
 
-    const { report_id } = await req.json();
+    const requestPayload = await req.json() as SynthesizeRequestPayload;
+    const report_id = requestPayload.report_id;
 
     if (!report_id) {
       return new Response(
@@ -205,8 +294,8 @@ serve(async (req) => {
       );
     }
 
-    const allStudies = report.results as any[];
-    const allPartialStudies = Array.isArray(report.partial_results) ? (report.partial_results as any[]) : [];
+    const allStudies = asContextStudies(report.results);
+    const allPartialStudies = asContextStudies(report.partial_results);
     const queryText = (report.normalized_query || report.question || "").toLowerCase();
 
     const strictStudies = allStudies.filter(isCompleteStudy);
@@ -221,9 +310,9 @@ serve(async (req) => {
 
     // Build numbered study context
     const studyContext = studies
-      .map((s: any, i: number) => {
-        const outcomes = (s.outcomes || [])
-          .map((o: any) => {
+      .map((s, i: number) => {
+        const outcomes = (Array.isArray(s.outcomes) ? s.outcomes : [])
+          .map((o) => {
             const parts = [`  - Outcome: ${o.outcome_measured}`];
             if (o.key_result) parts.push(`    Result: ${o.key_result}`);
             if (o.intervention) parts.push(`    Intervention: ${o.intervention}`);
@@ -328,7 +417,7 @@ Return ONLY valid JSON, no markdown fences or extra text`;
       );
     }
 
-    const aiResult = await response.json();
+    const aiResult = await response.json() as SynthesisCompletionResponse;
     const rawText = aiResult.choices?.[0]?.message?.content || "";
 
     if (!rawText) {
@@ -339,7 +428,7 @@ Return ONLY valid JSON, no markdown fences or extra text`;
     }
 
     // Parse and validate the narrative output
-    let synthesisData: any;
+    let synthesisData: SynthesisPayload;
     try {
       // Strip markdown code fences if present
       let cleaned = rawText
@@ -348,14 +437,10 @@ Return ONLY valid JSON, no markdown fences or extra text`;
         .trim();
 
       // Remove control characters that break JSON.parse
-      cleaned = cleaned.replace(/[\x00-\x1F\x7F]/g, (ch: string) => {
-        // Keep newlines/tabs as spaces, strip the rest
-        if (ch === "\n" || ch === "\r" || ch === "\t") return " ";
-        return "";
-      });
+      cleaned = sanitizeControlChars(cleaned);
 
       // Find JSON boundaries
-      const jsonStart = cleaned.search(/[\{\[]/);
+      const jsonStart = cleaned.search(/[[{]/);
       const startChar = jsonStart !== -1 ? cleaned[jsonStart] : "{";
       const endChar = startChar === "[" ? "]" : "}";
       const jsonEnd = cleaned.lastIndexOf(endChar);
@@ -369,11 +454,9 @@ Return ONLY valid JSON, no markdown fences or extra text`;
       // Fix trailing commas
       jsonString = jsonString.replace(/,\s*}/g, "}").replace(/,\s*]/g, "]");
 
-      synthesisData = JSON.parse(jsonString);
-
-      if (!synthesisData.narrative || typeof synthesisData.narrative !== "string") {
-        throw new Error("Missing narrative string");
-      }
+      const parsed = JSON.parse(jsonString) as unknown;
+      if (!isSynthesisPayload(parsed)) throw new Error("Missing narrative string");
+      synthesisData = parsed;
     } catch (parseErr) {
       console.error("Failed to parse/validate synthesis JSON:", parseErr);
       console.error("Raw text (first 500 chars):", rawText.substring(0, 500));
@@ -384,8 +467,8 @@ Return ONLY valid JSON, no markdown fences or extra text`;
     }
 
     // Merge computed warnings with LLM-generated warnings
-    const llmWarnings = synthesisData.warnings || [];
-    const allWarnings = [...computedWarnings, ...llmWarnings];
+    const llmWarnings = Array.isArray(synthesisData.warnings) ? synthesisData.warnings : [];
+    const allWarnings: WarningItem[] = [...computedWarnings, ...llmWarnings];
     // Deduplicate by text similarity
     const seen = new Set<string>();
     const dedupedWarnings = allWarnings.filter((w) => {
