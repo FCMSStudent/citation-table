@@ -17,3 +17,8 @@
 **Vulnerability:** Unbounded in-memory task storage, lack of concurrency control, and race conditions in file downloads within the Python microservice.
 **Learning:** Microservices using background threads for file operations without isolation or concurrency limits are vulnerable to both DoS (resource exhaustion) and race conditions (file collision). In-memory stores must implement explicit eviction policies (e.g., FIFO) to prevent OOM.
 **Prevention:** Enforce strict Pydantic input validation (max_length, Literal types), implement a global semaphore for background thread concurrency, and use task-specific unique subdirectories for all concurrent file operations.
+
+## 2026-02-16 - [Python Microservice Authentication Unification]
+**Vulnerability:** Inconsistent authentication across microservice endpoints and information leakage via task listing and health check.
+**Learning:** Partially implemented security (protecting only the most sensitive-looking endpoint) often leaves other vectors open, such as metadata leakage via monitoring endpoints (`/api/tasks`) or resource abuse via unprotected functional endpoints. Disclosing internal paths in health checks aids attackers in mapping the server environment.
+**Prevention:** Use FastAPI dependencies to apply authentication globally or to all functional endpoints consistently. Always sanitize health check responses to remove internal environment details like directory structures.
