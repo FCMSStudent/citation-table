@@ -28,26 +28,26 @@ describe('Relevance Scoring', () => {
       expect(score).toBeGreaterThanOrEqual(2);
     });
 
-    it('should give +1 for Meta-analysis', () => {
+    it('should include review and sample-size bonuses for Meta-analysis', () => {
       const score = calculateRelevanceScore({ ...baseStudy, review_type: 'Meta-analysis' as const }, 'unrelated query terms');
-      expect(score).toBe(1);
+      expect(score).toBe(1.5);
     });
 
-    it('should give +1 for Systematic review', () => {
+    it('should include review and sample-size bonuses for Systematic review', () => {
       const score = calculateRelevanceScore({ ...baseStudy, review_type: 'Systematic review' as const }, 'unrelated query terms');
-      expect(score).toBe(1);
+      expect(score).toBe(1.5);
     });
 
-    it('should give -2 for no outcomes reported', () => {
+    it('should apply no-outcomes penalty while preserving other signals', () => {
       const study: StudyResult = {
         ...baseStudy,
         outcomes: [{ outcome_measured: 'No outcomes reported', key_result: null, citation_snippet: 'No outcomes reported', ...picoDefaults }]
       };
-      expect(calculateRelevanceScore(study, 'test query')).toBe(-2);
+      expect(calculateRelevanceScore(study, 'test query')).toBe(-0.5);
     });
 
-    it('should give -2 for empty outcomes array', () => {
-      expect(calculateRelevanceScore({ ...baseStudy, outcomes: [] }, 'test query')).toBe(-2);
+    it('should apply no-outcomes penalty for empty outcomes array', () => {
+      expect(calculateRelevanceScore({ ...baseStudy, outcomes: [] }, 'test query')).toBe(-0.5);
     });
 
     it('should combine scores correctly', () => {
@@ -56,7 +56,7 @@ describe('Relevance Scoring', () => {
         review_type: 'Meta-analysis' as const,
         outcomes: [{ outcome_measured: 'Blood pressure and diabetes outcomes', key_result: 'Improved control', citation_snippet: 'Significant improvements', ...picoDefaults }]
       };
-      expect(calculateRelevanceScore(study, 'blood pressure diabetes control')).toBe(3);
+      expect(calculateRelevanceScore(study, 'blood pressure diabetes control')).toBe(3.5);
     });
   });
 
@@ -87,9 +87,9 @@ describe('Relevance Scoring', () => {
       ];
       const sorted = sortByRelevance(studies, 'blood pressure diabetes');
       expect(sorted[0].study_id).toBe('high');
-      expect(sorted[0].relevanceScore).toBe(3);
+      expect(sorted[0].relevanceScore).toBe(3.5);
       expect(sorted[2].study_id).toBe('low');
-      expect(sorted[2].relevanceScore).toBe(-2);
+      expect(sorted[2].relevanceScore).toBe(-1);
     });
 
     it('should include relevanceScore in returned objects', () => {

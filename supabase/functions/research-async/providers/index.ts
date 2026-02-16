@@ -2,6 +2,9 @@ export { searchOpenAlex, expandOpenAlexCitationGraph } from "./openalex.ts";
 export { searchSemanticScholar } from "./semantic-scholar.ts";
 export { searchArxiv } from "./arxiv.ts";
 export { searchPubMed } from "./pubmed.ts";
+export { runProviderPipeline } from "./pipeline.ts";
+export { providerHealthSnapshot } from "./health.ts";
+export { PROVIDER_REGISTRY } from "./catalog.ts";
 
 export type { ExpansionMode, PreparedSourceQuery, OpenAlexWork, SemanticScholarPaper, UnifiedPaper } from "./types.ts";
 export { extractSearchKeywords, buildSourceQuery, resolvePreparedQuery } from "./query-builder.ts";

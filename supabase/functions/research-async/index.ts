@@ -1,10 +1,9 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.49.1";
 import { prepareQueryProcessingV2, type QueryProcessingMeta, type SearchSource } from "../_shared/query-processing.ts";
-import { searchArxiv, searchOpenAlex, searchPubMed, searchSemanticScholar, expandOpenAlexCitationGraph } from "./providers/index.ts";
+import { providerHealthSnapshot, runProviderPipeline } from "./providers/index.ts";
 import { extractSearchKeywords } from "./providers/query-builder.ts";
 import { normalizeDoi } from "./providers/normalization.ts";
-import { withTimeout } from "./providers/http.ts";
 import type { UnifiedPaper } from "./providers/types.ts";
 import {
   applyQualityFilter,
@@ -137,41 +136,6 @@ function getExtractionMaxCandidates(): number {
   const raw = Number(Deno.env.get("EXTRACTION_MAX_CANDIDATES") || 45);
   if (!Number.isFinite(raw)) return 45;
   return Math.min(60, Math.max(5, Math.trunc(raw)));
-}
-
-const PROVIDER_TIMEOUT_MS = 8_000;
-const PROVIDER_RETRIES = 2;
-const RETRIEVAL_BUDGET_MS = 26_000;
-
-function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
-async function retryProviderSearch(
-  provider: SearchSource,
-  fn: () => Promise<UnifiedPaper[]>,
-): Promise<{ papers: UnifiedPaper[]; failed: boolean; error?: string; latencyMs: number }> {
-  const started = Date.now();
-  let lastError: Error | null = null;
-
-  for (let attempt = 0; attempt <= PROVIDER_RETRIES; attempt += 1) {
-    try {
-      const papers = await withTimeout(fn(), PROVIDER_TIMEOUT_MS, provider);
-      return { papers, failed: false, latencyMs: Date.now() - started };
-    } catch (error) {
-      lastError = error instanceof Error ? error : new Error(String(error));
-      if (attempt < PROVIDER_RETRIES) {
-        await sleep(250 * (attempt + 1));
-      }
-    }
-  }
-
-  return {
-    papers: [],
-    failed: true,
-    error: lastError?.message || `${provider} failed`,
-    latencyMs: Date.now() - started,
-  };
 }
 
 function hashKey(raw: string): string {
@@ -750,13 +714,16 @@ async function runResearchPipeline(
     });
   }
 
-  const retrievalStartedAt = Date.now();
-  const providerRuns = await Promise.all([
-    retryProviderSearch("semantic_scholar", () => searchSemanticScholar(searchQuery, "balanced", sourceQueryOverrides.semantic_scholar)),
-    retryProviderSearch("openalex", () => searchOpenAlex(searchQuery, "balanced", sourceQueryOverrides.openalex)),
-    retryProviderSearch("arxiv", () => searchArxiv(searchQuery, "balanced", sourceQueryOverrides.arxiv)),
-    retryProviderSearch("pubmed", () => searchPubMed(searchQuery, "balanced", sourceQueryOverrides.pubmed)),
-  ]);
+  const {
+    coverage,
+    papersByProvider,
+    candidates: providerCandidates,
+  } = await runProviderPipeline({
+    query: searchQuery,
+    maxCandidates: requestPayload.max_candidates,
+    mode: "balanced",
+    sourceQueryOverrides,
+  });
 
   if (queryPipelineMode === "shadow" && shadowPreparedPromise) {
     try {
@@ -767,41 +734,10 @@ async function runResearchPipeline(
     }
   }
 
-  const s2Papers = providerRuns[0].papers;
-  const openAlexPapers = providerRuns[1].papers;
-  const arxivPapers = providerRuns[2].papers;
-  const pubmedPapers = providerRuns[3].papers;
-  const failedProviders = providerRuns
-    .map((run, idx) => ({ run, name: (["semantic_scholar", "openalex", "arxiv", "pubmed"] as const)[idx] }))
-    .filter((entry) => entry.run.failed)
-    .map((entry) => entry.name);
-
-  const coverage: CoverageReport = {
-    providers_queried: 4,
-    providers_failed: failedProviders.length,
-    failed_provider_names: failedProviders,
-    degraded: failedProviders.length > 0,
-  };
-
-  let providerCandidates = [...s2Papers, ...openAlexPapers, ...arxivPapers, ...pubmedPapers];
-  const retrievalElapsed = Date.now() - retrievalStartedAt;
-  const remainingBudgetMs = RETRIEVAL_BUDGET_MS - retrievalElapsed;
-
-  if (remainingBudgetMs > 1_000 && providerCandidates.length < requestPayload.max_candidates) {
-    const expansionCap = Math.min(400, requestPayload.max_candidates - providerCandidates.length);
-    if (expansionCap > 0) {
-      try {
-        const expansion = await withTimeout(
-          expandOpenAlexCitationGraph(openAlexPapers, expansionCap),
-          remainingBudgetMs,
-          "openalex-expansion",
-        );
-        providerCandidates = [...providerCandidates, ...expansion];
-      } catch (error) {
-        console.warn("[Pipeline] OpenAlex expansion skipped:", error);
-      }
-    }
-  }
+  const s2Papers = papersByProvider.semantic_scholar;
+  const openAlexPapers = papersByProvider.openalex;
+  const arxivPapers = papersByProvider.arxiv;
+  const pubmedPapers = papersByProvider.pubmed;
 
   const dedupedForLegacyFlow = deduplicateAndMerge(s2Papers, openAlexPapers, arxivPapers, pubmedPapers);
   const enrichedLegacyPapers = await enrichWithMetadata(dedupedForLegacyFlow, enrichmentContext, "research-async");
@@ -1153,55 +1089,6 @@ function getPathParts(req: Request): string[] {
     .replace(/^\/research-async\/?/, "")
     .replace(/^\/+/, "");
   return path.split("/").filter(Boolean);
-}
-
-async function providerHealthSnapshot() {
-  const checks = [
-    {
-      provider: "openalex",
-      url: "https://api.openalex.org/works?search=health&per-page=1",
-    },
-    {
-      provider: "semantic_scholar",
-      url: "https://api.semanticscholar.org/graph/v1/paper/search?query=health&limit=1&fields=paperId",
-    },
-    {
-      provider: "pubmed",
-      url: "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esearch.fcgi?db=pubmed&term=health&retmax=1&retmode=json",
-    },
-    {
-      provider: "arxiv",
-      url: "https://export.arxiv.org/api/query?search_query=all:health&max_results=1",
-    },
-  ] as const;
-
-  const status = await Promise.all(checks.map(async (check) => {
-    const started = Date.now();
-    try {
-      const response = await withTimeout(fetch(check.url), 4_000, `health-${check.provider}`);
-      return {
-        provider: check.provider,
-        healthy: response.ok,
-        latency_ms: Date.now() - started,
-        error_rate: response.ok ? 0 : 1,
-        last_error: response.ok ? null : `HTTP ${response.status}`,
-      };
-    } catch (error) {
-      return {
-        provider: check.provider,
-        healthy: false,
-        latency_ms: Date.now() - started,
-        error_rate: 1,
-        last_error: error instanceof Error ? error.message : String(error),
-      };
-    }
-  }));
-
-  return {
-    providers: status,
-    providers_queried: status.length,
-    providers_failed: status.filter((item) => !item.healthy).length,
-  };
 }
 
 // ─── Main Handler ────────────────────────────────────────────────────────────
