@@ -108,9 +108,9 @@ async function reExtractStudyFromPdf(
   doi: string,
   pdfData: ArrayBuffer,
 ): Promise<void> {
-  const openaiApiKey = Deno.env.get("OPENAI_API_KEY");
-  if (!openaiApiKey) {
-    console.log("[scihub-download] OPENAI_API_KEY not set; skipping PDF re-extraction");
+  const geminiApiKey = Deno.env.get("GOOGLE_GEMINI_API_KEY");
+  if (!geminiApiKey) {
+    console.log("[scihub-download] GOOGLE_GEMINI_API_KEY not set; skipping PDF re-extraction");
     return;
   }
 
@@ -183,14 +183,14 @@ Current extracted study JSON (update this with PDF evidence):
 ${JSON.stringify(study, null, 2)}`;
 
     try {
-      const response = await fetch("https://api.openai.com/v1/chat/completions", {
+      const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/openai/chat/completions`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          Authorization: `Bearer ${openaiApiKey}`,
+          Authorization: `Bearer ${geminiApiKey}`,
         },
         body: JSON.stringify({
-          model: "gpt-4o-mini",
+          model: "gemini-2.5-flash",
           messages: [
             { role: "system", content: systemPrompt },
             { role: "user", content: userPrompt },
@@ -202,7 +202,7 @@ ${JSON.stringify(study, null, 2)}`;
 
       if (!response.ok) {
         const errorText = await response.text();
-        console.error(`[scihub-download] OpenAI PDF re-extraction failed (${response.status}):`, errorText);
+        console.error(`[scihub-download] Gemini PDF re-extraction failed (${response.status}):`, errorText);
         continue;
       }
 

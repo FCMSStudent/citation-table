@@ -374,14 +374,14 @@ async function fetchLlmRewrite(query: string, apiKey: string, timeoutMs: number)
   ].join(" ");
 
   try {
-    const response = await fetch("https://api.openai.com/v1/chat/completions", {
+    const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/openai/chat/completions`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
         Authorization: `Bearer ${apiKey}`,
       },
       body: JSON.stringify({
-        model: "gpt-4o-mini",
+        model: "gemini-2.5-flash",
         messages: [
           { role: "system", content: systemPrompt },
           { role: "user", content: `Query: ${query}` },
@@ -483,7 +483,7 @@ export async function prepareQueryProcessingV2(query: string, options: PrepareQu
   let usedLlmFallback = false;
 
   const now = Date.now();
-  const fallbackApiKey = options.llmApiKey || getEnv("OPENAI_API_KEY") || "";
+  const fallbackApiKey = options.llmApiKey || getEnv("GOOGLE_GEMINI_API_KEY") || "";
   const shouldAttemptFallback = confidence < confidenceThreshold && !!fallbackApiKey;
 
   if (shouldAttemptFallback) {
