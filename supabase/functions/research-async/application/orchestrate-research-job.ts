@@ -4,6 +4,7 @@ import {
 } from "../../_shared/metadata-enrichment.ts";
 import { defaultSearchRequestFromQuestion, sanitizeSearchRequest, type SearchRequestPayload, type SearchResponsePayload } from "../../_shared/lit-search.ts";
 import { runResearchPipeline } from "./stages/research-pipeline-stage.ts";
+import { createStageContext, runStage, type PipelineStage, type StageResult } from "./stages/pipeline-runtime.ts";
 import {
   createExtractionRunForSearch,
   loadReportForProcessing,
@@ -15,6 +16,95 @@ import {
 import { recordQueryProcessingEvent } from "../observability/query-processing-events.ts";
 import { hashKey, type ResearchJobRecord, type StudyResult, type SupabaseClientLike } from "../domain/models/research.ts";
 import type { MetadataEnrichmentStore } from "../../_shared/metadata-enrichment-store.ts";
+
+class PersistPipelineStage implements PipelineStage<{
+  supabase: SupabaseClientLike;
+  reportId: string;
+  userId: string;
+  question: string;
+  cacheKey: string;
+  litRequest: SearchRequestPayload;
+  data: Awaited<ReturnType<typeof runResearchPipeline>>;
+}, {
+  responsePayload: SearchResponsePayload;
+}> {
+  readonly name = "PERSIST" as const;
+
+  async execute(input: {
+    supabase: SupabaseClientLike;
+    reportId: string;
+    userId: string;
+    question: string;
+    cacheKey: string;
+    litRequest: SearchRequestPayload;
+    data: Awaited<ReturnType<typeof runResearchPipeline>>;
+  }): Promise<StageResult<{ responsePayload: SearchResponsePayload }>> {
+    const responsePayload: SearchResponsePayload = {
+      search_id: input.reportId,
+      status: "completed",
+      coverage: input.data.coverage,
+      evidence_table: input.data.evidence_table,
+      brief: input.data.brief,
+      stats: input.data.stats,
+    };
+
+    const runSnapshot = await createExtractionRunForSearch(input.supabase, {
+      reportId: input.reportId,
+      userId: input.userId,
+      trigger: "initial_pipeline",
+      engine: (() => {
+        const raw = String((input.data.extraction_stats || {}).engine || "unknown").toLowerCase();
+        if (raw === "llm" || raw === "scripted" || raw === "hybrid" || raw === "manual") return raw;
+        return "unknown";
+      })(),
+      question: input.question,
+      normalizedQuery: input.data.normalized_query || null,
+      litRequest: input.litRequest,
+      litResponse: responsePayload,
+      results: input.data.results || [],
+      partialResults: input.data.partial_results || [],
+      evidenceTable: input.data.evidence_table || [],
+      brief: input.data.brief,
+      coverage: input.data.coverage,
+      stats: input.data.stats,
+      extractionStats: input.data.extraction_stats || {},
+      canonicalPapers: input.data.canonical_papers || [],
+    });
+    responsePayload.active_run_id = runSnapshot.runId;
+    responsePayload.run_version = runSnapshot.runIndex;
+
+    await persistPipelineCompletion(input.supabase, {
+      reportId: input.reportId,
+      litRequest: input.litRequest,
+      responsePayload,
+      results: input.data.results || [],
+      partialResults: input.data.partial_results || [],
+      normalizedQuery: input.data.normalized_query,
+      totalPapersSearched: input.data.total_papers_searched || 0,
+      openalexCount: input.data.openalex_count || 0,
+      semanticScholarCount: input.data.semantic_scholar_count || 0,
+      arxivCount: input.data.arxiv_count || 0,
+      pubmedCount: input.data.pubmed_count || 0,
+      runId: runSnapshot.runId,
+      runIndex: runSnapshot.runIndex,
+    });
+
+    await writeSearchCache(input.supabase, input.cacheKey, input.litRequest, responsePayload);
+    await upsertPaperCache(input.supabase, input.data.canonical_papers);
+    await recordQueryProcessingEvent(input.supabase, {
+      functionName: "research-async",
+      mode: input.data.query_pipeline_mode,
+      reportId: input.reportId,
+      originalQuery: input.question,
+      servedQuery: input.data.normalized_query || input.question,
+      normalizedQuery: input.data.normalized_query,
+      queryProcessing: input.data.query_processing,
+      userId: input.userId,
+    });
+
+    return { output: { responsePayload } };
+  }
+}
 
 export async function processPipelineJob(
   supabase: SupabaseClientLike,
@@ -59,69 +149,19 @@ export async function processPipelineJob(
     retryMax: metadataRuntime.retryMax,
     maxLatencyMs: metadataRuntime.maxLatencyMs,
   });
-
-  const responsePayload: SearchResponsePayload = {
-    search_id: reportId,
-    status: "completed",
-    coverage: data.coverage,
-    evidence_table: data.evidence_table,
-    brief: data.brief,
-    stats: data.stats,
-  };
-
-  const runSnapshot = await createExtractionRunForSearch(supabase, {
+  const stageCtx = createStageContext({
+    pipelineId: `research-persist:${reportId}`,
+    stageTimeoutsMs: { PERSIST: 20_000 },
+  });
+  await runStage(new PersistPipelineStage(), {
+    supabase,
     reportId,
     userId,
-    trigger: "initial_pipeline",
-    engine: (() => {
-      const raw = String((data.extraction_stats || {}).engine || "unknown").toLowerCase();
-      if (raw === "llm" || raw === "scripted" || raw === "hybrid" || raw === "manual") return raw;
-      return "unknown";
-    })(),
     question,
-    normalizedQuery: data.normalized_query || null,
+    cacheKey,
     litRequest,
-    litResponse: responsePayload,
-    results: data.results || [],
-    partialResults: data.partial_results || [],
-    evidenceTable: data.evidence_table || [],
-    brief: data.brief,
-    coverage: data.coverage,
-    stats: data.stats,
-    extractionStats: data.extraction_stats || {},
-    canonicalPapers: data.canonical_papers || [],
-  });
-  responsePayload.active_run_id = runSnapshot.runId;
-  responsePayload.run_version = runSnapshot.runIndex;
-
-  await persistPipelineCompletion(supabase, {
-    reportId,
-    litRequest,
-    responsePayload,
-    results: data.results || [],
-    partialResults: data.partial_results || [],
-    normalizedQuery: data.normalized_query,
-    totalPapersSearched: data.total_papers_searched || 0,
-    openalexCount: data.openalex_count || 0,
-    semanticScholarCount: data.semantic_scholar_count || 0,
-    arxivCount: data.arxiv_count || 0,
-    pubmedCount: data.pubmed_count || 0,
-    runId: runSnapshot.runId,
-    runIndex: runSnapshot.runIndex,
-  });
-
-  await writeSearchCache(supabase, cacheKey, litRequest, responsePayload);
-  await upsertPaperCache(supabase, data.canonical_papers);
-  await recordQueryProcessingEvent(supabase, {
-    functionName: "research-async",
-    mode: data.query_pipeline_mode,
-    reportId,
-    originalQuery: question,
-    servedQuery: data.normalized_query || question,
-    normalizedQuery: data.normalized_query,
-    queryProcessing: data.query_processing,
-    userId,
-  });
+    data,
+  }, stageCtx);
 
   const dois = (data.results || [])
     .map((result: StudyResult) => result.citation?.doi?.trim())

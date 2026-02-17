@@ -33,6 +33,13 @@ import type {
   PipelineResult,
   MetadataEnrichmentContext,
 } from "../../domain/models/research.ts";
+import {
+  createStageContext,
+  runStage,
+  StageError,
+  type PipelineStage,
+  type StageResult,
+} from "./pipeline-runtime.ts";
 
 function formatCitation(paper: UnifiedPaper): string {
   const authors = paper.authors.slice(0, 3).join(", ");
@@ -541,122 +548,324 @@ function canonicalToFallbackStudy(paper: CanonicalPaper): StudyResult {
   };
 }
 
-export async function runResearchPipeline(
-  question: string,
-  requestPayload: SearchRequestPayload,
-  enrichmentContext: MetadataEnrichmentContext,
-): Promise<PipelineResult> {
-  const pipelineStartedAt = Date.now();
-  const GEMINI_API_KEY = Deno.env.get("GOOGLE_GEMINI_API_KEY") || "";
-  const extractionEngine = getExtractionEngine();
-  const extractionMaxCandidates = getExtractionMaxCandidates();
-  const pdfExtractorUrl = Deno.env.get("PDF_EXTRACTOR_URL") || "";
-  const pdfExtractorBearerToken = Deno.env.get("PDF_EXTRACTOR_BEARER_TOKEN") || "";
-  const pdfParseTimeoutMs = getPdfParseTimeoutMs();
+interface StageValidated {
+  question: string;
+  requestPayload: SearchRequestPayload;
+  queryPipelineMode: QueryPipelineMode;
+  extractionEngine: ExtractionEngine;
+  extractionMaxCandidates: number;
+  geminiApiKey: string;
+  pdfExtractorUrl?: string;
+  pdfExtractorBearerToken?: string;
+  pdfParseTimeoutMs: number;
+  enrichmentContext: MetadataEnrichmentContext;
+}
 
-  console.log(`[Pipeline] Processing query="${question}" max_candidates=${requestPayload.max_candidates}`);
+interface StagePrepared extends StageValidated {
+  searchQuery: string;
+  normalizedQueryForResponse?: string;
+  queryProcessingMeta?: QueryProcessingMeta;
+  queryTermsForRanking?: string[];
+  sourceQueryOverrides: Partial<Record<SearchSource, string>>;
+  shadowPreparedPromise?: Promise<Awaited<ReturnType<typeof prepareQueryProcessingV2>>>;
+}
 
-  const queryPipelineMode = getQueryPipelineMode();
-  const { normalized: v1Normalized, wasNormalized: v1WasNormalized } = normalizeQuery(question);
-  let normalizedQueryForResponse = v1WasNormalized ? v1Normalized : undefined;
-  let searchQuery = v1WasNormalized ? v1Normalized : question;
-  let queryProcessingMeta: QueryProcessingMeta | undefined;
-  let queryTermsForRanking: string[] | undefined;
-  const sourceQueryOverrides: Partial<Record<SearchSource, string>> = {};
-  let shadowPreparedPromise: Promise<Awaited<ReturnType<typeof prepareQueryProcessingV2>>> | null = null;
+interface StageRetrieved extends StagePrepared {
+  coverage: CoverageReport;
+  papersByProvider: {
+    semantic_scholar: UnifiedPaper[];
+    openalex: UnifiedPaper[];
+    arxiv: UnifiedPaper[];
+    pubmed: UnifiedPaper[];
+  };
+  providerCandidates: UnifiedPaper[];
+  enrichedLegacyPapers: UnifiedPaper[];
+  papersWithAbstracts: UnifiedPaper[];
+}
 
-  if (queryPipelineMode === "v2") {
-    const prepared = await prepareQueryProcessingV2(question, {
-      llmApiKey: GEMINI_API_KEY || undefined,
-      fallbackTimeoutMs: 350,
-    });
-    searchQuery = prepared.search_query;
-    normalizedQueryForResponse = prepared.was_normalized ? prepared.normalized_query : undefined;
-    queryTermsForRanking = prepared.query_terms;
-    queryProcessingMeta = prepared.query_processing;
-    sourceQueryOverrides.semantic_scholar = prepared.query_processing.source_queries.semantic_scholar;
-    sourceQueryOverrides.openalex = prepared.query_processing.source_queries.openalex;
-    sourceQueryOverrides.pubmed = prepared.query_processing.source_queries.pubmed;
-    sourceQueryOverrides.arxiv = prepared.query_processing.source_queries.arxiv;
-  } else if (queryPipelineMode === "shadow") {
-    shadowPreparedPromise = prepareQueryProcessingV2(question, {
-      llmApiKey: GEMINI_API_KEY || undefined,
-      fallbackTimeoutMs: 350,
-    });
-  }
+interface StageCanonicalized extends StageRetrieved {
+  providerById: Map<string, UnifiedPaper>;
+  providerByDoi: Map<string, UnifiedPaper>;
+  canonicalCandidates: CanonicalPaper[];
+}
 
-  const {
-    coverage,
-    papersByProvider,
-    candidates: providerCandidates,
-  } = await runProviderPipeline({
-    query: searchQuery,
-    maxCandidates: requestPayload.max_candidates,
-    mode: "balanced",
-    sourceQueryOverrides,
-  });
+interface StageQualityFiltered extends StageCanonicalized {
+  filtered_count: number;
+  keptCapped: CanonicalPaper[];
+  evidence_table: SearchResponsePayload["evidence_table"];
+  brief: SearchResponsePayload["brief"];
+}
 
-  if (queryPipelineMode === "shadow" && shadowPreparedPromise) {
-    try {
-      const prepared = await shadowPreparedPromise;
-      queryProcessingMeta = prepared.query_processing;
-    } catch (error) {
-      console.warn("[Pipeline] Shadow query processing failed:", error);
+interface StageDeterministicExtracted extends StageQualityFiltered {
+  extractionStartedAt: number;
+  extractionCandidates: UnifiedPaper[];
+  extraction_input_total: number;
+  deterministicResults: Awaited<ReturnType<typeof extractStudiesDeterministic>>;
+  results: StudyResult[];
+  partial_results: StudyResult[];
+  needsLlmPrimary: boolean;
+  needsHybridLlmFallback: boolean;
+}
+
+class ValidateStage implements PipelineStage<{ question: string; requestPayload: SearchRequestPayload; enrichmentContext: MetadataEnrichmentContext }, StageValidated> {
+  readonly name = "VALIDATE" as const;
+
+  async execute(input: { question: string; requestPayload: SearchRequestPayload; enrichmentContext: MetadataEnrichmentContext }): Promise<StageResult<StageValidated>> {
+    const question = input.question.trim();
+    if (!question) throw new StageError(this.name, "VALIDATION", "Question is required");
+    if (!Number.isFinite(input.requestPayload.max_candidates) || input.requestPayload.max_candidates <= 0) {
+      throw new StageError(this.name, "VALIDATION", "max_candidates must be a positive number");
     }
+    if (!input.requestPayload.filters) throw new StageError(this.name, "VALIDATION", "filters are required");
+
+    return {
+      output: {
+        question,
+        requestPayload: input.requestPayload,
+        queryPipelineMode: getQueryPipelineMode(),
+        extractionEngine: getExtractionEngine(),
+        extractionMaxCandidates: getExtractionMaxCandidates(),
+        geminiApiKey: Deno.env.get("GOOGLE_GEMINI_API_KEY") || "",
+        pdfExtractorUrl: Deno.env.get("PDF_EXTRACTOR_URL") || undefined,
+        pdfExtractorBearerToken: Deno.env.get("PDF_EXTRACTOR_BEARER_TOKEN") || undefined,
+        pdfParseTimeoutMs: getPdfParseTimeoutMs(),
+        enrichmentContext: input.enrichmentContext,
+      },
+    };
   }
+}
 
-  const s2Papers = papersByProvider.semantic_scholar;
-  const openAlexPapers = papersByProvider.openalex;
-  const arxivPapers = papersByProvider.arxiv;
-  const pubmedPapers = papersByProvider.pubmed;
+class PrepareQueryStage implements PipelineStage<StageValidated, StagePrepared> {
+  readonly name = "PREPARE_QUERY" as const;
 
-  const dedupedForLegacyFlow = deduplicateAndMerge(s2Papers, openAlexPapers, arxivPapers, pubmedPapers);
-  const enrichedLegacyPapers = await enrichWithMetadata(dedupedForLegacyFlow, enrichmentContext, "research-async");
-  const enrichedProviderCandidates = await enrichWithMetadata(providerCandidates, enrichmentContext, "research-async");
-  const papersWithAbstracts = enrichedProviderCandidates.filter((paper) => paper.abstract && paper.abstract.length > 50);
+  async execute(input: StageValidated): Promise<StageResult<StagePrepared>> {
+    const { normalized: v1Normalized, wasNormalized: v1WasNormalized } = normalizeQuery(input.question);
+    let normalizedQueryForResponse = v1WasNormalized ? v1Normalized : undefined;
+    let searchQuery = v1WasNormalized ? v1Normalized : input.question;
+    let queryProcessingMeta: QueryProcessingMeta | undefined;
+    let queryTermsForRanking: string[] | undefined;
+    const sourceQueryOverrides: Partial<Record<SearchSource, string>> = {};
+    let shadowPreparedPromise: Promise<Awaited<ReturnType<typeof prepareQueryProcessingV2>>> | null = null;
 
-  const queryKeywords = getQueryKeywordSet(searchQuery, queryPipelineMode === "v2" ? queryTermsForRanking : undefined);
-  const rankedByQuery = [...papersWithAbstracts].sort(
-    (left, right) => scorePaperCandidate(right, queryKeywords) - scorePaperCandidate(left, queryKeywords),
-  );
-  const cappedCandidates = rankedByQuery.slice(0, requestPayload.max_candidates);
-  const providerById = new Map<string, UnifiedPaper>();
-  const providerByDoi = new Map<string, UnifiedPaper>();
-  for (const candidate of cappedCandidates) {
-    providerById.set(candidate.id, candidate);
-    const normalized = normalizeDoi(candidate.doi);
-    if (normalized && !providerByDoi.has(normalized)) providerByDoi.set(normalized, candidate);
+    if (input.queryPipelineMode === "v2") {
+      const prepared = await prepareQueryProcessingV2(input.question, {
+        llmApiKey: input.geminiApiKey || undefined,
+        fallbackTimeoutMs: 350,
+      });
+      searchQuery = prepared.search_query;
+      normalizedQueryForResponse = prepared.was_normalized ? prepared.normalized_query : undefined;
+      queryTermsForRanking = prepared.query_terms;
+      queryProcessingMeta = prepared.query_processing;
+      sourceQueryOverrides.semantic_scholar = prepared.query_processing.source_queries.semantic_scholar;
+      sourceQueryOverrides.openalex = prepared.query_processing.source_queries.openalex;
+      sourceQueryOverrides.pubmed = prepared.query_processing.source_queries.pubmed;
+      sourceQueryOverrides.arxiv = prepared.query_processing.source_queries.arxiv;
+    } else if (input.queryPipelineMode === "shadow") {
+      shadowPreparedPromise = prepareQueryProcessingV2(input.question, {
+        llmApiKey: input.geminiApiKey || undefined,
+        fallbackTimeoutMs: 350,
+      });
+    }
+
+    return {
+      output: {
+        ...input,
+        searchQuery,
+        normalizedQueryForResponse,
+        queryProcessingMeta,
+        queryTermsForRanking,
+        sourceQueryOverrides,
+        shadowPreparedPromise,
+      },
+    };
   }
+}
 
-  const canonicalCandidates = canonicalizePapers(cappedCandidates as InputPaper[]);
-  const timeframe: [number, number] = [requestPayload.filters.from_year, requestPayload.filters.to_year];
-  const { kept, filtered_count } = applyQualityFilter(canonicalCandidates, requestPayload.filters, timeframe);
-  const keptCapped = kept.slice(0, requestPayload.max_candidates);
-  const { evidence_table, brief } = buildEvidenceAndBrief(keptCapped, requestPayload.max_evidence_rows);
+class RetrieveProvidersStage implements PipelineStage<StagePrepared, StageRetrieved> {
+  readonly name = "RETRIEVE_PROVIDERS" as const;
 
-  let results: StudyResult[] = [];
-  let partial_results: StudyResult[] = [];
-  let extraction_stats: Record<string, unknown> = {};
-  let extraction_input_total = 0;
-  if (keptCapped.length > 0) {
-    const extractionCandidates = keptCapped.slice(0, extractionMaxCandidates).map((paper) => {
+  async execute(input: StagePrepared): Promise<StageResult<StageRetrieved>> {
+    const { coverage, papersByProvider, candidates: providerCandidates } = await runProviderPipeline({
+      query: input.searchQuery,
+      maxCandidates: input.requestPayload.max_candidates,
+      mode: "balanced",
+      sourceQueryOverrides: input.sourceQueryOverrides,
+    });
+
+    const s2Papers = papersByProvider.semantic_scholar;
+    const openAlexPapers = papersByProvider.openalex;
+    const arxivPapers = papersByProvider.arxiv;
+    const pubmedPapers = papersByProvider.pubmed;
+
+    const dedupedForLegacyFlow = deduplicateAndMerge(s2Papers, openAlexPapers, arxivPapers, pubmedPapers);
+    const enrichedLegacyPapers = await enrichWithMetadata(dedupedForLegacyFlow, input.enrichmentContext, "research-async");
+    const enrichedProviderCandidates = await enrichWithMetadata(providerCandidates, input.enrichmentContext, "research-async");
+    const papersWithAbstracts = enrichedProviderCandidates.filter((paper) => paper.abstract && paper.abstract.length > 50);
+
+    return {
+      output: {
+        ...input,
+        coverage,
+        papersByProvider: {
+          semantic_scholar: s2Papers,
+          openalex: openAlexPapers,
+          arxiv: arxivPapers,
+          pubmed: pubmedPapers,
+        },
+        providerCandidates: enrichedProviderCandidates,
+        enrichedLegacyPapers,
+        papersWithAbstracts,
+      },
+    };
+  }
+}
+
+class CanonicalizeStage implements PipelineStage<StageRetrieved, StageCanonicalized> {
+  readonly name = "CANONICALIZE" as const;
+
+  async execute(input: StageRetrieved): Promise<StageResult<StageCanonicalized>> {
+    const queryKeywords = getQueryKeywordSet(
+      input.searchQuery,
+      input.queryPipelineMode === "v2" ? input.queryTermsForRanking : undefined,
+    );
+    const rankedByQuery = [...input.papersWithAbstracts].sort(
+      (left, right) => scorePaperCandidate(right, queryKeywords) - scorePaperCandidate(left, queryKeywords),
+    );
+    const cappedCandidates = rankedByQuery.slice(0, input.requestPayload.max_candidates);
+    const providerById = new Map<string, UnifiedPaper>();
+    const providerByDoi = new Map<string, UnifiedPaper>();
+    for (const candidate of cappedCandidates) {
+      providerById.set(candidate.id, candidate);
+      const normalized = normalizeDoi(candidate.doi);
+      if (normalized && !providerByDoi.has(normalized)) providerByDoi.set(normalized, candidate);
+    }
+    const canonicalCandidates = canonicalizePapers(cappedCandidates as InputPaper[]);
+
+    return {
+      output: {
+        ...input,
+        providerById,
+        providerByDoi,
+        canonicalCandidates,
+      },
+    };
+  }
+}
+
+class QualityFilterStage implements PipelineStage<StageCanonicalized, StageQualityFiltered> {
+  readonly name = "QUALITY_FILTER" as const;
+
+  async execute(input: StageCanonicalized): Promise<StageResult<StageQualityFiltered>> {
+    const timeframe: [number, number] = [input.requestPayload.filters.from_year, input.requestPayload.filters.to_year];
+    const { kept, filtered_count } = applyQualityFilter(input.canonicalCandidates, input.requestPayload.filters, timeframe);
+    const keptCapped = kept.slice(0, input.requestPayload.max_candidates);
+    const { evidence_table, brief } = buildEvidenceAndBrief(keptCapped, input.requestPayload.max_evidence_rows);
+
+    return {
+      output: {
+        ...input,
+        filtered_count,
+        keptCapped,
+        evidence_table,
+        brief,
+      },
+    };
+  }
+}
+
+class DeterministicExtractStage implements PipelineStage<StageQualityFiltered, StageDeterministicExtracted> {
+  readonly name = "DETERMINISTIC_EXTRACT" as const;
+
+  async execute(input: StageQualityFiltered): Promise<StageResult<StageDeterministicExtracted>> {
+    if (input.keptCapped.length === 0) {
+      return {
+        output: {
+          ...input,
+          extractionStartedAt: Date.now(),
+          extractionCandidates: [],
+          extraction_input_total: 0,
+          deterministicResults: [],
+          results: [],
+          partial_results: [],
+          needsLlmPrimary: false,
+          needsHybridLlmFallback: false,
+        },
+      };
+    }
+
+    const extractionCandidates = input.keptCapped.slice(0, input.extractionMaxCandidates).map((paper) => {
       const base = canonicalToUnifiedPaper(paper);
-      const providerMatch = providerById.get(paper.paper_id) || (paper.doi ? providerByDoi.get(normalizeDoi(paper.doi) || "") : undefined);
+      const providerMatch = input.providerById.get(paper.paper_id)
+        || (paper.doi ? input.providerByDoi.get(normalizeDoi(paper.doi) || "") : undefined);
       if (providerMatch?.pdfUrl) base.pdfUrl = providerMatch.pdfUrl;
       if (providerMatch?.landingPageUrl) base.landingPageUrl = providerMatch.landingPageUrl;
       return base;
     });
-    extraction_input_total = extractionCandidates.length;
+    const extraction_input_total = extractionCandidates.length;
     const extractionStartedAt = Date.now();
 
-    if (extractionEngine === "llm") {
-      if (!GEMINI_API_KEY) throw new Error("GOOGLE_GEMINI_API_KEY required when EXTRACTION_ENGINE=llm");
+    if (input.extractionEngine === "llm") {
+      if (!input.geminiApiKey) {
+        throw new StageError(this.name, "VALIDATION", "GOOGLE_GEMINI_API_KEY required when EXTRACTION_ENGINE=llm");
+      }
+      return {
+        output: {
+          ...input,
+          extractionStartedAt,
+          extractionCandidates,
+          extraction_input_total,
+          deterministicResults: [],
+          results: [],
+          partial_results: [],
+          needsLlmPrimary: true,
+          needsHybridLlmFallback: false,
+        },
+      };
+    }
 
+    const deterministicInputs = extractionCandidates.map((paper) => toDeterministicInput(paper));
+    const deterministicResults = await extractStudiesDeterministic(deterministicInputs, {
+      question: input.question,
+      pdfExtractorUrl: input.pdfExtractorUrl,
+      pdfExtractorBearerToken: input.pdfExtractorBearerToken,
+      pdfParseTimeoutMs: input.pdfParseTimeoutMs,
+      batchSize: 10,
+    });
+    const deterministicMerged = mergeExtractedStudies(
+      deterministicResults.map((row) => row.study as unknown as StudyResult),
+    );
+    const deterministicTiers = applyCompletenessTiers(deterministicMerged as unknown as DeterministicStudyResult[]);
+
+    return {
+      output: {
+        ...input,
+        extractionStartedAt,
+        extractionCandidates,
+        extraction_input_total,
+        deterministicResults,
+        results: deterministicTiers.complete as unknown as StudyResult[],
+        partial_results: deterministicTiers.partial as unknown as StudyResult[],
+        needsLlmPrimary: false,
+        needsHybridLlmFallback: input.extractionEngine === "hybrid" && deterministicTiers.complete.length === 0 && Boolean(input.geminiApiKey),
+      },
+    };
+  }
+}
+
+class LlmAugmentStage implements PipelineStage<StageDeterministicExtracted, StageDeterministicExtracted & { extraction_stats: Record<string, unknown> }> {
+  readonly name = "LLM_AUGMENT" as const;
+
+  async execute(input: StageDeterministicExtracted): Promise<StageResult<StageDeterministicExtracted & { extraction_stats: Record<string, unknown> }>> {
+    let results = [...input.results];
+    let partial_results = [...input.partial_results];
+    let llmFallbackApplied = false;
+
+    if (input.needsLlmPrimary) {
       try {
         const batchSize = 15;
         const extractionBatches: Promise<StudyResult[]>[] = [];
-        for (let i = 0; i < extractionCandidates.length; i += batchSize) {
-          extractionBatches.push(extractStudyData(extractionCandidates.slice(i, i + batchSize), question, GEMINI_API_KEY));
+        for (let i = 0; i < input.extractionCandidates.length; i += batchSize) {
+          extractionBatches.push(extractStudyData(input.extractionCandidates.slice(i, i + batchSize), input.question, input.geminiApiKey));
         }
         const extracted = (await Promise.all(extractionBatches)).flat();
         const mergedByStudy = mergeExtractedStudies(extracted);
@@ -665,101 +874,156 @@ export async function runResearchPipeline(
         partial_results = tiers.partial as unknown as StudyResult[];
       } catch (error) {
         console.warn("[Pipeline] LLM extraction fallback triggered:", error);
-        partial_results = keptCapped.slice(0, 50).map(canonicalToFallbackStudy);
+        partial_results = input.keptCapped.slice(0, 50).map(canonicalToFallbackStudy);
       }
 
-      extraction_stats = {
-        total_inputs: extractionCandidates.length,
-        extracted_total: results.length + partial_results.length,
-        complete_total: results.length,
-        partial_total: partial_results.length,
-        used_pdf: 0,
-        used_abstract_fallback: 0,
-        failures: 0,
-        fallback_reasons: {},
-        engine: "llm",
-        llm_fallback_applied: false,
-        latency_ms: Date.now() - extractionStartedAt,
+      return {
+        output: {
+          ...input,
+          results,
+          partial_results,
+          extraction_stats: {
+            total_inputs: input.extractionCandidates.length,
+            extracted_total: results.length + partial_results.length,
+            complete_total: results.length,
+            partial_total: partial_results.length,
+            used_pdf: 0,
+            used_abstract_fallback: 0,
+            failures: 0,
+            fallback_reasons: {},
+            engine: "llm",
+            llm_fallback_applied: false,
+            latency_ms: Date.now() - input.extractionStartedAt,
+          },
+        },
       };
-    } else {
-      const deterministicInputs = extractionCandidates.map((paper) => toDeterministicInput(paper));
-      const deterministicResults = await extractStudiesDeterministic(deterministicInputs, {
-        question,
-        pdfExtractorUrl: pdfExtractorUrl || undefined,
-        pdfExtractorBearerToken: pdfExtractorBearerToken || undefined,
-        pdfParseTimeoutMs,
-        batchSize: 10,
-      });
-      const deterministicMerged = mergeExtractedStudies(
-        deterministicResults.map((row) => row.study as unknown as StudyResult),
-      );
-      const deterministicTiers = applyCompletenessTiers(deterministicMerged as unknown as DeterministicStudyResult[]);
-      results = deterministicTiers.complete as unknown as StudyResult[];
-      partial_results = deterministicTiers.partial as unknown as StudyResult[];
-
-      let llmFallbackApplied = false;
-      if (extractionEngine === "hybrid" && results.length === 0 && GEMINI_API_KEY) {
-        try {
-          const batchSize = 15;
-          const llmBatches: Promise<StudyResult[]>[] = [];
-          for (let i = 0; i < extractionCandidates.length; i += batchSize) {
-            llmBatches.push(extractStudyData(extractionCandidates.slice(i, i + batchSize), question, GEMINI_API_KEY));
-          }
-          const llmExtracted = (await Promise.all(llmBatches)).flat();
-          const llmMerged = mergeExtractedStudies(llmExtracted);
-          const llmTiers = applyCompletenessTiers(llmMerged as unknown as DeterministicStudyResult[]);
-          if (llmTiers.complete.length > 0) {
-            results = llmTiers.complete as unknown as StudyResult[];
-            llmFallbackApplied = true;
-          }
-        } catch (error) {
-          console.warn("[Pipeline] Hybrid LLM fallback failed:", error);
-        }
-      }
-
-      if (results.length === 0 && partial_results.length === 0) {
-        partial_results = keptCapped.slice(0, 50).map(canonicalToFallbackStudy);
-      }
-
-      extraction_stats = summarizeExtractionResults(deterministicResults, {
-        totalInputs: deterministicInputs.length,
-        completeTotal: results.length,
-        partialTotal: partial_results.length,
-        latencyMs: Date.now() - extractionStartedAt,
-        engine: extractionEngine,
-        llmFallbackApplied,
-      }) as unknown as Record<string, unknown>;
     }
+
+    if (input.needsHybridLlmFallback && input.geminiApiKey) {
+      try {
+        const batchSize = 15;
+        const llmBatches: Promise<StudyResult[]>[] = [];
+        for (let i = 0; i < input.extractionCandidates.length; i += batchSize) {
+          llmBatches.push(extractStudyData(input.extractionCandidates.slice(i, i + batchSize), input.question, input.geminiApiKey));
+        }
+        const llmExtracted = (await Promise.all(llmBatches)).flat();
+        const llmMerged = mergeExtractedStudies(llmExtracted);
+        const llmTiers = applyCompletenessTiers(llmMerged as unknown as DeterministicStudyResult[]);
+        if (llmTiers.complete.length > 0) {
+          results = llmTiers.complete as unknown as StudyResult[];
+          llmFallbackApplied = true;
+        }
+      } catch (error) {
+        console.warn("[Pipeline] Hybrid LLM fallback failed:", error);
+      }
+    }
+
+    if (results.length === 0 && partial_results.length === 0 && input.keptCapped.length > 0) {
+      partial_results = input.keptCapped.slice(0, 50).map(canonicalToFallbackStudy);
+    }
+
+    return {
+      output: {
+        ...input,
+        results,
+        partial_results,
+        extraction_stats: summarizeExtractionResults(input.deterministicResults, {
+          totalInputs: input.extractionCandidates.length,
+          completeTotal: results.length,
+          partialTotal: partial_results.length,
+          latencyMs: Date.now() - input.extractionStartedAt,
+          engine: input.extractionEngine,
+          llmFallbackApplied,
+        }) as unknown as Record<string, unknown>,
+      },
+    };
   }
+}
 
-  const stats: SearchStats = {
-    latency_ms: Date.now() - pipelineStartedAt,
-    candidates_total: canonicalCandidates.length,
-    candidates_filtered: filtered_count,
-    retrieved_total: providerCandidates.length,
-    abstract_eligible_total: papersWithAbstracts.length,
-    quality_kept_total: keptCapped.length,
-    extraction_input_total,
-    strict_complete_total: results.length,
-    partial_total: partial_results.length,
-  };
+class PersistStage implements PipelineStage<{
+  pipelineStartedAt: number;
+  state: StageDeterministicExtracted & { extraction_stats: Record<string, unknown> };
+}, PipelineResult> {
+  readonly name = "PERSIST" as const;
 
-  return {
-    results,
-    partial_results,
-    extraction_stats,
-    evidence_table,
-    brief,
-    coverage,
-    stats,
-    canonical_papers: keptCapped,
-    normalized_query: normalizedQueryForResponse,
-    total_papers_searched: enrichedLegacyPapers.length,
-    openalex_count: openAlexPapers.length,
-    semantic_scholar_count: s2Papers.length,
-    arxiv_count: arxivPapers.length,
-    pubmed_count: pubmedPapers.length,
-    query_processing: queryProcessingMeta,
-    query_pipeline_mode: queryPipelineMode,
-  };
+  async execute(input: { pipelineStartedAt: number; state: StageDeterministicExtracted & { extraction_stats: Record<string, unknown> } }): Promise<StageResult<PipelineResult>> {
+    const state = input.state;
+    const stats: SearchStats = {
+      latency_ms: Date.now() - input.pipelineStartedAt,
+      candidates_total: state.canonicalCandidates.length,
+      candidates_filtered: state.filtered_count,
+      retrieved_total: state.providerCandidates.length,
+      abstract_eligible_total: state.papersWithAbstracts.length,
+      quality_kept_total: state.keptCapped.length,
+      extraction_input_total: state.extraction_input_total,
+      strict_complete_total: state.results.length,
+      partial_total: state.partial_results.length,
+    };
+
+    return {
+      output: {
+        results: state.results,
+        partial_results: state.partial_results,
+        extraction_stats: state.extraction_stats,
+        evidence_table: state.evidence_table,
+        brief: state.brief,
+        coverage: state.coverage,
+        stats,
+        canonical_papers: state.keptCapped,
+        normalized_query: state.normalizedQueryForResponse,
+        total_papers_searched: state.enrichedLegacyPapers.length,
+        openalex_count: state.papersByProvider.openalex.length,
+        semantic_scholar_count: state.papersByProvider.semantic_scholar.length,
+        arxiv_count: state.papersByProvider.arxiv.length,
+        pubmed_count: state.papersByProvider.pubmed.length,
+        query_processing: state.queryProcessingMeta,
+        query_pipeline_mode: state.queryPipelineMode,
+      },
+    };
+  }
+}
+
+async function resolveShadowPreparedQuery(state: StageRetrieved): Promise<StageRetrieved> {
+  if (state.queryPipelineMode !== "shadow") return state;
+  if (!state.shadowPreparedPromise) return state;
+  try {
+    const prepared = await state.shadowPreparedPromise;
+    return { ...state, queryProcessingMeta: prepared.query_processing, shadowPreparedPromise: undefined };
+  } catch (error) {
+    console.warn("[Pipeline] Shadow query processing failed:", error);
+    return { ...state, shadowPreparedPromise: undefined };
+  }
+}
+
+export async function runResearchPipeline(
+  question: string,
+  requestPayload: SearchRequestPayload,
+  enrichmentContext: MetadataEnrichmentContext,
+): Promise<PipelineResult> {
+  const pipelineStartedAt = Date.now();
+  console.log(`[Pipeline] Processing query="${question}" max_candidates=${requestPayload.max_candidates}`);
+
+  const stageCtx = createStageContext({
+    pipelineId: `research:${pipelineStartedAt}`,
+    stageTimeoutsMs: {
+      VALIDATE: 2_000,
+      PREPARE_QUERY: 5_000,
+      RETRIEVE_PROVIDERS: 60_000,
+      CANONICALIZE: 5_000,
+      QUALITY_FILTER: 5_000,
+      DETERMINISTIC_EXTRACT: 120_000,
+      LLM_AUGMENT: 150_000,
+      PERSIST: 2_000,
+    },
+  });
+
+  const validated = await runStage(new ValidateStage(), { question, requestPayload, enrichmentContext }, stageCtx);
+  const prepared = await runStage(new PrepareQueryStage(), validated, stageCtx);
+  const retrievedRaw = await runStage(new RetrieveProvidersStage(), prepared, stageCtx);
+  const retrieved = await resolveShadowPreparedQuery(retrievedRaw);
+  const canonicalized = await runStage(new CanonicalizeStage(), retrieved, stageCtx);
+  const qualityFiltered = await runStage(new QualityFilterStage(), canonicalized, stageCtx);
+  const deterministicExtracted = await runStage(new DeterministicExtractStage(), qualityFiltered, stageCtx);
+  const llmAugmented = await runStage(new LlmAugmentStage(), deterministicExtracted, stageCtx);
+  return await runStage(new PersistStage(), { pipelineStartedAt, state: llmAugmented }, stageCtx);
 }
