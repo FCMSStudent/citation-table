@@ -15,3 +15,9 @@
 **Learning:** Table sorting headers should use `aria-sort` on the `<th>` element to communicate state, and the sorting button should have a dynamic `aria-label` that describes both the current state and the action of clicking (e.g., "Sort by Year (ascending). Click to sort descending"). For selection, always prefer semantic `Checkbox` components over custom icons to ensure proper roles and states are conveyed to assistive technologies.
 
 **Action:** Implement `aria-sort` and descriptive labels in sortable headers; use `Checkbox` components for row selection with labels providing row context.
+
+## 2025-05-17 - Safe State Updates for Temporary UI Feedback
+
+**Learning:** When implementing temporary UI state changes (like a "Copied" feedback state that resets after 2 seconds), always store the `setTimeout` ID in a `useRef` and clear it in a `useEffect` cleanup function. This prevents "state update on unmounted component" warnings and potential memory leaks if the user navigates away before the timer finishes.
+
+**Action:** Use `useRef` for timers in temporary UI feedback loops and ensure they are cleared on component unmount.
