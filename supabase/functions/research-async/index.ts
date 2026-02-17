@@ -1426,136 +1426,79 @@ serve(async (req) => {
       }
     }
 
-    const backgroundWork = (async () => {
-      try {
-        const data = await runResearchPipeline(question, litRequest, {
-          mode: metadataMode,
-          store: metadataStore,
-          sourceTrust: metadataSourceTrust,
-          userId,
-          reportId,
-          searchId: reportId,
-          retryMax: metadataRuntime.retryMax,
-          maxLatencyMs: metadataRuntime.maxLatencyMs,
-        });
+    // Run the pipeline inline (await) to ensure it completes before the response is sent.
+    // Using scheduleBackgroundWork/waitUntil was causing the runtime to shut down prematurely.
+    try {
+      const data = await runResearchPipeline(question, litRequest, {
+        mode: metadataMode,
+        store: metadataStore,
+        sourceTrust: metadataSourceTrust,
+        userId,
+        reportId,
+        searchId: reportId,
+        retryMax: metadataRuntime.retryMax,
+        maxLatencyMs: metadataRuntime.maxLatencyMs,
+      });
 
-        console.log(`[research-async] Pipeline complete for ${reportId}: ${(data.results || []).length} results, ${(data.partial_results || []).length} partial`);
+      console.log(`[research-async] Pipeline complete for ${reportId}: ${(data.results || []).length} results, ${(data.partial_results || []).length} partial`);
 
-        // Update report with only columns that exist in the schema
-        const { error: updateError } = await supabase
-          .from("research_reports")
-          .update({
-            status: "completed",
-            results: [...(data.results || []), ...(data.partial_results || [])],
-            normalized_query: data.normalized_query || null,
-            total_papers_searched: data.total_papers_searched || 0,
-            openalex_count: data.openalex_count || 0,
-            semantic_scholar_count: data.semantic_scholar_count || 0,
-            arxiv_count: data.arxiv_count || 0,
-            pubmed_count: data.pubmed_count || 0,
-            completed_at: new Date().toISOString(),
-          })
-          .eq("id", reportId);
+      // Update report with only columns that exist in the schema
+      const { error: updateError } = await supabase
+        .from("research_reports")
+        .update({
+          status: "completed",
+          results: [...(data.results || []), ...(data.partial_results || [])],
+          normalized_query: data.normalized_query || null,
+          total_papers_searched: data.total_papers_searched || 0,
+          openalex_count: data.openalex_count || 0,
+          semantic_scholar_count: data.semantic_scholar_count || 0,
+          arxiv_count: data.arxiv_count || 0,
+          pubmed_count: data.pubmed_count || 0,
+          completed_at: new Date().toISOString(),
+        })
+        .eq("id", reportId);
 
-        if (updateError) {
-          console.error(`[research-async] Update error for ${reportId}:`, updateError);
-          // Try a minimal update to at least mark it failed
-          await supabase
-            .from("research_reports")
-            .update({ status: "failed", error_message: `DB update failed: ${updateError.message}`, completed_at: new Date().toISOString() })
-            .eq("id", reportId);
-          return;
-        }
-
-        console.log(`[research-async] Report ${reportId} marked completed`);
-
-        // Non-critical: attempt to cache and trigger PDF downloads
-        try {
-          await writeSearchCache(supabase, cacheKey, litRequest, {
-            search_id: reportId,
-            status: "completed",
-            coverage: data.coverage,
-            evidence_table: data.evidence_table,
-            brief: data.brief,
-            stats: data.stats,
-          });
-        } catch (e) { console.warn("[research-async] Cache write skipped:", e); }
-
-        try {
-          await upsertPaperCache(supabase, data.canonical_papers);
-        } catch (e) { console.warn("[research-async] Paper cache skipped:", e); }
-
-        try {
-          await createExtractionRunForSearch(supabase, {
-            reportId,
-            userId,
-            trigger: "initial_pipeline",
-            engine: (() => {
-              const raw = String((data.extraction_stats || {}).engine || "unknown").toLowerCase();
-              if (raw === "llm" || raw === "scripted" || raw === "hybrid" || raw === "manual") return raw;
-              return "unknown";
-            })(),
-            question,
-            normalizedQuery: data.normalized_query || null,
-            litRequest,
-            litResponse: { search_id: reportId, status: "completed", coverage: data.coverage, evidence_table: data.evidence_table, brief: data.brief, stats: data.stats },
-            results: data.results || [],
-            partialResults: data.partial_results || [],
-            evidenceTable: data.evidence_table || [],
-            brief: data.brief,
-            coverage: data.coverage,
-            stats: data.stats,
-            extractionStats: data.extraction_stats || {},
-            canonicalPapers: data.canonical_papers || [],
-          });
-        } catch (e) { console.warn("[research-async] Extraction run persist skipped:", e); }
-
-        try {
-          await recordQueryProcessingEvent(supabase, {
-            functionName: "research-async",
-            mode: data.query_pipeline_mode,
-            reportId,
-            originalQuery: question,
-            servedQuery: data.normalized_query || question,
-            normalizedQuery: data.normalized_query,
-            queryProcessing: data.query_processing,
-            userId,
-          });
-        } catch (e) { console.warn("[research-async] Query event skipped:", e); }
-
-        // Trigger PDF downloads for results with DOIs
-        const dois = (data.results || [])
-          .map((result: StudyResult) => result.citation?.doi?.trim())
-          .filter((doi: string | undefined): doi is string => Boolean(doi));
-
-        if (dois.length > 0) {
-          const scihubUrl = `${supabaseUrl}/functions/v1/scihub-download`;
-          fetch(scihubUrl, {
-            method: "POST",
-            headers: {
-              "Content-Type": "application/json",
-              "Authorization": `Bearer ${Deno.env.get("SUPABASE_ANON_KEY")}`,
-            },
-            body: JSON.stringify({ report_id: reportId, dois, user_id: userId }),
-          }).catch((err) => {
-            console.error(`[research-async] Failed to trigger PDF downloads:`, err);
-          });
-        }
-      } catch (err) {
-        console.error(`[research-async] Pipeline failed for ${reportId}:`, err);
-        const errorMessage = err instanceof Error ? err.message : "An unexpected error occurred";
+      if (updateError) {
+        console.error(`[research-async] Update error for ${reportId}:`, updateError);
         await supabase
           .from("research_reports")
-          .update({
-            status: "failed",
-            error_message: errorMessage,
-            completed_at: new Date().toISOString(),
-          })
+          .update({ status: "failed", error_message: `DB update failed: ${updateError.message}`, completed_at: new Date().toISOString() })
           .eq("id", reportId);
-      }
-    })();
+      } else {
+        console.log(`[research-async] Report ${reportId} marked completed`);
 
-    scheduleBackgroundWork(backgroundWork);
+        // Non-critical post-processing
+        try { await writeSearchCache(supabase, cacheKey, litRequest, { search_id: reportId, status: "completed", coverage: data.coverage, evidence_table: data.evidence_table, brief: data.brief, stats: data.stats }); } catch (e) { console.warn("[research-async] Cache write skipped:", e); }
+        try { await upsertPaperCache(supabase, data.canonical_papers); } catch (e) { console.warn("[research-async] Paper cache skipped:", e); }
+        try {
+          await createExtractionRunForSearch(supabase, {
+            reportId, userId, trigger: "initial_pipeline",
+            engine: (() => { const raw = String((data.extraction_stats || {}).engine || "unknown").toLowerCase(); if (raw === "llm" || raw === "scripted" || raw === "hybrid" || raw === "manual") return raw; return "unknown"; })(),
+            question, normalizedQuery: data.normalized_query || null, litRequest,
+            litResponse: { search_id: reportId, status: "completed", coverage: data.coverage, evidence_table: data.evidence_table, brief: data.brief, stats: data.stats },
+            results: data.results || [], partialResults: data.partial_results || [], evidenceTable: data.evidence_table || [],
+            brief: data.brief, coverage: data.coverage, stats: data.stats, extractionStats: data.extraction_stats || {}, canonicalPapers: data.canonical_papers || [],
+          });
+        } catch (e) { console.warn("[research-async] Extraction run persist skipped:", e); }
+        try {
+          await recordQueryProcessingEvent(supabase, { functionName: "research-async", mode: data.query_pipeline_mode, reportId, originalQuery: question, servedQuery: data.normalized_query || question, normalizedQuery: data.normalized_query, queryProcessing: data.query_processing, userId });
+        } catch (e) { console.warn("[research-async] Query event skipped:", e); }
+
+        // Trigger PDF downloads
+        const dois = (data.results || []).map((result: StudyResult) => result.citation?.doi?.trim()).filter((doi: string | undefined): doi is string => Boolean(doi));
+        if (dois.length > 0) {
+          const scihubUrl = `${supabaseUrl}/functions/v1/scihub-download`;
+          fetch(scihubUrl, { method: "POST", headers: { "Content-Type": "application/json", "Authorization": `Bearer ${Deno.env.get("SUPABASE_ANON_KEY")}` }, body: JSON.stringify({ report_id: reportId, dois, user_id: userId }) }).catch((err) => console.error(`[research-async] Failed to trigger PDF downloads:`, err));
+        }
+      }
+    } catch (err) {
+      console.error(`[research-async] Pipeline failed for ${reportId}:`, err);
+      const errorMessage = err instanceof Error ? err.message : "An unexpected error occurred";
+      await supabase
+        .from("research_reports")
+        .update({ status: "failed", error_message: errorMessage, completed_at: new Date().toISOString() })
+        .eq("id", reportId);
+    }
 
     if (isLitRoute) {
       return new Response(JSON.stringify(runningSearchResponse(reportId)), {
