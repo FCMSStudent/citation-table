@@ -102,6 +102,7 @@ interface SupabaseQueryBuilder<T = unknown> extends PromiseLike<SupabaseResponse
 
 export interface SupabaseClientLike {
   from<T = unknown>(table: string): SupabaseQueryBuilder<T>;
+  rpc<T = unknown>(fn: string, params?: Record<string, unknown>): Promise<SupabaseResponse<T>>;
 }
 
 const DEFAULT_COLUMN_SET_NAME = "canonical_evidence_v1";
@@ -155,20 +156,31 @@ async function resolveDefaultColumnSetId(client: SupabaseClientLike): Promise<st
   return data.id;
 }
 
-async function getLatestRun(client: SupabaseClientLike, reportId: string): Promise<{ id: string; run_index: number } | null> {
+async function getRunByIndex(
+  client: SupabaseClientLike,
+  reportId: string,
+  runIndex: number,
+): Promise<{ id: string; run_index: number } | null> {
   const { data, error } = await client
     .from<{ id: string; run_index: number }>("extraction_runs")
     .select("id,run_index")
     .eq("report_id", reportId)
-    .order("run_index", { ascending: false })
-    .limit(1)
+    .eq("run_index", runIndex)
     .maybeSingle();
 
   if (error) {
-    throw new Error(`Failed to load latest extraction run: ${error.message}`);
+    throw new Error(`Failed to load extraction run by index: ${error.message}`);
   }
 
   return data || null;
+}
+
+async function allocateNextRunIndex(client: SupabaseClientLike, reportId: string): Promise<number> {
+  const { data, error } = await client.rpc<number>("next_run_index", { p_report_id: reportId });
+  if (error || typeof data !== "number" || !Number.isFinite(data) || data < 1) {
+    throw new Error(`Failed to allocate extraction run index: ${error?.message || "invalid response"}`);
+  }
+  return data;
 }
 
 async function loadInstructions(client: SupabaseClientLike, columnSetId: string): Promise<ColumnInstruction[]> {
@@ -324,9 +336,11 @@ export async function persistExtractionRun(
   input: PersistExtractionRunInput,
 ): Promise<PersistExtractionRunResult> {
   const columnSetId = input.columnSetId || await resolveDefaultColumnSetId(client);
-  const latestRun = await getLatestRun(client, input.reportId);
-  const runIndex = latestRun ? latestRun.run_index + 1 : 1;
-  const parentRunId = input.parentRunId === undefined ? latestRun?.id ?? null : input.parentRunId;
+  const runIndex = await allocateNextRunIndex(client, input.reportId);
+  const previousRun = runIndex > 1 && input.parentRunId === undefined
+    ? await getRunByIndex(client, input.reportId, runIndex - 1)
+    : null;
+  const parentRunId = input.parentRunId === undefined ? previousRun?.id ?? null : input.parentRunId;
 
   const { data: runInsert, error: runError } = await client
     .from<{ id: string; run_index: number }>("extraction_runs")
