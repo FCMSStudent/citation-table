@@ -283,11 +283,12 @@ serve(async (req) => {
 
     const { data: report, error: dbError } = await rlSupabase
       .from("research_reports")
-      .select("question, results, partial_results, normalized_query, narrative_synthesis, user_id")
+      .select("question, results, normalized_query, narrative_synthesis, user_id")
       .eq("id", report_id)
       .single();
 
     if (dbError || !report?.results || report.user_id !== userId) {
+      console.error("[synthesize] DB error or access denied:", dbError?.message);
       return new Response(
         JSON.stringify({ error: "Report not found" }),
         { status: 404, headers: { ...corsHeaders, "Content-Type": "application/json" } }
@@ -295,7 +296,7 @@ serve(async (req) => {
     }
 
     const allStudies = asContextStudies(report.results);
-    const allPartialStudies = asContextStudies(report.partial_results);
+    const allPartialStudies = allStudies.filter((s: ContextStudy) => !isCompleteStudy(s));
     const queryText = (report.normalized_query || report.question || "").toLowerCase();
 
     const strictStudies = allStudies.filter(isCompleteStudy);
