@@ -119,6 +119,25 @@ function normalizeQuery(query: string): { normalized: string; wasNormalized: boo
 
 type QueryPipelineMode = "v1" | "v2" | "shadow";
 type ExtractionEngine = "llm" | "scripted" | "hybrid";
+type ResearchJobStatus = "queued" | "leased" | "completed" | "dead";
+
+interface ResearchJobRecord {
+  id: string;
+  report_id: string;
+  stage: string;
+  provider: string;
+  payload: Record<string, unknown>;
+  status: ResearchJobStatus;
+  attempts: number;
+  max_attempts: number;
+  dedupe_key: string;
+  lease_owner: string | null;
+  lease_expires_at: string | null;
+  last_error: string | null;
+}
+
+const RESEARCH_JOB_STAGE_PIPELINE = "pipeline";
+const RESEARCH_JOB_PROVIDER = "research-async";
 
 function getQueryPipelineMode(): QueryPipelineMode {
   const raw = (Deno.env.get("QUERY_PIPELINE_MODE") || "shadow").toLowerCase();
@@ -903,17 +922,6 @@ async function runResearchPipeline(
   };
 }
 
-// ─── Background Work Helper ──────────────────────────────────────────────────
-
-function scheduleBackgroundWork(work: Promise<void>): void {
-  const runtime = globalThis as { EdgeRuntime?: { waitUntil?: (p: Promise<void>) => void } };
-  if (runtime.EdgeRuntime?.waitUntil) {
-    runtime.EdgeRuntime.waitUntil(work);
-  } else {
-    work.catch(console.error);
-  }
-}
-
 // ─── Rate Limiting ───────────────────────────────────────────────────────────
 
 type SupabaseClientLike = ReturnType<typeof createClient>;
@@ -1150,6 +1158,254 @@ function getPathParts(req: Request): string[] {
   return path.split("/").filter(Boolean);
 }
 
+function buildResearchJobDedupeKey(reportId: string, stage: string, provider: string): string {
+  return `${stage}:${provider}:${reportId}`;
+}
+
+async function enqueueResearchJob(
+  supabase: SupabaseClientLike,
+  params: {
+    reportId: string;
+    question: string;
+    userId: string;
+    litRequest: SearchRequestPayload;
+    cacheKey: string;
+    stage?: string;
+    provider?: string;
+    maxAttempts?: number;
+  },
+): Promise<ResearchJobRecord> {
+  const stage = params.stage || RESEARCH_JOB_STAGE_PIPELINE;
+  const provider = params.provider || RESEARCH_JOB_PROVIDER;
+  const dedupeKey = buildResearchJobDedupeKey(params.reportId, stage, provider);
+
+  const { data, error } = await supabase.rpc("research_jobs_enqueue", {
+    p_report_id: params.reportId,
+    p_stage: stage,
+    p_provider: provider,
+    p_payload: {
+      report_id: params.reportId,
+      question: params.question,
+      user_id: params.userId,
+      lit_request: params.litRequest,
+      cache_key: params.cacheKey,
+    },
+    p_dedupe_key: dedupeKey,
+    p_max_attempts: params.maxAttempts ?? 5,
+  });
+
+  if (error) {
+    throw new Error(`Failed to enqueue research job: ${error.message}`);
+  }
+
+  const row = Array.isArray(data) ? data[0] : data;
+  if (!row || typeof row !== "object") {
+    throw new Error("Failed to enqueue research job: empty response");
+  }
+
+  return row as ResearchJobRecord;
+}
+
+async function claimResearchJobs(
+  supabase: SupabaseClientLike,
+  workerId: string,
+  batchSize: number,
+  leaseSeconds: number,
+): Promise<ResearchJobRecord[]> {
+  const { data, error } = await supabase.rpc("research_jobs_claim", {
+    p_worker_id: workerId,
+    p_batch_size: batchSize,
+    p_lease_seconds: leaseSeconds,
+  });
+  if (error) {
+    throw new Error(`Failed to claim research jobs: ${error.message}`);
+  }
+  return Array.isArray(data) ? data as ResearchJobRecord[] : [];
+}
+
+async function completeResearchJob(
+  supabase: SupabaseClientLike,
+  jobId: string,
+  workerId: string,
+): Promise<ResearchJobRecord | null> {
+  const { data, error } = await supabase.rpc("research_jobs_complete", {
+    p_job_id: jobId,
+    p_worker_id: workerId,
+  });
+  if (error) {
+    throw new Error(`Failed to complete research job: ${error.message}`);
+  }
+  const row = Array.isArray(data) ? data[0] : data;
+  return (row as ResearchJobRecord | null) || null;
+}
+
+async function failResearchJob(
+  supabase: SupabaseClientLike,
+  jobId: string,
+  workerId: string,
+  errorMessage: string,
+): Promise<ResearchJobRecord | null> {
+  const { data, error } = await supabase.rpc("research_jobs_fail", {
+    p_job_id: jobId,
+    p_worker_id: workerId,
+    p_error: errorMessage,
+  });
+  if (error) {
+    throw new Error(`Failed to fail research job: ${error.message}`);
+  }
+  const row = Array.isArray(data) ? data[0] : data;
+  return (row as ResearchJobRecord | null) || null;
+}
+
+async function processPipelineJob(
+  supabase: SupabaseClientLike,
+  job: ResearchJobRecord,
+  metadataRuntime: ReturnType<typeof getMetadataEnrichmentRuntimeConfig>,
+  metadataStore: MetadataEnrichmentStore,
+  metadataSourceTrust: Record<string, number>,
+): Promise<void> {
+  const payload = (job.payload || {}) as Record<string, unknown>;
+  const reportId = job.report_id;
+  const question = typeof payload.question === "string" ? payload.question.trim() : "";
+  const userId = typeof payload.user_id === "string" ? payload.user_id : "";
+  const litRequest = sanitizeSearchRequest(
+    (payload.lit_request || defaultSearchRequestFromQuestion(question)) as Partial<SearchRequestPayload>,
+  );
+  const cacheKey = typeof payload.cache_key === "string"
+    ? payload.cache_key
+    : hashKey(JSON.stringify(litRequest));
+
+  if (!question || !userId || !reportId) {
+    throw new Error("job payload missing required fields");
+  }
+
+  const { data: report } = await supabase
+    .from("research_reports")
+    .select("id,status")
+    .eq("id", reportId)
+    .maybeSingle();
+
+  if (!report) {
+    throw new Error("report not found");
+  }
+
+  if (report.status === "completed") {
+    return;
+  }
+
+  await supabase
+    .from("research_reports")
+    .update({
+      status: "processing",
+      error_message: null,
+    })
+    .eq("id", reportId);
+
+  const metadataMode = selectEffectiveEnrichmentMode(metadataRuntime);
+  const data = await runResearchPipeline(question, litRequest, {
+    mode: metadataMode,
+    store: metadataStore,
+    sourceTrust: metadataSourceTrust,
+    userId,
+    reportId,
+    searchId: reportId,
+    retryMax: metadataRuntime.retryMax,
+    maxLatencyMs: metadataRuntime.maxLatencyMs,
+  });
+
+  const responsePayload: SearchResponsePayload = {
+    search_id: reportId,
+    status: "completed",
+    coverage: data.coverage,
+    evidence_table: data.evidence_table,
+    brief: data.brief,
+    stats: data.stats,
+  };
+
+  const runSnapshot = await createExtractionRunForSearch(supabase, {
+    reportId,
+    userId,
+    trigger: "initial_pipeline",
+    engine: (() => {
+      const raw = String((data.extraction_stats || {}).engine || "unknown").toLowerCase();
+      if (raw === "llm" || raw === "scripted" || raw === "hybrid" || raw === "manual") return raw;
+      return "unknown";
+    })(),
+    question,
+    normalizedQuery: data.normalized_query || null,
+    litRequest,
+    litResponse: responsePayload,
+    results: data.results || [],
+    partialResults: data.partial_results || [],
+    evidenceTable: data.evidence_table || [],
+    brief: data.brief,
+    coverage: data.coverage,
+    stats: data.stats,
+    extractionStats: data.extraction_stats || {},
+    canonicalPapers: data.canonical_papers || [],
+  });
+  responsePayload.active_run_id = runSnapshot.runId;
+  responsePayload.run_version = runSnapshot.runIndex;
+
+  const { error: updateError } = await supabase
+    .from("research_reports")
+    .update({
+      status: "completed",
+      results: [...(data.results || []), ...(data.partial_results || [])],
+      normalized_query: data.normalized_query || null,
+      total_papers_searched: data.total_papers_searched || 0,
+      openalex_count: data.openalex_count || 0,
+      semantic_scholar_count: data.semantic_scholar_count || 0,
+      arxiv_count: data.arxiv_count || 0,
+      pubmed_count: data.pubmed_count || 0,
+      lit_request: litRequest,
+      lit_response: responsePayload,
+      coverage_report: responsePayload.coverage,
+      evidence_table: responsePayload.evidence_table,
+      brief_json: responsePayload.brief,
+      search_stats: responsePayload.stats,
+      active_extraction_run_id: runSnapshot.runId,
+      extraction_run_count: runSnapshot.runIndex,
+      completed_at: new Date().toISOString(),
+      error_message: null,
+    })
+    .eq("id", reportId);
+
+  if (updateError) {
+    throw new Error(`DB update failed: ${updateError.message}`);
+  }
+
+  await writeSearchCache(supabase, cacheKey, litRequest, responsePayload);
+  await upsertPaperCache(supabase, data.canonical_papers);
+  await recordQueryProcessingEvent(supabase, {
+    functionName: "research-async",
+    mode: data.query_pipeline_mode,
+    reportId,
+    originalQuery: question,
+    servedQuery: data.normalized_query || question,
+    normalizedQuery: data.normalized_query,
+    queryProcessing: data.query_processing,
+    userId,
+  });
+
+  const dois = (data.results || [])
+    .map((result: StudyResult) => result.citation?.doi?.trim())
+    .filter((doi: string | undefined): doi is string => Boolean(doi));
+
+  if (dois.length > 0) {
+    const supabaseUrl = Deno.env.get("SUPABASE_URL") || "";
+    const scihubUrl = `${supabaseUrl}/functions/v1/scihub-download`;
+    fetch(scihubUrl, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Authorization": `Bearer ${Deno.env.get("SUPABASE_ANON_KEY")}`,
+      },
+      body: JSON.stringify({ report_id: reportId, dois, user_id: userId }),
+    }).catch((err) => console.error("[research-async] Failed to trigger PDF downloads:", err));
+  }
+}
+
 // ─── Main Handler ────────────────────────────────────────────────────────────
 
 serve(async (req) => {
@@ -1164,6 +1420,82 @@ serve(async (req) => {
   try {
     const pathParts = getPathParts(req);
     const isLitRoute = pathParts[0] === "v1" && pathParts[1] === "lit";
+    const isWorkerDrainRoute = req.method === "POST" && isLitRoute && pathParts[2] === "jobs" && pathParts[3] === "drain";
+
+    if (isWorkerDrainRoute) {
+      const workerToken = Deno.env.get("RESEARCH_JOB_WORKER_TOKEN");
+      const suppliedToken = req.headers.get("x-research-worker-token");
+      if (!workerToken || suppliedToken !== workerToken) {
+        return new Response(JSON.stringify({ error: "Unauthorized worker request" }), {
+          status: 401,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+
+      const body = await req.json().catch(() => ({}));
+      const batchSizeRaw = Number(body?.batch_size ?? 1);
+      const leaseSecondsRaw = Number(body?.lease_seconds ?? 120);
+      const batchSize = Number.isFinite(batchSizeRaw) ? Math.min(25, Math.max(1, Math.trunc(batchSizeRaw))) : 1;
+      const leaseSeconds = Number.isFinite(leaseSecondsRaw) ? Math.min(900, Math.max(30, Math.trunc(leaseSecondsRaw))) : 120;
+      const workerId = typeof body?.worker_id === "string" && body.worker_id.trim().length > 0
+        ? body.worker_id.trim()
+        : `research-worker-${crypto.randomUUID()}`;
+
+      const metadataRuntime = getMetadataEnrichmentRuntimeConfig();
+      const metadataStore = new MetadataEnrichmentStore(supabase);
+      const metadataSourceTrust = await metadataStore.getSourceTrustMap();
+
+      const jobs = await claimResearchJobs(supabase, workerId, batchSize, leaseSeconds);
+      let completed = 0;
+      let retried = 0;
+      let dead = 0;
+      const failures: Array<{ job_id: string; error: string }> = [];
+
+      for (const job of jobs) {
+        try {
+          await processPipelineJob(supabase, job, metadataRuntime, metadataStore, metadataSourceTrust);
+          await completeResearchJob(supabase, job.id, workerId);
+          completed += 1;
+        } catch (error) {
+          const message = error instanceof Error ? error.message : "unknown_error";
+          failures.push({ job_id: job.id, error: message });
+          const updated = await failResearchJob(supabase, job.id, workerId, message);
+
+          if (updated?.status === "dead") {
+            dead += 1;
+            await supabase
+              .from("research_reports")
+              .update({
+                status: "failed",
+                error_message: message,
+                completed_at: new Date().toISOString(),
+              })
+              .eq("id", job.report_id);
+          } else {
+            retried += 1;
+            await supabase
+              .from("research_reports")
+              .update({
+                status: "queued",
+                error_message: message,
+              })
+              .eq("id", job.report_id);
+          }
+        }
+      }
+
+      return new Response(JSON.stringify({
+        worker_id: workerId,
+        claimed: jobs.length,
+        completed,
+        retried,
+        dead,
+        failures,
+      }), {
+        status: 200,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
 
     const authHeader = req.headers.get("Authorization");
     if (!authHeader?.startsWith("Bearer ")) {
@@ -1184,10 +1516,6 @@ serve(async (req) => {
       );
     }
     const userId = userData.user.id;
-    const metadataRuntime = getMetadataEnrichmentRuntimeConfig();
-    const metadataMode = selectEffectiveEnrichmentMode(metadataRuntime);
-    const metadataStore = new MetadataEnrichmentStore(supabase);
-    const metadataSourceTrust = await metadataStore.getSourceTrustMap();
 
     if (req.method === "GET" && isLitRoute && pathParts[2] === "providers" && pathParts[3] === "health") {
       const health = await providerHealthSnapshot();
@@ -1365,7 +1693,7 @@ serve(async (req) => {
       .from("research_reports")
       .insert({
         question,
-        status: "processing",
+        status: "queued",
         user_id: userId,
       })
       .select("id")
@@ -1426,84 +1754,16 @@ serve(async (req) => {
       }
     }
 
-    // Use waitUntil for background processing — the response is returned immediately.
-    // The pipeline runs in the background and updates the report status when done.
-    const backgroundWork = (async () => {
-      try {
-        const data = await runResearchPipeline(question, litRequest, {
-          mode: metadataMode,
-          store: metadataStore,
-          sourceTrust: metadataSourceTrust,
-          userId,
-          reportId,
-          searchId: reportId,
-          retryMax: metadataRuntime.retryMax,
-          maxLatencyMs: metadataRuntime.maxLatencyMs,
-        });
-
-        console.log(`[research-async] Pipeline complete for ${reportId}: ${(data.results || []).length} results, ${(data.partial_results || []).length} partial`);
-
-        // Update report — only columns that exist in the current schema
-        const { error: updateError } = await supabase
-          .from("research_reports")
-          .update({
-            status: "completed",
-            results: [...(data.results || []), ...(data.partial_results || [])],
-            normalized_query: data.normalized_query || null,
-            total_papers_searched: data.total_papers_searched || 0,
-            openalex_count: data.openalex_count || 0,
-            semantic_scholar_count: data.semantic_scholar_count || 0,
-            arxiv_count: data.arxiv_count || 0,
-            pubmed_count: data.pubmed_count || 0,
-            completed_at: new Date().toISOString(),
-          })
-          .eq("id", reportId);
-
-        if (updateError) {
-          console.error(`[research-async] Update error for ${reportId}:`, updateError);
-          await supabase
-            .from("research_reports")
-            .update({ status: "failed", error_message: `DB update failed: ${updateError.message}`, completed_at: new Date().toISOString() })
-            .eq("id", reportId);
-          return;
-        }
-
-        console.log(`[research-async] Report ${reportId} marked completed`);
-
-        // Non-critical post-processing (all wrapped in try/catch)
-        try { await writeSearchCache(supabase, cacheKey, litRequest, { search_id: reportId, status: "completed", coverage: data.coverage, evidence_table: data.evidence_table, brief: data.brief, stats: data.stats }); } catch (e) { console.warn("[research-async] Cache write skipped:", e); }
-        try { await upsertPaperCache(supabase, data.canonical_papers); } catch (e) { console.warn("[research-async] Paper cache skipped:", e); }
-        try {
-          await createExtractionRunForSearch(supabase, {
-            reportId, userId, trigger: "initial_pipeline",
-            engine: (() => { const raw = String((data.extraction_stats || {}).engine || "unknown").toLowerCase(); if (raw === "llm" || raw === "scripted" || raw === "hybrid" || raw === "manual") return raw; return "unknown"; })(),
-            question, normalizedQuery: data.normalized_query || null, litRequest,
-            litResponse: { search_id: reportId, status: "completed", coverage: data.coverage, evidence_table: data.evidence_table, brief: data.brief, stats: data.stats },
-            results: data.results || [], partialResults: data.partial_results || [], evidenceTable: data.evidence_table || [],
-            brief: data.brief, coverage: data.coverage, stats: data.stats, extractionStats: data.extraction_stats || {}, canonicalPapers: data.canonical_papers || [],
-          });
-        } catch (e) { console.warn("[research-async] Extraction run persist skipped:", e); }
-        try {
-          await recordQueryProcessingEvent(supabase, { functionName: "research-async", mode: data.query_pipeline_mode, reportId, originalQuery: question, servedQuery: data.normalized_query || question, normalizedQuery: data.normalized_query, queryProcessing: data.query_processing, userId });
-        } catch (e) { console.warn("[research-async] Query event skipped:", e); }
-
-        // Trigger PDF downloads
-        const dois = (data.results || []).map((result: StudyResult) => result.citation?.doi?.trim()).filter((doi: string | undefined): doi is string => Boolean(doi));
-        if (dois.length > 0) {
-          const scihubUrl = `${supabaseUrl}/functions/v1/scihub-download`;
-          fetch(scihubUrl, { method: "POST", headers: { "Content-Type": "application/json", "Authorization": `Bearer ${Deno.env.get("SUPABASE_ANON_KEY")}` }, body: JSON.stringify({ report_id: reportId, dois, user_id: userId }) }).catch((err) => console.error(`[research-async] Failed to trigger PDF downloads:`, err));
-        }
-      } catch (err) {
-        console.error(`[research-async] Pipeline failed for ${reportId}:`, err);
-        const errorMessage = err instanceof Error ? err.message : "An unexpected error occurred";
-        await supabase
-          .from("research_reports")
-          .update({ status: "failed", error_message: errorMessage, completed_at: new Date().toISOString() })
-          .eq("id", reportId);
-      }
-    })();
-
-    scheduleBackgroundWork(backgroundWork);
+    await enqueueResearchJob(supabase, {
+      reportId,
+      question,
+      userId,
+      litRequest,
+      cacheKey,
+      stage: RESEARCH_JOB_STAGE_PIPELINE,
+      provider: RESEARCH_JOB_PROVIDER,
+      maxAttempts: 5,
+    });
 
     if (isLitRoute) {
       return new Response(JSON.stringify(runningSearchResponse(reportId)), {
