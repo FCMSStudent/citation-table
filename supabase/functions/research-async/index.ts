@@ -1438,111 +1438,92 @@ serve(async (req) => {
           retryMax: metadataRuntime.retryMax,
           maxLatencyMs: metadataRuntime.maxLatencyMs,
         });
-        const litResponse: SearchResponsePayload = {
-          search_id: reportId,
-          status: "completed",
-          coverage: data.coverage,
-          evidence_table: data.evidence_table,
-          brief: data.brief,
-          stats: data.stats,
-        };
-        const extractionEngine = (() => {
-          const raw = String((data.extraction_stats || {}).engine || "unknown").toLowerCase();
-          if (raw === "llm" || raw === "scripted" || raw === "hybrid" || raw === "manual") return raw;
-          return "unknown";
-        })();
-        const runSnapshot = await createExtractionRunForSearch(supabase, {
-          reportId,
-          userId,
-          trigger: "initial_pipeline",
-          engine: extractionEngine,
-          question,
-          normalizedQuery: data.normalized_query || null,
-          litRequest,
-          litResponse,
-          results: data.results || [],
-          partialResults: data.partial_results || [],
-          evidenceTable: data.evidence_table || [],
-          brief: data.brief,
-          coverage: data.coverage,
-          stats: data.stats,
-          extractionStats: data.extraction_stats || {},
-          canonicalPapers: data.canonical_papers || [],
-        });
-        litResponse.active_run_id = runSnapshot.runId;
-        litResponse.run_version = runSnapshot.runIndex;
 
+        console.log(`[research-async] Pipeline complete for ${reportId}: ${(data.results || []).length} results, ${(data.partial_results || []).length} partial`);
+
+        // Update report with only columns that exist in the schema
         const { error: updateError } = await supabase
           .from("research_reports")
           .update({
             status: "completed",
-            active_extraction_run_id: runSnapshot.runId,
-            extraction_run_count: runSnapshot.runIndex,
-            results: data.results || [],
-            partial_results: data.partial_results || [],
-            extraction_stats: data.extraction_stats || {},
+            results: [...(data.results || []), ...(data.partial_results || [])],
             normalized_query: data.normalized_query || null,
             total_papers_searched: data.total_papers_searched || 0,
             openalex_count: data.openalex_count || 0,
             semantic_scholar_count: data.semantic_scholar_count || 0,
             arxiv_count: data.arxiv_count || 0,
             pubmed_count: data.pubmed_count || 0,
-            coverage_report: data.coverage,
-            evidence_table: data.evidence_table,
-            brief_json: data.brief,
-            search_stats: data.stats,
-            lit_request: litRequest,
-            lit_response: litResponse,
             completed_at: new Date().toISOString(),
           })
           .eq("id", reportId);
 
         if (updateError) {
           console.error(`[research-async] Update error for ${reportId}:`, updateError);
+          // Try a minimal update to at least mark it failed
+          await supabase
+            .from("research_reports")
+            .update({ status: "failed", error_message: `DB update failed: ${updateError.message}`, completed_at: new Date().toISOString() })
+            .eq("id", reportId);
           return;
         }
 
-        await writeSearchCache(supabase, cacheKey, litRequest, litResponse);
-        await upsertPaperCache(supabase, data.canonical_papers);
+        console.log(`[research-async] Report ${reportId} marked completed`);
 
-        await recordQueryProcessingEvent(supabase, {
-          functionName: "research-async",
-          mode: data.query_pipeline_mode,
-          reportId,
-          originalQuery: question,
-          servedQuery: data.normalized_query || question,
-          normalizedQuery: data.normalized_query,
-          queryProcessing: data.query_processing,
-          userId,
-        });
-
-        if (metadataMode === "offline_apply") {
-          const jobPapers = (data.canonical_papers || []).map((paper) => ({
-            id: paper.paper_id,
-            title: paper.title,
-            year: paper.year,
-            authors: paper.authors,
-            venue: paper.venue,
-            doi: paper.doi,
-            citationCount: paper.citation_count,
-            journal: paper.venue,
-            source: paper.provenance?.[0]?.provider || "unknown",
-          }));
-
-          await metadataStore.enqueueJob({
-            stack: "supabase_edge",
-            report_id: reportId,
+        // Non-critical: attempt to cache and trigger PDF downloads
+        try {
+          await writeSearchCache(supabase, cacheKey, litRequest, {
             search_id: reportId,
-            user_id: userId,
-            payload: {
-              function_name: "research-async",
-              mode: "offline_apply",
-              report_id: reportId,
-              papers: jobPapers,
-            },
+            status: "completed",
+            coverage: data.coverage,
+            evidence_table: data.evidence_table,
+            brief: data.brief,
+            stats: data.stats,
           });
-        }
+        } catch (e) { console.warn("[research-async] Cache write skipped:", e); }
 
+        try {
+          await upsertPaperCache(supabase, data.canonical_papers);
+        } catch (e) { console.warn("[research-async] Paper cache skipped:", e); }
+
+        try {
+          await createExtractionRunForSearch(supabase, {
+            reportId,
+            userId,
+            trigger: "initial_pipeline",
+            engine: (() => {
+              const raw = String((data.extraction_stats || {}).engine || "unknown").toLowerCase();
+              if (raw === "llm" || raw === "scripted" || raw === "hybrid" || raw === "manual") return raw;
+              return "unknown";
+            })(),
+            question,
+            normalizedQuery: data.normalized_query || null,
+            litRequest,
+            litResponse: { search_id: reportId, status: "completed", coverage: data.coverage, evidence_table: data.evidence_table, brief: data.brief, stats: data.stats },
+            results: data.results || [],
+            partialResults: data.partial_results || [],
+            evidenceTable: data.evidence_table || [],
+            brief: data.brief,
+            coverage: data.coverage,
+            stats: data.stats,
+            extractionStats: data.extraction_stats || {},
+            canonicalPapers: data.canonical_papers || [],
+          });
+        } catch (e) { console.warn("[research-async] Extraction run persist skipped:", e); }
+
+        try {
+          await recordQueryProcessingEvent(supabase, {
+            functionName: "research-async",
+            mode: data.query_pipeline_mode,
+            reportId,
+            originalQuery: question,
+            servedQuery: data.normalized_query || question,
+            normalizedQuery: data.normalized_query,
+            queryProcessing: data.query_processing,
+            userId,
+          });
+        } catch (e) { console.warn("[research-async] Query event skipped:", e); }
+
+        // Trigger PDF downloads for results with DOIs
         const dois = (data.results || [])
           .map((result: StudyResult) => result.citation?.doi?.trim())
           .filter((doi: string | undefined): doi is string => Boolean(doi));
@@ -1561,6 +1542,7 @@ serve(async (req) => {
           });
         }
       } catch (err) {
+        console.error(`[research-async] Pipeline failed for ${reportId}:`, err);
         const errorMessage = err instanceof Error ? err.message : "An unexpected error occurred";
         await supabase
           .from("research_reports")
