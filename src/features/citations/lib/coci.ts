@@ -27,22 +27,25 @@ export interface CociResponse {
  * @throws Error if the request fails or VITE_SUPABASE_URL is not configured
  */
 export async function fetchCociForDoi(doi: string): Promise<CociResponse> {
-  const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
+  const { supabase } = await import("@/integrations/supabase/client");
   
-  if (!supabaseUrl) {
-    throw new Error(
-      "VITE_SUPABASE_URL is not configured. Please set it in your .env.local file."
-    );
+  const { data: { session } } = await supabase.auth.getSession();
+  if (!session?.access_token) {
+    throw new Error("Authentication required. Please sign in to use citation lookup.");
   }
 
-  // Optional: include API key if available (for rate limiting, analytics, etc.)
-  // Check multiple possible env var names for compatibility with different configurations
+  const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
+  if (!supabaseUrl) {
+    throw new Error("VITE_SUPABASE_URL is not configured. Please set it in your .env.local file.");
+  }
+
   const apiKey = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY || 
                  import.meta.env.VITE_SUPABASE_PUBLISHABLE_DEFAULT_KEY ||
                  import.meta.env.VITE_SUPABASE_ANON_KEY;
 
   const headers: Record<string, string> = {
     "Content-Type": "application/json",
+    "Authorization": `Bearer ${session.access_token}`,
   };
 
   if (apiKey) {
@@ -56,9 +59,7 @@ export async function fetchCociForDoi(doi: string): Promise<CociResponse> {
 
   if (!response.ok) {
     const errorText = await response.text();
-    throw new Error(
-      `Failed to fetch COCI data (${response.status}): ${errorText}`
-    );
+    throw new Error(`Failed to fetch COCI data (${response.status}): ${errorText}`);
   }
 
   return response.json();
