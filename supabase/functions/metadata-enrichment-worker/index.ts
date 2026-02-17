@@ -35,9 +35,9 @@ function buildEnrichedMap(results: EnrichmentResult[]): Map<string, EnrichmentIn
 }
 
 function applyReportUpdates(
-  existingResults: any[],
+  existingResults: Record<string, unknown>[],
   enrichedMap: Map<string, EnrichmentInputPaper>,
-): { updated: any[]; changed: number } {
+): { updated: Record<string, unknown>[]; changed: number } {
   let changed = 0;
 
   const updated = existingResults.map((study) => {
@@ -154,9 +154,12 @@ serve(async (req) => {
   let requestedStack: MetadataEnrichmentJobRecord["stack"] = "supabase_edge";
 
   if (req.method === "POST") {
+    // Security: generic error handling for body parsing to avoid information leakage
     const body = await req.json().catch(() => ({}));
     if (body?.batch_size !== undefined) {
       requestedBatchSize = parsePositiveInt(String(body.batch_size), defaultBatchSize);
+      // Security: Add an upper bound to batch size to prevent resource abuse (DoS)
+      requestedBatchSize = Math.min(requestedBatchSize, 100);
     }
     if (body?.stack === "supabase_edge" || body?.stack === "python_api" || body?.stack === "backfill") {
       requestedStack = body.stack;
