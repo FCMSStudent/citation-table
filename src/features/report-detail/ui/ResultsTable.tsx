@@ -217,7 +217,12 @@ const StudyRow = memo(({
   const firstOutcomeResult = study.outcomes?.find((o) => o.key_result)?.key_result || '—';
   const openAlexUrl = normalizeOpenAlexStudyUrl(study.citation.openalex_id);
   const doiUrl = study.citation.doi ? sanitizeUrl(`https://doi.org/${study.citation.doi}`) : null;
-  const expandedIndices = useMemo(() => new Set(expandedSnippetIndices.split(',')), [expandedSnippetIndices]);
+
+  // Perf: Avoid creating a Set with an empty string if expandedSnippetIndices is empty.
+  const expandedIndices = useMemo(() => {
+    if (!expandedSnippetIndices) return new Set<string>();
+    return new Set(expandedSnippetIndices.split(','));
+  }, [expandedSnippetIndices]);
 
   return (
     <Fragment>
@@ -506,12 +511,43 @@ export function ResultsTable({
     [mainStudies, currentPage],
   );
 
+  // Perf: Pre-calculate the expanded snippet indices for all studies in a single pass.
+  // This reduces complexity from O(R*S) to O(S+R) by avoiding repeated Set->Array conversions and filters.
+  const expandedIndicesByStudy = useMemo(() => {
+    const map = new Map<string, string[]>();
+    for (const key of expandedSnippets) {
+      const lastDashIndex = key.lastIndexOf('-');
+      if (lastDashIndex === -1) continue;
+      const studyId = key.slice(0, lastDashIndex);
+      const snippetIndex = key.slice(lastDashIndex + 1);
+
+      let indices = map.get(studyId);
+      if (!indices) {
+        indices = [];
+        map.set(studyId, indices);
+      }
+      indices.push(snippetIndex);
+    }
+
+    const finalMap = new Map<string, string>();
+    for (const [studyId, indices] of map.entries()) {
+      finalMap.set(studyId, indices.join(','));
+    }
+    return finalMap;
+  }, [expandedSnippets]);
+
   const startItem = mainStudies.length === 0 ? 0 : (currentPage - 1) * PAGE_SIZE + 1;
   const endItem = Math.min(currentPage * PAGE_SIZE, mainStudies.length);
 
   const summaryData = useMemo(() => {
     const claimsSource = (briefSentences || []).slice(0, 3);
-    const studyById = new Map(mainStudies.map((study) => [study.study_id, study]));
+
+    // Perf: Build studyById map once in a simple loop to avoid intermediate array allocation.
+    const studyById = new Map<string, ScoredStudy>();
+    for (const study of mainStudies) {
+      studyById.set(study.study_id, study);
+    }
+
     const numberByStudyId = new Map<string, number>();
     const references: SummaryReference[] = [];
 
@@ -950,10 +986,7 @@ export function ResultsTable({
                     onToggle={toggleRow}
                     highlightedStudyId={highlightedStudyId}
                     pdf={study.citation.doi ? pdfsByDoi[study.citation.doi] : undefined}
-                    expandedSnippetIndices={Array.from(expandedSnippets)
-                      .filter(id => id.startsWith(`${study.study_id}-`))
-                      .map(id => id.split('-').pop())
-                      .join(',')}
+                    expandedSnippetIndices={expandedIndicesByStudy.get(study.study_id) || ''}
                     onToggleSnippet={toggleSnippet}
                   />
                 ))}
