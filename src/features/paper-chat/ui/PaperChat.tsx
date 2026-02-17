@@ -1,13 +1,13 @@
 import { useState, useRef, useEffect } from 'react';
 import ReactMarkdown from 'react-markdown';
 import { MessageCircle, Send, Trash2, AlertCircle, Bot, User, Sparkles } from 'lucide-react';
-import { Button } from '@/shared/ui/button';
-import { Textarea } from '@/shared/ui/textarea';
+import { Button } from '@/shared/ui/Button';
+import { Textarea } from '@/shared/ui/Textarea';
 import { usePaperChat } from '@/features/paper-chat/model/usePaperChat';
 import {
   Dialog,
   DialogContent,
-} from '@/shared/ui/dialog';
+} from '@/shared/ui/Dialog';
 
 interface PaperChatProps {
   reportId: string;

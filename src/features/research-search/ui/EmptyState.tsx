@@ -1,6 +1,6 @@
 import { FileSearch, Table2, Quote } from 'lucide-react';
-import { FeatureCard } from '@/shared/ui/feature-card';
-import { IconBox } from '@/shared/ui/icon-box';
+import { FeatureCard } from '@/shared/ui/FeatureCard';
+import { IconBox } from '@/shared/ui/IconBox';
 import { BookOpen } from 'lucide-react';
 
 export function EmptyState() {

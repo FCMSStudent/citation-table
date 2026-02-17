@@ -7,7 +7,7 @@ import { SearchProgress } from '@/features/report-detail/ui/SearchProgress';
 import { ResultsTable } from '@/features/report-detail/ui/ResultsTable';
 import { PaperChat } from '@/features/paper-chat/ui/PaperChat';
 import { AddStudyDialog } from '@/features/study-management/ui/AddStudyDialog';
-import { Skeleton } from '@/shared/ui/skeleton';
+import { Skeleton } from '@/shared/ui/Skeleton';
 import type { StudyResult } from '@/shared/types/research';
 import { cn } from '@/shared/lib/utils';
 

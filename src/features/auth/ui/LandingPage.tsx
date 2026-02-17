@@ -1,9 +1,9 @@
 import { Link } from 'react-router-dom';
 import { Search, FileText, Shield, ArrowRight } from 'lucide-react';
-import { Button } from '@/shared/ui/button';
-import { PageShell } from '@/shared/ui/page-shell';
-import { PageHeader } from '@/shared/ui/page-header';
-import { FeatureCard } from '@/shared/ui/feature-card';
+import { Button } from '@/shared/ui/Button';
+import { PageShell } from '@/shared/ui/PageShell';
+import { PageHeader } from '@/shared/ui/PageHeader';
+import { FeatureCard } from '@/shared/ui/FeatureCard';
 
 const Landing = () => {
   return (

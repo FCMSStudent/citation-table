@@ -1,7 +1,7 @@
 import * as React from "react";
 import { cn } from "@/shared/lib/utils";
 import type { LucideIcon } from "lucide-react";
-import { IconBox } from "./icon-box";
+import { IconBox } from "./IconBox";
 
 interface FeatureCardProps {
   icon: LucideIcon;

@@ -22,14 +22,14 @@ import type {
   StudyResult,
 } from '@/shared/types/research';
 import { NarrativeSynthesis } from './NarrativeSynthesis';
-import { Button } from '@/shared/ui/button';
-import { Badge } from '@/shared/ui/badge';
-import { Switch } from '@/shared/ui/switch';
-import { Input } from '@/shared/ui/input';
-import { Tabs, TabsList, TabsTrigger } from '@/shared/ui/tabs';
-import { Popover, PopoverContent, PopoverTrigger } from '@/shared/ui/popover';
-import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/shared/ui/collapsible';
-import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/shared/ui/dropdown-menu';
+import { Button } from '@/shared/ui/Button';
+import { Badge } from '@/shared/ui/Badge';
+import { Switch } from '@/shared/ui/Switch';
+import { Input } from '@/shared/ui/Input';
+import { Tabs, TabsList, TabsTrigger } from '@/shared/ui/Tabs';
+import { Popover, PopoverContent, PopoverTrigger } from '@/shared/ui/Popover';
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/shared/ui/Collapsible';
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/shared/ui/DropdownMenu';
 import { downloadRISFile } from '@/shared/lib/risExport';
 import { downloadCSV } from '@/shared/lib/csvExport';
 import { downloadPaperCSV } from '@/shared/lib/csvPaperExport';
@@ -89,11 +89,11 @@ interface SummaryReference {
 const PAGE_SIZE = 25;
 const FILTER_DEBOUNCE_MS = 200;
 
-function getPreferencesKey(reportId?: string): string {
+function getReportPreferencesStorageKey(reportId?: string): string {
   return `report-view-preferences:${reportId || 'default'}`;
 }
 
-function loadPreferences(reportId?: string): ReportViewPreferences {
+function loadReportViewPreferences(reportId?: string): ReportViewPreferences {
   const defaults: ReportViewPreferences = {
     activeTab: 'summary',
     sortBy: 'relevance',
@@ -103,7 +103,7 @@ function loadPreferences(reportId?: string): ReportViewPreferences {
   };
 
   try {
-    const raw = localStorage.getItem(getPreferencesKey(reportId));
+    const raw = localStorage.getItem(getReportPreferencesStorageKey(reportId));
     if (!raw) return defaults;
     const parsed = JSON.parse(raw) as Partial<ReportViewPreferences>;
     return {
@@ -130,19 +130,19 @@ function trackReportEvent(name: string, payload: Record<string, unknown> = {}) {
   }
 }
 
-function getFirstAuthor(citation: string | null | undefined): string {
+function extractCitationFirstAuthor(citation: string | null | undefined): string {
   if (!citation) return 'Unknown';
   const firstPart = citation.split(',')[0] || citation;
   return firstPart.replace(/\set al\.?$/i, '').trim();
 }
 
-function normalizeOpenAlexUrl(value: string | null | undefined): string | null {
+function normalizeOpenAlexStudyUrl(value: string | null | undefined): string | null {
   if (!value) return null;
   if (/^https?:\/\//i.test(value)) return sanitizeUrl(value);
   return sanitizeUrl(`https://openalex.org/${value}`);
 }
 
-function buildSearchBlob(study: StudyResult): string {
+function buildStudySearchBlob(study: StudyResult): string {
   const outcomesText = (study.outcomes || [])
     .map((o) => `${o.outcome_measured || ''} ${o.key_result || ''} ${o.citation_snippet || ''}`)
     .join(' ');
@@ -162,16 +162,16 @@ function buildSearchBlob(study: StudyResult): string {
 
 const searchBlobCache = new WeakMap<StudyResult, string>();
 
-function getSearchBlob(study: StudyResult): string {
+function getCachedStudySearchBlob(study: StudyResult): string {
   const cached = searchBlobCache.get(study);
   if (cached !== undefined) return cached;
-  const blob = buildSearchBlob(study);
+  const blob = buildStudySearchBlob(study);
   // Perf: cache the lowercased search blob to avoid recomputation on filter/sort changes.
   searchBlobCache.set(study, blob);
   return blob;
 }
 
-function matchesStudyDesign(study: StudyResult, design: StudyDesignFilter): boolean {
+function matchesReportStudyDesignFilter(study: StudyResult, design: StudyDesignFilter): boolean {
   if (design === 'all') return true;
   if (design === 'meta') return study.review_type === 'Meta-analysis';
   if (design === 'review') return study.study_design === 'review' || study.review_type === 'Systematic review';
@@ -181,7 +181,7 @@ function matchesStudyDesign(study: StudyResult, design: StudyDesignFilter): bool
   return study.study_design === 'unknown';
 }
 
-function buildPageWindow(current: number, total: number, windowSize = 5): number[] {
+function buildReportPaginationWindow(current: number, total: number, windowSize = 5): number[] {
   if (total <= 0) return [];
   const clampedCurrent = Math.min(Math.max(current, 1), total);
   const half = Math.floor(windowSize / 2);
@@ -215,7 +215,7 @@ const StudyRow = memo(({
   onToggleSnippet,
 }: StudyRowProps) => {
   const firstOutcomeResult = study.outcomes?.find((o) => o.key_result)?.key_result || '—';
-  const openAlexUrl = normalizeOpenAlexUrl(study.citation.openalex_id);
+  const openAlexUrl = normalizeOpenAlexStudyUrl(study.citation.openalex_id);
   const doiUrl = study.citation.doi ? sanitizeUrl(`https://doi.org/${study.citation.doi}`) : null;
   const expandedIndices = useMemo(() => new Set(expandedSnippetIndices.split(',')), [expandedSnippetIndices]);
 
@@ -404,7 +404,7 @@ export function ResultsTable({
   }, [totalInputStudies, reportId]);
 
   useEffect(() => {
-    const prefs = loadPreferences(reportId);
+    const prefs = loadReportViewPreferences(reportId);
     setViewMode(prefs.activeTab);
     setSortBy(prefs.sortBy);
     setStudyDesign(prefs.studyDesign);
@@ -423,7 +423,7 @@ export function ResultsTable({
       explicitOnly,
       localFind: findInput,
     };
-    localStorage.setItem(getPreferencesKey(reportId), JSON.stringify(payload));
+    localStorage.setItem(getReportPreferencesStorageKey(reportId), JSON.stringify(payload));
   }, [prefsLoaded, viewMode, sortBy, studyDesign, explicitOnly, findInput, reportId]);
 
   useEffect(() => {
@@ -476,13 +476,13 @@ export function ResultsTable({
     const excluded: ScoredStudy[] = [];
 
     for (const study of sorted) {
-      if (!matchesStudyDesign(study, studyDesign)) continue;
+      if (!matchesReportStudyDesignFilter(study, studyDesign)) continue;
 
       const outcomesText = getOutcomeText(study);
       const isExplicitMatch = (study.outcomes?.length || 0) > 0 && !outcomesText.includes('no outcomes reported');
       if (explicitOnly && !isExplicitMatch) continue;
 
-      if (debouncedFind && !getSearchBlob(study).includes(debouncedFind)) continue;
+      if (debouncedFind && !getCachedStudySearchBlob(study).includes(debouncedFind)) continue;
 
       // Single-pass separation into main and excluded (low-value) studies.
       if (isLowValueStudy(study, study.relevanceScore)) {
@@ -530,7 +530,7 @@ export function ResultsTable({
           references.push({
             number,
             studyId,
-            label: `${getFirstAuthor(study.citation.formatted)} (${study.year})`,
+            label: `${extractCitationFirstAuthor(study.citation.formatted)} (${study.year})`,
             title: study.title,
           });
         }
@@ -653,7 +653,7 @@ export function ResultsTable({
 
   if (totalInputStudies === 0) return null;
 
-  const pageWindow = buildPageWindow(currentPage, totalPages, 5);
+  const pageWindow = buildReportPaginationWindow(currentPage, totalPages, 5);
 
   return (
     <div className="w-full animate-fade-in">

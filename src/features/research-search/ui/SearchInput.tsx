@@ -1,6 +1,6 @@
 import { useState, FormEvent } from 'react';
 import { Search, Loader2 } from 'lucide-react';
-import { Button } from '@/shared/ui/button';
+import { Button } from '@/shared/ui/Button';
 
 interface SearchInputProps {
   onSearch: (question: string) => void;

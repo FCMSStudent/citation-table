@@ -3,10 +3,10 @@ import { ArrowLeft, FileText, LogOut } from 'lucide-react';
 import { ReportCard } from '@/features/reports-list/ui/ReportCard';
 import { useReports } from '@/entities/report/model/useReports';
 import { useAuth } from '@/features/auth/model/useAuth';
-import { Skeleton } from '@/shared/ui/skeleton';
-import { Button } from '@/shared/ui/button';
-import { PageShell } from '@/shared/ui/page-shell';
-import { PageHeader } from '@/shared/ui/page-header';
+import { Skeleton } from '@/shared/ui/Skeleton';
+import { Button } from '@/shared/ui/Button';
+import { PageShell } from '@/shared/ui/PageShell';
+import { PageHeader } from '@/shared/ui/PageHeader';
 
 const Reports = () => {
   const { signOut } = useAuth();

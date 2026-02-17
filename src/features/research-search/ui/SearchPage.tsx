@@ -5,9 +5,9 @@ import { EmptyState } from '@/features/research-search/ui/EmptyState';
 import { useResearch } from '@/features/research-search/model/useResearch';
 import { useAuth } from '@/features/auth/model/useAuth';
 import { FileText, LogOut } from 'lucide-react';
-import { Button } from '@/shared/ui/button';
-import { PageShell } from '@/shared/ui/page-shell';
-import { PageHeader } from '@/shared/ui/page-header';
+import { Button } from '@/shared/ui/Button';
+import { PageShell } from '@/shared/ui/PageShell';
+import { PageHeader } from '@/shared/ui/PageHeader';
 
 const Index = () => {
   const { user, signOut } = useAuth();

@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { Loader2, Search, Brain, FileText, CheckCircle2, AlertCircle } from 'lucide-react';
-import { Progress } from '@/shared/ui/progress';
+import { Progress } from '@/shared/ui/Progress';
 
 interface SearchProgressProps {
   status: 'processing' | 'completed' | 'failed';

@@ -2,11 +2,11 @@ import { useState, useEffect, useCallback } from 'react';
 import type { ReactNode } from 'react';
 import { RefreshCw, Sparkles, AlertCircle, AlertTriangle } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
-import { Button } from '@/shared/ui/button';
-import { Badge } from '@/shared/ui/badge';
-import { Skeleton } from '@/shared/ui/skeleton';
-import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/shared/ui/tooltip';
-import { Popover, PopoverContent, PopoverTrigger } from '@/shared/ui/popover';
+import { Button } from '@/shared/ui/Button';
+import { Badge } from '@/shared/ui/Badge';
+import { Skeleton } from '@/shared/ui/Skeleton';
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/shared/ui/Tooltip';
+import { Popover, PopoverContent, PopoverTrigger } from '@/shared/ui/Popover';
 import { getSupabase } from '@/integrations/supabase/fallback';
 import type { StudyResult, SynthesisData, SynthesisWarning, NarrativeSynthesisData } from '@/shared/types/research';
 

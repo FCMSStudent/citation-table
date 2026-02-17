@@ -1,6 +1,6 @@
 import { Link } from 'react-router-dom';
 import { Clock, CheckCircle2, AlertCircle, Loader2, ArrowRight } from 'lucide-react';
-import { Badge } from '@/shared/ui/badge';
+import { Badge } from '@/shared/ui/Badge';
 
 interface ReportCardProps {
   id: string;

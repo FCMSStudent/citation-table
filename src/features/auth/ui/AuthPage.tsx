@@ -3,12 +3,12 @@ import { Navigate } from 'react-router-dom';
 import { BookOpen, Mail, Lock, Loader2 } from 'lucide-react';
 import { useAuth } from '@/features/auth/model/useAuth';
 import { lovable } from '@/integrations/lovable/index';
-import { Button } from '@/shared/ui/button';
-import { Input } from '@/shared/ui/input';
-import { Label } from '@/shared/ui/label';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/shared/ui/card';
-import { PageShell } from '@/shared/ui/page-shell';
-import { IconBox } from '@/shared/ui/icon-box';
+import { Button } from '@/shared/ui/Button';
+import { Input } from '@/shared/ui/Input';
+import { Label } from '@/shared/ui/Label';
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/shared/ui/Card';
+import { PageShell } from '@/shared/ui/PageShell';
+import { IconBox } from '@/shared/ui/IconBox';
 
 const Auth = () => {
   const { user, isLoading: authLoading, signUp, signIn, signInAsGuest } = useAuth();
