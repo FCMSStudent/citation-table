@@ -9,7 +9,9 @@ import {
   createExtractionRunForSearch,
   loadReportForProcessing,
   markReportProcessing,
+  normalizeQueryForCache,
   persistPipelineCompletion,
+  resolveQueryCacheTtlHours,
   upsertPaperCache,
   writeSearchCache,
 } from "../infrastructure/repositories/research-repository.ts";
@@ -24,6 +26,11 @@ class PersistPipelineStage implements PipelineStage<{
   userId: string;
   question: string;
   cacheKey: string;
+  providerHash?: string;
+  pipelineVersionId?: string | null;
+  seed?: number;
+  runInputHash?: string;
+  configSnapshot?: Record<string, unknown>;
   litRequest: SearchRequestPayload;
   data: Awaited<ReturnType<typeof runResearchPipeline>>;
 }, {
@@ -37,6 +44,11 @@ class PersistPipelineStage implements PipelineStage<{
     userId: string;
     question: string;
     cacheKey: string;
+    providerHash?: string;
+    pipelineVersionId?: string | null;
+    seed?: number;
+    runInputHash?: string;
+    configSnapshot?: Record<string, unknown>;
     litRequest: SearchRequestPayload;
     data: Awaited<ReturnType<typeof runResearchPipeline>>;
   }): Promise<StageResult<{ responsePayload: SearchResponsePayload }>> {
@@ -73,6 +85,11 @@ class PersistPipelineStage implements PipelineStage<{
       promptHash: input.data.extraction_metadata?.prompt_hash ?? null,
       model: input.data.extraction_metadata?.model ?? null,
       deterministicFlag: Boolean(input.data.extraction_metadata?.deterministic_flag),
+      pipelineVersionId: input.pipelineVersionId ?? null,
+      seed: input.seed ?? 0,
+      inputHash: input.runInputHash || hashKey(JSON.stringify({ question: input.question, litRequest: input.litRequest })),
+      outputHash: hashKey(JSON.stringify(input.data)),
+      configSnapshot: input.configSnapshot || {},
       canonicalPapers: input.data.canonical_papers || [],
     });
     responsePayload.active_run_id = runSnapshot.runId;
@@ -94,7 +111,11 @@ class PersistPipelineStage implements PipelineStage<{
       runIndex: runSnapshot.runIndex,
     });
 
-    await writeSearchCache(input.supabase, input.cacheKey, input.litRequest, responsePayload);
+    await writeSearchCache(input.supabase, input.cacheKey, input.litRequest, responsePayload, {
+      normalizedQuery: normalizeQueryForCache(input.data.normalized_query || input.question),
+      providerHash: input.providerHash,
+      ttlHours: resolveQueryCacheTtlHours(),
+    });
     await upsertPaperCache(input.supabase, input.data.canonical_papers);
     await recordQueryProcessingEvent(input.supabase, {
       functionName: "research-async",
@@ -128,6 +149,15 @@ export async function processPipelineJob(
   const cacheKey = typeof payload.cache_key === "string"
     ? payload.cache_key
     : hashKey(JSON.stringify(litRequest));
+  const providerHash = typeof payload.provider_hash === "string" ? payload.provider_hash : undefined;
+  const pipelineVersionId = typeof payload.pipeline_version_id === "string" ? payload.pipeline_version_id : null;
+  const seed = Number.isFinite(Number(payload.seed)) ? Math.trunc(Number(payload.seed)) : 0;
+  const runInputHash = typeof payload.run_input_hash === "string"
+    ? payload.run_input_hash
+    : hashKey(JSON.stringify({ question, litRequest, seed }));
+  const configSnapshot = (payload.config_snapshot && typeof payload.config_snapshot === "object")
+    ? payload.config_snapshot as Record<string, unknown>
+    : {};
 
   if (!question || !userId || !reportId) {
     throw new Error("job payload missing required fields");
@@ -177,6 +207,11 @@ export async function processPipelineJob(
     userId,
     question,
     cacheKey,
+    providerHash,
+    pipelineVersionId,
+    seed,
+    runInputHash,
+    configSnapshot,
     litRequest,
     data,
   }, stageCtx);

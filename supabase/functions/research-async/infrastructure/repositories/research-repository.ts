@@ -49,18 +49,53 @@ export async function checkRateLimit(
 export async function readCachedSearch(
   supabase: SupabaseClientLike,
   cacheKey: string,
+  normalizedQuery?: string,
+  providerHash?: string,
 ): Promise<SearchResponsePayload | null> {
   const nowIso = new Date().toISOString();
-  const { data, error } = await supabase
-    .from("lit_query_cache")
-    .select("response_payload")
-    .eq("cache_key", cacheKey)
-    .gt("expires_at", nowIso)
-    .maybeSingle();
+  let data: { cache_key?: string; response_payload?: unknown; hit_count?: number } | null = null;
+  let error: { message: string } | null = null;
+
+  if (normalizedQuery && providerHash) {
+    const byFingerprint = await supabase
+      .from("lit_query_cache")
+      .select("cache_key,response_payload,hit_count")
+      .eq("normalized_query", normalizedQuery)
+      .eq("provider_hash", providerHash)
+      .gt("expires_at", nowIso)
+      .order("updated_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    data = byFingerprint.data as { cache_key?: string; response_payload?: unknown; hit_count?: number } | null;
+    error = byFingerprint.error as { message: string } | null;
+  }
+
+  if (!data && !error) {
+    const byLegacyKey = await supabase
+      .from("lit_query_cache")
+      .select("cache_key,response_payload,hit_count")
+      .eq("cache_key", cacheKey)
+      .gt("expires_at", nowIso)
+      .maybeSingle();
+    data = byLegacyKey.data as { cache_key?: string; response_payload?: unknown; hit_count?: number } | null;
+    error = byLegacyKey.error as { message: string } | null;
+  }
 
   if (error) {
     console.warn("[cache] read failed:", error.message);
     return null;
+  }
+
+  if (data) {
+    await supabase
+      .from("lit_query_cache")
+      .update({
+        hit_count: (data.hit_count || 0) + 1,
+        last_hit_at: nowIso,
+      })
+      .eq("cache_key", data.cache_key || cacheKey)
+      .then(() => undefined)
+      .catch(() => undefined);
   }
 
   return (data?.response_payload as SearchResponsePayload) || null;
@@ -71,10 +106,20 @@ export async function writeSearchCache(
   cacheKey: string,
   requestPayload: SearchRequestPayload,
   responsePayload: SearchResponsePayload,
+  options?: {
+    normalizedQuery?: string;
+    providerHash?: string;
+    ttlHours?: number;
+  },
 ): Promise<void> {
-  const expiresAt = new Date(Date.now() + 6 * 60 * 60_000).toISOString();
+  const ttlHours = Math.min(24, Math.max(6, Math.trunc(options?.ttlHours ?? 12)));
+  const expiresAt = new Date(Date.now() + ttlHours * 60 * 60_000).toISOString();
   const { error } = await supabase.from("lit_query_cache").upsert({
     cache_key: cacheKey,
+    normalized_query: options?.normalizedQuery ?? null,
+    provider_hash: options?.providerHash ?? null,
+    cache_version: "v2",
+    ttl_hours: ttlHours,
     request_payload: requestPayload,
     response_payload: responsePayload,
     expires_at: expiresAt,
@@ -109,6 +154,13 @@ export async function createExtractionRunForSearch(
     promptHash?: string | null;
     model?: string | null;
     deterministicFlag?: boolean;
+    pipelineVersionId?: string | null;
+    seed?: number;
+    inputHash?: string | null;
+    outputHash?: string | null;
+    configSnapshot?: Record<string, unknown>;
+    promptManifestHash?: string | null;
+    extractorBundleHash?: string | null;
   },
 ): Promise<{ runId: string; runIndex: number }> {
   const persisted = await persistExtractionRun(supabase, {
@@ -132,6 +184,13 @@ export async function createExtractionRunForSearch(
     promptHash: params.promptHash ?? null,
     model: params.model ?? null,
     deterministicFlag: Boolean(params.deterministicFlag),
+    pipelineVersionId: params.pipelineVersionId ?? null,
+    seed: params.seed ?? null,
+    inputHash: params.inputHash ?? null,
+    outputHash: params.outputHash ?? null,
+    configSnapshot: params.configSnapshot ?? {},
+    promptManifestHash: params.promptManifestHash ?? null,
+    extractorBundleHash: params.extractorBundleHash ?? null,
     canonicalPapers: params.canonicalPapers || [],
     completedAt: new Date().toISOString(),
   });
@@ -160,30 +219,33 @@ export async function enqueueResearchJob(
   supabase: SupabaseClientLike,
   params: {
     reportId: string;
-    question: string;
-    userId: string;
-    litRequest: SearchRequestPayload;
-    cacheKey: string;
+    question?: string;
+    userId?: string;
+    litRequest?: SearchRequestPayload;
+    cacheKey?: string;
     stage?: string;
     provider?: string;
     maxAttempts?: number;
+    inputHash?: string;
+    payload?: Record<string, unknown>;
   },
 ): Promise<ResearchJobRecord> {
   const stage = params.stage || RESEARCH_JOB_STAGE_PIPELINE;
   const provider = params.provider || RESEARCH_JOB_PROVIDER;
-  const dedupeKey = buildResearchJobDedupeKey(params.reportId, stage, provider);
+  const dedupeKey = buildResearchJobDedupeKey(params.reportId, stage, provider, params.inputHash);
+  const payload = params.payload || {
+    report_id: params.reportId,
+    question: params.question,
+    user_id: params.userId,
+    lit_request: params.litRequest,
+    cache_key: params.cacheKey,
+  };
 
   const { data, error } = await supabase.rpc("research_jobs_enqueue", {
     p_report_id: params.reportId,
     p_stage: stage,
     p_provider: provider,
-    p_payload: {
-      report_id: params.reportId,
-      question: params.question,
-      user_id: params.userId,
-      lit_request: params.litRequest,
-      cache_key: params.cacheKey,
-    },
+    p_payload: payload,
     p_dedupe_key: dedupeKey,
     p_max_attempts: params.maxAttempts ?? 5,
   });
@@ -261,8 +323,36 @@ export function buildLitRequest(rawBody: unknown, isLitRoute: boolean): { litReq
   return { litRequest, question };
 }
 
-export function buildCacheKey(litRequest: SearchRequestPayload): string {
-  return hashKey(JSON.stringify(litRequest));
+export function buildCacheKey(litRequest: SearchRequestPayload, providerHash?: string): string {
+  const normalizedQuery = normalizeQueryForCache(litRequest.query);
+  const providerHashValue = providerHash || buildProviderHash();
+  return hashKey(JSON.stringify({
+    normalized_query: normalizedQuery,
+    provider_hash: providerHashValue,
+    domain: litRequest.domain,
+    filters: litRequest.filters,
+    max_candidates: litRequest.max_candidates,
+  }));
+}
+
+export function normalizeQueryForCache(query: string): string {
+  return (query || "")
+    .toLowerCase()
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+export function buildProviderHash(providerNames?: string[]): string {
+  const providers = Array.isArray(providerNames) && providerNames.length > 0
+    ? providerNames
+    : ["openalex", "semantic_scholar", "arxiv", "pubmed"];
+  return hashKey(JSON.stringify([...providers].sort()));
+}
+
+export function resolveQueryCacheTtlHours(): number {
+  const raw = Number(Deno.env.get("QUERY_CACHE_TTL_HOURS") || 12);
+  if (!Number.isFinite(raw)) return 12;
+  return Math.min(24, Math.max(6, Math.trunc(raw)));
 }
 
 export async function createQueuedReport(

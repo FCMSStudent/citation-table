@@ -46,7 +46,8 @@ describe("research provider: openalex", () => {
     });
     vi.stubGlobal("fetch", fetchMock);
 
-    const papers = await searchOpenAlex("blood pressure", "balanced");
+    const result = await searchOpenAlex("blood pressure", "balanced");
+    const papers = result.papers;
 
     expect(fetchMock).toHaveBeenCalledTimes(1);
     const searchUrl = String(fetchMock.mock.calls[0][0]);

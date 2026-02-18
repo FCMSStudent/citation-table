@@ -3,13 +3,19 @@ import { searchArxiv } from "./arxiv.ts";
 import { searchOpenAlex } from "./openalex.ts";
 import { searchPubMed } from "./pubmed.ts";
 import { searchSemanticScholar } from "./semantic-scholar.ts";
-import type { ExpansionMode, ProviderAdapter, ProviderSearchResponse, UnifiedPaper } from "./types.ts";
+import type {
+  ExpansionMode,
+  ProviderAdapter,
+  ProviderHttpErrorLike,
+  ProviderQueryResult,
+  ProviderSearchResponse,
+} from "./types.ts";
 
 export type ProviderSearchFn = (
   query: string,
   mode: ExpansionMode,
   precompiledQuery?: string,
-) => Promise<UnifiedPaper[]>;
+) => Promise<ProviderQueryResult>;
 
 interface ProviderDescriptor {
   name: SearchSource;
@@ -21,23 +27,73 @@ function toProviderAdapter(descriptor: ProviderDescriptor): ProviderAdapter {
   return {
     name: descriptor.name,
     healthUrl: descriptor.healthUrl,
-    async search(query: string, mode: ExpansionMode, precompiledQuery?: string): Promise<ProviderSearchResponse> {
+    async search(
+      query: string,
+      mode: ExpansionMode,
+      precompiledQuery?: string,
+      context?: Parameters<ProviderAdapter["search"]>[3],
+    ): Promise<ProviderSearchResponse> {
       const startedAt = Date.now();
+      const startedIso = new Date().toISOString();
       try {
-        const papers = await descriptor.search(query, mode, precompiledQuery);
+        await context?.runtime?.beforeCall(descriptor.name);
+        const result = await descriptor.search(query, mode, precompiledQuery);
+        const latencyMs = Date.now() - startedAt;
+        await context?.runtime?.afterCall(descriptor.name, {
+          success: true,
+          statusCode: result.statusCode,
+          retryAfterSeconds: result.retryAfterSeconds,
+          retryCount: result.retryCount,
+          latencyMs,
+        });
+        await context?.onProviderSpan?.({
+          provider: descriptor.name,
+          startedAt: startedIso,
+          endedAt: new Date().toISOString(),
+          durationMs: latencyMs,
+          success: true,
+          retryCount: result.retryCount || 0,
+          statusCode: result.statusCode,
+        });
         return {
-          papers,
-          latencyMs: Date.now() - startedAt,
+          papers: result.papers,
+          latencyMs,
           degraded: false,
+          retryCount: result.retryCount,
+          statusCode: result.statusCode,
+          retryAfterSeconds: result.retryAfterSeconds,
         };
       } catch (error) {
+        const err = error as ProviderHttpErrorLike;
         const message = error instanceof Error ? error.message : String(error);
+        const latencyMs = Date.now() - startedAt;
+        await context?.runtime?.afterCall(descriptor.name, {
+          success: false,
+          statusCode: err?.status,
+          retryAfterSeconds: err?.retryAfterSeconds ?? null,
+          latencyMs,
+          error: message,
+        }).catch((runtimeError) => {
+          console.warn(`[Provider:${descriptor.name}] runtime state update failed`, runtimeError);
+        });
+        await context?.onProviderSpan?.({
+          provider: descriptor.name,
+          startedAt: startedIso,
+          endedAt: new Date().toISOString(),
+          durationMs: latencyMs,
+          success: false,
+          retryCount: 0,
+          statusCode: err?.status,
+          error: message,
+        }).catch(() => undefined);
         console.error(`[Provider:${descriptor.name}] Search failed`, error);
         return {
           papers: [],
-          latencyMs: Date.now() - startedAt,
+          latencyMs,
           degraded: true,
           error: message,
+          statusCode: err?.status,
+          retryAfterSeconds: err?.retryAfterSeconds ?? null,
         };
       }
     },

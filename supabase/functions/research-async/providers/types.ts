@@ -67,6 +67,9 @@ export interface ProviderSearchResponse {
   latencyMs: number;
   degraded: boolean;
   error?: string;
+  retryCount?: number;
+  statusCode?: number;
+  retryAfterSeconds?: number | null;
 }
 
 export interface ProviderAdapter {
@@ -76,5 +79,43 @@ export interface ProviderAdapter {
     query: string,
     mode: ExpansionMode,
     precompiledQuery?: string,
+    context?: {
+      runtime?: {
+        beforeCall: (provider: SearchSource) => Promise<void>;
+        afterCall: (
+          provider: SearchSource,
+          result: {
+            success: boolean;
+            statusCode?: number;
+            retryAfterSeconds?: number | null;
+            retryCount?: number;
+            latencyMs: number;
+            error?: string;
+          },
+        ) => Promise<void>;
+      };
+      onProviderSpan?: (event: {
+        provider: SearchSource;
+        startedAt: string;
+        endedAt: string;
+        durationMs: number;
+        success: boolean;
+        retryCount: number;
+        statusCode?: number;
+        error?: string;
+      }) => Promise<void>;
+    },
   ) => Promise<ProviderSearchResponse>;
+}
+
+export interface ProviderQueryResult {
+  papers: UnifiedPaper[];
+  retryCount: number;
+  statusCode?: number;
+  retryAfterSeconds?: number | null;
+}
+
+export interface ProviderHttpErrorLike extends Error {
+  status?: number;
+  retryAfterSeconds?: number | null;
 }

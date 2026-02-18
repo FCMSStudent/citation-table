@@ -5,9 +5,10 @@ declare const Deno: {
   };
 };
 import type { ExpansionMode, OpenAlexWork, UnifiedPaper } from "./types.ts";
+import type { ProviderQueryResult } from "./types.ts";
 import { resolvePreparedQuery } from "./query-builder.ts";
 import { normalizeDoi, reconstructAbstract } from "./normalization.ts";
-import { fetchWithRetry } from "./http.ts";
+import { fetchWithRetry, HttpStatusError, parseRetryAfterSeconds } from "./http.ts";
 
 const OPENALEX_PROVIDER_TIMEOUT_MS = 8_000;
 const OPENALEX_PROVIDER_RETRIES = 4;
@@ -60,7 +61,7 @@ export async function searchOpenAlex(
   query: string,
   mode: ExpansionMode = "balanced",
   precompiledQuery?: string,
-): Promise<UnifiedPaper[]> {
+): Promise<ProviderQueryResult> {
   const prepared = resolvePreparedQuery(query, "openalex", mode, precompiledQuery);
   const apiKey = Deno.env.get("OPENALEX_API_KEY");
   const url = new URL("https://api.openalex.org/works");
@@ -79,6 +80,7 @@ export async function searchOpenAlex(
     `[OpenAlex] Searching original="${prepared.originalKeywordQuery}" expanded="${prepared.expandedKeywordQuery}" api="${prepared.apiQuery}"`,
   );
 
+  let retryCount = 0;
   const response = await fetchWithRetry(
     url.toString(),
     { headers: buildOpenAlexHeaders() },
@@ -87,19 +89,29 @@ export async function searchOpenAlex(
       timeoutMs: OPENALEX_PROVIDER_TIMEOUT_MS,
       maxRetries: OPENALEX_PROVIDER_RETRIES,
       onRetry: ({ attempt, delayMs, reason }) => {
+        retryCount = attempt;
         console.warn(`[OpenAlex] Retry #${attempt} in ${delayMs}ms (${reason})`);
       },
     },
   );
 
   if (!response.ok) {
-    throw new Error(`[OpenAlex] API error ${response.status}`);
+    throw new HttpStatusError(
+      `[OpenAlex] API error ${response.status}`,
+      response.status,
+      parseRetryAfterSeconds(response.headers.get("retry-after")),
+    );
   }
 
   const data = await response.json() as OpenAlexListResponse;
   const works: OpenAlexWork[] = data.results || [];
   console.log(`[OpenAlex] Found ${works.length} papers`);
-  return works.map((work, idx) => toUnifiedFromOpenAlex(work, 1 / (idx + 1)));
+  return {
+    papers: works.map((work, idx) => toUnifiedFromOpenAlex(work, 1 / (idx + 1))),
+    retryCount,
+    statusCode: response.status,
+    retryAfterSeconds: null,
+  };
 }
 
 export async function expandOpenAlexCitationGraph(
@@ -157,7 +169,11 @@ export async function expandOpenAlexCitationGraph(
       },
     );
     if (!response.ok) {
-      throw new Error(`[OpenAlex] Expansion API error ${response.status}`);
+      throw new HttpStatusError(
+        `[OpenAlex] Expansion API error ${response.status}`,
+        response.status,
+        parseRetryAfterSeconds(response.headers.get("retry-after")),
+      );
     }
 
     const payload = await response.json() as OpenAlexListResponse;

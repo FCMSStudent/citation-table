@@ -46,7 +46,8 @@ describe("research provider: semantic scholar", () => {
     });
     vi.stubGlobal("fetch", fetchMock);
 
-    const papers = await searchSemanticScholar("trial outcomes", "balanced");
+    const result = await searchSemanticScholar("trial outcomes", "balanced");
+    const papers = result.papers;
 
     expect(fetchMock).toHaveBeenCalledTimes(1);
     expect(fetchMock.mock.calls[0][1]?.headers).toMatchObject({ "x-api-key": "s2-key" });

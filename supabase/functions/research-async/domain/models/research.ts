@@ -48,6 +48,14 @@ export interface StudyResult {
 export type QueryPipelineMode = "v1" | "v2" | "shadow";
 export type ExtractionEngine = "llm" | "scripted" | "hybrid";
 export type ResearchJobStatus = "queued" | "leased" | "completed" | "dead";
+export type ResearchQueueStage =
+  | "ingest_provider"
+  | "normalize"
+  | "dedupe"
+  | "quality_filter"
+  | "deterministic_extract"
+  | "llm_augment"
+  | "compile_report";
 
 export interface ResearchJobRecord {
   id: string;
@@ -155,6 +163,22 @@ export interface WorkerDrainResult {
 }
 
 export const RESEARCH_JOB_STAGE_PIPELINE = "pipeline";
+export const RESEARCH_QUEUE_STAGE_INGEST_PROVIDER: ResearchQueueStage = "ingest_provider";
+export const RESEARCH_QUEUE_STAGE_NORMALIZE: ResearchQueueStage = "normalize";
+export const RESEARCH_QUEUE_STAGE_DEDUPE: ResearchQueueStage = "dedupe";
+export const RESEARCH_QUEUE_STAGE_QUALITY_FILTER: ResearchQueueStage = "quality_filter";
+export const RESEARCH_QUEUE_STAGE_DETERMINISTIC_EXTRACT: ResearchQueueStage = "deterministic_extract";
+export const RESEARCH_QUEUE_STAGE_LLM_AUGMENT: ResearchQueueStage = "llm_augment";
+export const RESEARCH_QUEUE_STAGE_COMPILE_REPORT: ResearchQueueStage = "compile_report";
+export const RESEARCH_QUEUE_STAGE_SEQUENCE: readonly ResearchQueueStage[] = [
+  RESEARCH_QUEUE_STAGE_INGEST_PROVIDER,
+  RESEARCH_QUEUE_STAGE_NORMALIZE,
+  RESEARCH_QUEUE_STAGE_DEDUPE,
+  RESEARCH_QUEUE_STAGE_QUALITY_FILTER,
+  RESEARCH_QUEUE_STAGE_DETERMINISTIC_EXTRACT,
+  RESEARCH_QUEUE_STAGE_LLM_AUGMENT,
+  RESEARCH_QUEUE_STAGE_COMPILE_REPORT,
+] as const;
 export const RESEARCH_JOB_PROVIDER = "research-async";
 
 export const corsHeaders = {
@@ -237,8 +261,10 @@ export function mapReportToSearchResponse(report: {
   };
 }
 
-export function buildResearchJobDedupeKey(reportId: string, stage: string, provider: string): string {
-  return `${stage}:${provider}:${reportId}`;
+export function buildResearchJobDedupeKey(reportId: string, stage: string, provider: string, inputHash?: string): string {
+  return inputHash
+    ? `${stage}:${provider}:${reportId}:${inputHash}`
+    : `${stage}:${provider}:${reportId}`;
 }
 
 export type { SearchRequestPayload, SearchResponsePayload, SearchStats, CoverageReport, CanonicalPaper };

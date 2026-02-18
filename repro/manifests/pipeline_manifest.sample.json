@@ -1,0 +1,7 @@
+{
+  "deterministic_extractor_version": "deterministic_first_v1",
+  "llm_model": "gemini-2.5-flash",
+  "query_pipeline_mode": "shadow",
+  "extraction_engine": "hybrid",
+  "provider_profile": ["openalex", "semantic_scholar", "arxiv", "pubmed"]
+}

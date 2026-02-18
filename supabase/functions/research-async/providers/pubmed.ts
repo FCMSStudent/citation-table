@@ -4,9 +4,9 @@ declare const Deno: {
     get(name: string): string | undefined;
   };
 };
-import type { ExpansionMode, UnifiedPaper } from "./types.ts";
+import type { ExpansionMode, ProviderQueryResult, UnifiedPaper } from "./types.ts";
 import { resolvePreparedQuery } from "./query-builder.ts";
-import { fetchWithRetry, sleep } from "./http.ts";
+import { fetchWithRetry, HttpStatusError, parseRetryAfterSeconds, sleep } from "./http.ts";
 
 const PUBMED_BASE_URL = "https://eutils.ncbi.nlm.nih.gov/entrez/eutils";
 const PUBMED_TIMEOUT_MS = 8_000;
@@ -41,7 +41,7 @@ export async function searchPubMed(
   query: string,
   mode: ExpansionMode = "balanced",
   precompiledQuery?: string,
-): Promise<UnifiedPaper[]> {
+): Promise<ProviderQueryResult> {
   const prepared = resolvePreparedQuery(query, "pubmed", mode, precompiledQuery);
   if (!prepared.apiQuery) return [];
 
@@ -54,6 +54,7 @@ export async function searchPubMed(
   const hasApiKey = Boolean(ncbiApiKey);
   const rateLimit = createRateLimiter(getPubMedMinIntervalMs(hasApiKey));
   if (ncbiApiKey) console.log("[PubMed] Using NCBI API key for enhanced rate limits");
+  let retryCount = 0;
 
   const esearchParams = buildPubMedParams(
     {
@@ -74,12 +75,17 @@ export async function searchPubMed(
       timeoutMs: PUBMED_TIMEOUT_MS,
       maxRetries: PUBMED_MAX_RETRIES,
       onRetry: ({ attempt, delayMs, reason }) => {
+        retryCount += 1;
         console.warn(`[PubMed] ESearch retry #${attempt} in ${delayMs}ms (${reason})`);
       },
     },
   );
   if (!esearchRes.ok) {
-    throw new Error(`[PubMed] ESearch API error ${esearchRes.status}`);
+    throw new HttpStatusError(
+      `[PubMed] ESearch API error ${esearchRes.status}`,
+      esearchRes.status,
+      parseRetryAfterSeconds(esearchRes.headers.get("retry-after")),
+    );
   }
 
   const esearchData = await esearchRes.json();
@@ -89,7 +95,12 @@ export async function searchPubMed(
   const pmids: string[] = esearchData?.esearchresult?.idlist || [];
   if (pmids.length === 0) {
     console.log("[PubMed] No results found");
-    return [];
+    return {
+      papers: [],
+      retryCount,
+      statusCode: esearchRes.status,
+      retryAfterSeconds: null,
+    };
   }
   console.log(`[PubMed] ESearch returned ${pmids.length} PMIDs`);
 
@@ -112,12 +123,17 @@ export async function searchPubMed(
       timeoutMs: PUBMED_TIMEOUT_MS,
       maxRetries: PUBMED_MAX_RETRIES,
       onRetry: ({ attempt, delayMs, reason }) => {
+        retryCount += 1;
         console.warn(`[PubMed] EFetch retry #${attempt} in ${delayMs}ms (${reason})`);
       },
     },
   );
   if (!efetchRes.ok) {
-    throw new Error(`[PubMed] EFetch API error ${efetchRes.status}`);
+    throw new HttpStatusError(
+      `[PubMed] EFetch API error ${efetchRes.status}`,
+      efetchRes.status,
+      parseRetryAfterSeconds(efetchRes.headers.get("retry-after")),
+    );
   }
 
   const xmlText = await efetchRes.text();
@@ -191,5 +207,10 @@ export async function searchPubMed(
   }
 
   console.log(`[PubMed] Found ${papers.length} papers`);
-  return papers;
+  return {
+    papers,
+    retryCount,
+    statusCode: efetchRes.status,
+    retryAfterSeconds: null,
+  };
 }

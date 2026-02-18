@@ -11,7 +11,11 @@
     "preview": "vite preview",
     "test": "vitest run",
     "test:watch": "vitest",
-    "test:coverage-hooks": "vitest run --coverage"
+    "test:coverage-hooks": "vitest run --coverage",
+    "phase3:loadtest": "node repro/scripts/load_test_harness.mjs",
+    "phase3:eval": "bash repro/scripts/run_eval.sh",
+    "phase3:replay": "node repro/scripts/replay_validator.mjs",
+    "phase3:validate": "node repro/scripts/validate_phase3.mjs"
   },
   "dependencies": {
     "@radix-ui/react-collapsible": "^1.1.11",
