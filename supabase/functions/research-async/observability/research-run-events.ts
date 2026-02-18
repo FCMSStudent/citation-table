@@ -16,8 +16,13 @@ export function createResearchRunEventEmitter(
       report_id: params.reportId ?? null,
       stage: event.stage,
       status: event.status,
+      event_type: event.event_type,
       duration: event.duration ?? null,
+      duration_ms: event.duration_ms ?? event.duration ?? null,
       error_category: event.error_category ?? null,
+      error_code: event.error_code ?? null,
+      input_hash: event.input_hash ?? null,
+      output_hash: event.output_hash ?? null,
       message: event.message ?? null,
       event_at: event.at,
     };

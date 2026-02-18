@@ -142,8 +142,8 @@ export async function processPipelineJob(
   }
 
   await markReportProcessing(supabase, reportId);
-  const traceId = crypto.randomUUID();
   const runId = job.id;
+  const traceId = runId; // trace_id = run_id per observability contract
   const emitEvent = createResearchRunEventEmitter(supabase, {
     traceId,
     runId,
