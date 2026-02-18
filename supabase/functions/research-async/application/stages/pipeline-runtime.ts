@@ -53,12 +53,15 @@ export class StageError extends Error {
   readonly category: StageErrorCategory;
   readonly retryable: boolean;
 
+  readonly cause?: unknown;
+
   constructor(stage: PipelineStageName, category: StageErrorCategory, message: string, retryable = false, options?: { cause?: unknown }) {
-    super(message, options);
+    super(message);
     this.name = "StageError";
     this.stage = stage;
     this.category = category;
     this.retryable = retryable;
+    this.cause = options?.cause;
   }
 }
 

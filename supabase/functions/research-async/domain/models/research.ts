@@ -1,4 +1,5 @@
-import type { createClient } from "https://esm.sh/@supabase/supabase-js@2.49.1";
+// deno-lint-ignore-file no-explicit-any
+type SupabaseClient = { from: (...args: any[]) => any; rpc: (...args: any[]) => any; auth: any; functions: any; storage: any; };
 import type {
   CanonicalPaper,
   CoverageReport,
@@ -99,7 +100,7 @@ export interface PipelineResult {
   query_pipeline_mode: QueryPipelineMode;
 }
 
-export type SupabaseClientLike = ReturnType<typeof createClient>;
+export type SupabaseClientLike = SupabaseClient;
 
 export interface ProcessPipelineJobDependencies {
   metadataRuntime: {
