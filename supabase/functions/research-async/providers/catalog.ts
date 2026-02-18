@@ -3,7 +3,7 @@ import { searchArxiv } from "./arxiv.ts";
 import { searchOpenAlex } from "./openalex.ts";
 import { searchPubMed } from "./pubmed.ts";
 import { searchSemanticScholar } from "./semantic-scholar.ts";
-import type { ExpansionMode, ProviderAdapter, ProviderSearchResponse, UnifiedPaper } from "./types.ts";
+import type { ExpansionMode, UnifiedPaper } from "./types.ts";
 
 export type ProviderSearchFn = (
   query: string,
@@ -11,40 +11,13 @@ export type ProviderSearchFn = (
   precompiledQuery?: string,
 ) => Promise<UnifiedPaper[]>;
 
-interface ProviderDescriptor {
+export interface ProviderDescriptor {
   name: SearchSource;
   search: ProviderSearchFn;
   healthUrl: string;
 }
 
-function toProviderAdapter(descriptor: ProviderDescriptor): ProviderAdapter {
-  return {
-    name: descriptor.name,
-    healthUrl: descriptor.healthUrl,
-    async search(query: string, mode: ExpansionMode, precompiledQuery?: string): Promise<ProviderSearchResponse> {
-      const startedAt = Date.now();
-      try {
-        const papers = await descriptor.search(query, mode, precompiledQuery);
-        return {
-          papers,
-          latencyMs: Date.now() - startedAt,
-          degraded: false,
-        };
-      } catch (error) {
-        const message = error instanceof Error ? error.message : String(error);
-        console.error(`[Provider:${descriptor.name}] Search failed`, error);
-        return {
-          papers: [],
-          latencyMs: Date.now() - startedAt,
-          degraded: true,
-          error: message,
-        };
-      }
-    },
-  };
-}
-
-export const PROVIDER_REGISTRY: readonly ProviderAdapter[] = [
+export const PROVIDER_REGISTRY: readonly ProviderDescriptor[] = [
   {
     name: "semantic_scholar",
     search: searchSemanticScholar,
@@ -65,4 +38,4 @@ export const PROVIDER_REGISTRY: readonly ProviderAdapter[] = [
     search: searchPubMed,
     healthUrl: "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esearch.fcgi?db=pubmed&term=health&retmax=1&retmode=json",
   },
-].map(toProviderAdapter);
+];

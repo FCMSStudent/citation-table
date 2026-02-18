@@ -79,36 +79,40 @@ export async function searchOpenAlex(
     `[OpenAlex] Searching original="${prepared.originalKeywordQuery}" expanded="${prepared.expandedKeywordQuery}" api="${prepared.apiQuery}"`,
   );
 
-  const response = await fetchWithRetry(
-    url.toString(),
-    { headers: buildOpenAlexHeaders() },
-    {
-      label: "openalex-search",
-      timeoutMs: OPENALEX_PROVIDER_TIMEOUT_MS,
-      maxRetries: OPENALEX_PROVIDER_RETRIES,
-      onRetry: ({ attempt, delayMs, reason }) => {
-        console.warn(`[OpenAlex] Retry #${attempt} in ${delayMs}ms (${reason})`);
+  try {
+    const response = await fetchWithRetry(
+      url.toString(),
+      { headers: buildOpenAlexHeaders() },
+      {
+        label: "openalex-search",
+        timeoutMs: OPENALEX_PROVIDER_TIMEOUT_MS,
+        maxRetries: OPENALEX_PROVIDER_RETRIES,
+        onRetry: ({ attempt, delayMs, reason }) => {
+          console.warn(`[OpenAlex] Retry #${attempt} in ${delayMs}ms (${reason})`);
+        },
       },
-    },
-  );
+    );
 
-  if (!response.ok) {
-    throw new Error(`[OpenAlex] API error ${response.status}`);
+    if (!response.ok) {
+      console.error(`[OpenAlex] API error: ${response.status}`);
+      return [];
+    }
+
+    const data = await response.json() as OpenAlexListResponse;
+    const works: OpenAlexWork[] = data.results || [];
+    console.log(`[OpenAlex] Found ${works.length} papers`);
+    return works.map((work, idx) => toUnifiedFromOpenAlex(work, 1 / (idx + 1)));
+  } catch (error) {
+    console.error("[OpenAlex] Error:", error);
+    return [];
   }
-
-  const data = await response.json() as OpenAlexListResponse;
-  const works: OpenAlexWork[] = data.results || [];
-  console.log(`[OpenAlex] Found ${works.length} papers`);
-  return works.map((work, idx) => toUnifiedFromOpenAlex(work, 1 / (idx + 1)));
 }
 
 export async function expandOpenAlexCitationGraph(
   seedPapers: UnifiedPaper[],
   maxAdditional: number,
-  signal?: AbortSignal,
 ): Promise<UnifiedPaper[]> {
   if (maxAdditional <= 0) return [];
-  signal?.throwIfAborted();
 
   const openAlexSeeds = seedPapers
     .filter((paper) => paper.source === "openalex")
@@ -133,7 +137,6 @@ export async function expandOpenAlexCitationGraph(
 
   const batches: UnifiedPaper[] = [];
   for (let i = 0; i < uniqueRefs.length; i += OPENALEX_BATCH_LOOKUP_SIZE) {
-    signal?.throwIfAborted();
     const chunk = uniqueRefs.slice(i, i + OPENALEX_BATCH_LOOKUP_SIZE);
     const normalizedChunk = chunk.map(normalizeOpenAlexWorkId).filter(Boolean);
     if (normalizedChunk.length === 0) continue;
@@ -144,22 +147,25 @@ export async function expandOpenAlexCitationGraph(
     queryUrl.searchParams.set("select", OPENALEX_SELECT_FIELDS);
     if (apiKey) queryUrl.searchParams.set("api_key", apiKey);
 
-    const response = await fetchWithRetry(
-      queryUrl.toString(),
-      { headers, signal },
-      {
-        label: "openalex-expand",
-        timeoutMs: OPENALEX_PROVIDER_TIMEOUT_MS,
-        maxRetries: OPENALEX_PROVIDER_RETRIES,
-        onRetry: ({ attempt, delayMs, reason }) => {
-          console.warn(`[OpenAlex] Expansion retry #${attempt} in ${delayMs}ms (${reason})`);
+    let response: Response;
+    try {
+      response = await fetchWithRetry(
+        queryUrl.toString(),
+        { headers },
+        {
+          label: "openalex-expand",
+          timeoutMs: OPENALEX_PROVIDER_TIMEOUT_MS,
+          maxRetries: OPENALEX_PROVIDER_RETRIES,
+          onRetry: ({ attempt, delayMs, reason }) => {
+            console.warn(`[OpenAlex] Expansion retry #${attempt} in ${delayMs}ms (${reason})`);
+          },
         },
-      },
-    );
-    if (!response.ok) {
-      throw new Error(`[OpenAlex] Expansion API error ${response.status}`);
+      );
+    } catch {
+      continue;
     }
 
+    if (!response.ok) continue;
     const payload = await response.json() as OpenAlexListResponse;
     const byId = new Map<string, OpenAlexWork>();
     for (const work of payload.results || []) {

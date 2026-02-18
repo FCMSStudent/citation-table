@@ -35,26 +35,21 @@ function buildEnrichedMap(results: EnrichmentResult[]): Map<string, EnrichmentIn
 }
 
 function applyReportUpdates(
-  existingResults: unknown[],
+  existingResults: any[],
   enrichedMap: Map<string, EnrichmentInputPaper>,
-): { updated: unknown[]; changed: number } {
+): { updated: any[]; changed: number } {
   let changed = 0;
 
   const updated = existingResults.map((study) => {
     if (!study || typeof study !== "object") return study;
-    const studyRecord = study as Record<string, unknown>;
-    const studyId = typeof studyRecord.study_id === "string" ? studyRecord.study_id : "";
+    const studyId = String(study.study_id || "");
     if (!studyId) return study;
 
     const enrichedPaper = enrichedMap.get(studyId);
     if (!enrichedPaper) return study;
 
-    const nextStudy: Record<string, unknown> = { ...studyRecord };
-    const existingCitation = nextStudy.citation;
-    const citation: Record<string, unknown> =
-      existingCitation && typeof existingCitation === "object"
-        ? { ...(existingCitation as Record<string, unknown>) }
-        : {};
+    const nextStudy = { ...study };
+    const citation = { ...(nextStudy.citation || {}) };
 
     let touched = false;
 
@@ -64,8 +59,7 @@ function applyReportUpdates(
     }
 
     if (typeof enrichedPaper.citationCount === "number" && enrichedPaper.citationCount >= 0) {
-      const currentCitationCount = typeof nextStudy.citationCount === "number" ? nextStudy.citationCount : null;
-      if (currentCitationCount === null || enrichedPaper.citationCount > currentCitationCount) {
+      if (typeof nextStudy.citationCount !== "number" || enrichedPaper.citationCount > nextStudy.citationCount) {
         nextStudy.citationCount = enrichedPaper.citationCount;
         touched = true;
       }

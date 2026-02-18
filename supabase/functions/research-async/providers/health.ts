@@ -1,16 +1,11 @@
-import { fetchWithTimeout } from "./http.ts";
+import { withTimeout } from "./http.ts";
 import { PROVIDER_REGISTRY } from "./catalog.ts";
 
 export async function providerHealthSnapshot() {
   const providers = await Promise.all(PROVIDER_REGISTRY.map(async (provider) => {
     const started = Date.now();
     try {
-      const response = await fetchWithTimeout(
-        provider.healthUrl,
-        {},
-        4_000,
-        `health-${provider.name}`,
-      );
+      const response = await withTimeout(fetch(provider.healthUrl), 4_000, `health-${provider.name}`);
       return {
         provider: provider.name,
         healthy: response.ok,

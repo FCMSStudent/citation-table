@@ -283,12 +283,11 @@ serve(async (req) => {
 
     const { data: report, error: dbError } = await rlSupabase
       .from("research_reports")
-      .select("question, results, normalized_query, narrative_synthesis, user_id")
+      .select("question, results, partial_results, normalized_query, narrative_synthesis, user_id")
       .eq("id", report_id)
       .single();
 
     if (dbError || !report?.results || report.user_id !== userId) {
-      console.error("[synthesize] DB error or access denied:", dbError?.message);
       return new Response(
         JSON.stringify({ error: "Report not found" }),
         { status: 404, headers: { ...corsHeaders, "Content-Type": "application/json" } }
@@ -296,7 +295,7 @@ serve(async (req) => {
     }
 
     const allStudies = asContextStudies(report.results);
-    const allPartialStudies = allStudies.filter((s: ContextStudy) => !isCompleteStudy(s));
+    const allPartialStudies = asContextStudies(report.partial_results);
     const queryText = (report.normalized_query || report.question || "").toLowerCase();
 
     const strictStudies = allStudies.filter(isCompleteStudy);
@@ -384,48 +383,36 @@ WARNING FIELD RULES:
 
 Return ONLY valid JSON, no markdown fences or extra text`;
 
-    const LOVABLE_API_KEY = Deno.env.get("LOVABLE_API_KEY");
-    if (!LOVABLE_API_KEY) {
+    const GEMINI_API_KEY = Deno.env.get("GOOGLE_GEMINI_API_KEY");
+    if (!GEMINI_API_KEY) {
       return new Response(
-        JSON.stringify({ error: "LOVABLE_API_KEY is not configured" }),
+        JSON.stringify({ error: "GOOGLE_GEMINI_API_KEY is not configured" }),
         { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
     }
 
-    const response = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
+    const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/openai/chat/completions`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        Authorization: `Bearer ${LOVABLE_API_KEY}`,
+        Authorization: `Bearer ${GEMINI_API_KEY}`,
       },
       body: JSON.stringify({
-        model: "google/gemini-2.5-flash",
+        model: "gemini-2.5-flash",
         messages: [
           { role: "system", content: systemPrompt },
-          { role: "user", content: `Synthesize the evidence for: "${report.question}"` },
         ],
         temperature: 0.3,
         max_tokens: 8000,
+        response_format: { type: "json_object" },
       }),
     });
 
     if (!response.ok) {
       const text = await response.text();
-      console.error("AI API error:", response.status, text);
-      if (response.status === 429) {
-        return new Response(
-          JSON.stringify({ error: "Rate limit exceeded, please try again later." }),
-          { status: 429, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-        );
-      }
-      if (response.status === 402) {
-        return new Response(
-          JSON.stringify({ error: "AI credits exhausted. Please add funds." }),
-          { status: 402, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-        );
-      }
+      console.error("Gemini API error:", response.status, text);
       return new Response(
-        JSON.stringify({ error: `AI API error (${response.status})` }),
+        JSON.stringify({ error: `Gemini API error (${response.status})` }),
         { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
     }

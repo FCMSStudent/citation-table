@@ -225,7 +225,7 @@ serve(async (req) => {
     // Fetch report data and verify ownership
     const { data: report, error: dbError } = await serviceClient
       .from("research_reports")
-      .select("question, results, normalized_query, user_id")
+      .select("question, results, partial_results, normalized_query, user_id")
       .eq("id", report_id)
       .single();
 
@@ -237,7 +237,7 @@ serve(async (req) => {
     }
 
     const allStudies = asContextStudies(report.results);
-    const allPartialStudies = allStudies.filter((s) => !isCompleteStudy(s));
+    const allPartialStudies = asContextStudies(report.partial_results);
     const queryText = (report.normalized_query || report.question || "").toLowerCase();
 
     const strictStudies = allStudies.filter(isCompleteStudy);

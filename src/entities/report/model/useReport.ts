@@ -36,32 +36,10 @@ interface UseReportReturn {
   refetch: () => void;
 }
 
-const POLL_INTERVAL_MS = 3000;
-const CLIENT_TIMEOUT_MS = 10 * 60 * 1000;
-const CLIENT_TIMEOUT_MESSAGE = 'Search timed out after 10 minutes. Please retry.';
-
-function applyClientTimeout(report: Report): Report {
-  if (report.status !== 'processing') {
-    return report;
-  }
-
-  const elapsedMs = Date.now() - new Date(report.created_at).getTime();
-  if (elapsedMs < CLIENT_TIMEOUT_MS) {
-    return report;
-  }
-
-  return {
-    ...report,
-    status: 'failed',
-    error_message: CLIENT_TIMEOUT_MESSAGE,
-  };
-}
-
 export function useReport(reportId: string | undefined): UseReportReturn {
   const [report, setReport] = useState<Report | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [timeoutOverrideUntil, setTimeoutOverrideUntil] = useState<number | null>(null);
 
   const fetchReport = useCallback(async () => {
     if (!reportId) return;
@@ -75,14 +53,7 @@ export function useReport(reportId: string | undefined): UseReportReturn {
         .single();
 
       if (fetchError) throw new Error(fetchError.message);
-      const rawReport = row as unknown as Report;
-      const canBypassTimeout = timeoutOverrideUntil !== null && Date.now() < timeoutOverrideUntil;
-      const nextReport = canBypassTimeout ? rawReport : applyClientTimeout(rawReport);
-      setReport(nextReport);
-
-      if (rawReport.status !== 'processing' && timeoutOverrideUntil !== null) {
-        setTimeoutOverrideUntil(null);
-      }
+      setReport(row as unknown as Report);
       setError(null);
     } catch (err) {
       console.error('Error fetching report:', err);
@@ -90,7 +61,7 @@ export function useReport(reportId: string | undefined): UseReportReturn {
     } finally {
       setIsLoading(false);
     }
-  }, [reportId, timeoutOverrideUntil]);
+  }, [reportId]);
 
   useEffect(() => {
     fetchReport();
@@ -98,16 +69,9 @@ export function useReport(reportId: string | undefined): UseReportReturn {
 
   useEffect(() => {
     if (!reportId || report?.status !== 'processing') return;
-    const interval = setInterval(fetchReport, POLL_INTERVAL_MS);
+    const interval = setInterval(fetchReport, 3000);
     return () => clearInterval(interval);
   }, [reportId, report?.status, fetchReport]);
 
-  const refetch = useCallback(() => {
-    if (report?.status === 'failed' && report.error_message === CLIENT_TIMEOUT_MESSAGE) {
-      setTimeoutOverrideUntil(Date.now() + CLIENT_TIMEOUT_MS);
-    }
-    void fetchReport();
-  }, [report?.status, report?.error_message, fetchReport]);
-
-  return { report, isLoading, error, refetch };
+  return { report, isLoading, error, refetch: fetchReport };
 }

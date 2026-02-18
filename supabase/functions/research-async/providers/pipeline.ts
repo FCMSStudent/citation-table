@@ -1,16 +1,18 @@
 import type { SearchSource } from "../../_shared/query-processing.ts";
 import type { CoverageReport } from "../../_shared/lit-search.ts";
 import { expandOpenAlexCitationGraph } from "./openalex.ts";
+import { sleep, withTimeout } from "./http.ts";
 import { PROVIDER_REGISTRY } from "./catalog.ts";
 import type { ExpansionMode, UnifiedPaper } from "./types.ts";
 
+const PROVIDER_TIMEOUT_MS = 8_000;
+const PROVIDER_RETRIES = 2;
 const RETRIEVAL_BUDGET_MS = 26_000;
 
 export interface ProviderRunResult {
   provider: SearchSource;
   papers: UnifiedPaper[];
   failed: boolean;
-  degraded: boolean;
   error?: string;
   latencyMs: number;
 }
@@ -38,6 +40,34 @@ function emptyProviderBuckets(): Record<SearchSource, UnifiedPaper[]> {
   };
 }
 
+async function retryProviderSearch(
+  provider: SearchSource,
+  fn: () => Promise<UnifiedPaper[]>,
+): Promise<ProviderRunResult> {
+  const started = Date.now();
+  let lastError: Error | null = null;
+
+  for (let attempt = 0; attempt <= PROVIDER_RETRIES; attempt += 1) {
+    try {
+      const papers = await withTimeout(fn(), PROVIDER_TIMEOUT_MS, provider);
+      return { provider, papers, failed: false, latencyMs: Date.now() - started };
+    } catch (error) {
+      lastError = error instanceof Error ? error : new Error(String(error));
+      if (attempt < PROVIDER_RETRIES) {
+        await sleep(250 * (attempt + 1));
+      }
+    }
+  }
+
+  return {
+    provider,
+    papers: [],
+    failed: true,
+    error: lastError?.message || `${provider} failed`,
+    latencyMs: Date.now() - started,
+  };
+}
+
 export async function runProviderPipeline({
   query,
   maxCandidates,
@@ -47,19 +77,10 @@ export async function runProviderPipeline({
   const retrievalStartedAt = Date.now();
 
   const providerRuns = await Promise.all(PROVIDER_REGISTRY.map((provider) =>
-    provider.search(query, mode, sourceQueryOverrides[provider.name]).then((response) => {
-      console.log(
-        `[Provider:${provider.name}] latency=${response.latencyMs}ms papers=${response.papers.length} degraded=${response.degraded}${response.error ? ` error=${response.error}` : ""}`,
-      );
-      return {
-        provider: provider.name,
-        papers: response.papers,
-        failed: response.degraded,
-        degraded: response.degraded,
-        error: response.error,
-        latencyMs: response.latencyMs,
-      };
-    })
+    retryProviderSearch(
+      provider.name,
+      () => provider.search(query, mode, sourceQueryOverrides[provider.name]),
+    )
   ));
 
   const papersByProvider = emptyProviderBuckets();
@@ -70,25 +91,19 @@ export async function runProviderPipeline({
   let candidates = providerRuns.flatMap((run) => run.papers);
   const retrievalElapsed = Date.now() - retrievalStartedAt;
   const remainingBudgetMs = RETRIEVAL_BUDGET_MS - retrievalElapsed;
-  let expansionDegraded = false;
 
   if (remainingBudgetMs > 1_000 && candidates.length < maxCandidates) {
     const expansionCap = Math.min(400, maxCandidates - candidates.length);
     if (expansionCap > 0) {
-      const controller = new AbortController();
-      const timeout = setTimeout(() => controller.abort(), remainingBudgetMs);
       try {
-        const expansion = await expandOpenAlexCitationGraph(
-          papersByProvider.openalex,
-          expansionCap,
-          controller.signal,
+        const expansion = await withTimeout(
+          expandOpenAlexCitationGraph(papersByProvider.openalex, expansionCap),
+          remainingBudgetMs,
+          "openalex-expansion",
         );
         candidates = [...candidates, ...expansion];
       } catch (error) {
-        expansionDegraded = true;
-        console.error("[Pipeline] OpenAlex expansion failed:", error);
-      } finally {
-        clearTimeout(timeout);
+        console.warn("[Pipeline] OpenAlex expansion skipped:", error);
       }
     }
   }
@@ -101,7 +116,7 @@ export async function runProviderPipeline({
     providers_queried: providerRuns.length,
     providers_failed: failedProviders.length,
     failed_provider_names: failedProviders,
-    degraded: failedProviders.length > 0 || expansionDegraded,
+    degraded: failedProviders.length > 0,
   };
 
   return {

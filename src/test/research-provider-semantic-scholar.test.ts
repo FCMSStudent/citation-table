@@ -55,13 +55,16 @@ describe("research provider: semantic scholar", () => {
     expect(papers[0].pubmed_id).toBe("123");
   });
 
-  it("allows back-to-back calls without cross-call global throttling", async () => {
+  it("supports back-to-back calls with throttle", async () => {
     const fetchMock = vi.fn().mockResolvedValue({ ok: true, json: async () => ({ data: [] }) });
     vi.stubGlobal("fetch", fetchMock);
 
     await searchSemanticScholar("q1", "balanced");
+    const started = Date.now();
     await searchSemanticScholar("q2", "balanced");
+    const elapsed = Date.now() - started;
 
     expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(elapsed).toBeGreaterThanOrEqual(900);
   });
 });
