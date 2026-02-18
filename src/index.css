@@ -59,25 +59,6 @@
     --success: 152 60% 44%;
     --warning: 38 92% 55%;
     --info: 215 90% 56%;
-    --status-success: var(--success);
-    --status-warning: var(--warning);
-    --status-info: var(--info);
-    --status-danger: var(--destructive);
-
-    /* ── Semantic typography scale ── */
-    --type-xs: 0.75rem;
-    --type-sm: 0.875rem;
-    --type-md: 1rem;
-    --type-lg: 1.125rem;
-    --type-xl: 1.25rem;
-
-    /* ── Semantic spacing scale ── */
-    --space-1: 0.25rem;
-    --space-2: 0.5rem;
-    --space-3: 0.75rem;
-    --space-4: 1rem;
-    --space-5: 1.25rem;
-    --space-6: 1.5rem;
 
     /* ── Liquid Glass Gradients ── */
     --gradient-primary: linear-gradient(135deg, hsl(215 90% 62% / 0.8) 0%, hsl(260 60% 62% / 0.6) 100%);
@@ -180,10 +161,6 @@
     --glass-border: hsl(0 0% 100% / 0.1);
     --glass-shadow: 0 8px 32px hsl(0 0% 0% / 0.2), 0 2px 8px hsl(0 0% 0% / 0.1);
     --glass-highlight: inset 0 1px 0 hsl(0 0% 100% / 0.08);
-    --status-success: var(--success);
-    --status-warning: var(--warning);
-    --status-info: var(--info);
-    --status-danger: var(--destructive);
 
     /* ── Sidebar ── */
     --sidebar-background: 225 18% 10%;

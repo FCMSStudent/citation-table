@@ -13,9 +13,6 @@ export interface ProviderRunResult {
   degraded: boolean;
   error?: string;
   latencyMs: number;
-  retryCount: number;
-  statusCode?: number;
-  retryAfterSeconds?: number | null;
 }
 
 export interface ProviderPipelineOptions {
@@ -23,8 +20,6 @@ export interface ProviderPipelineOptions {
   maxCandidates: number;
   mode?: ExpansionMode;
   sourceQueryOverrides?: Partial<Record<SearchSource, string>>;
-  providers?: SearchSource[];
-  providerExecution?: Parameters<(typeof PROVIDER_REGISTRY)[number]["search"]>[3];
 }
 
 export interface ProviderPipelineResult {
@@ -48,18 +43,13 @@ export async function runProviderPipeline({
   maxCandidates,
   mode = "balanced",
   sourceQueryOverrides = {},
-  providers,
-  providerExecution,
 }: ProviderPipelineOptions): Promise<ProviderPipelineResult> {
   const retrievalStartedAt = Date.now();
-  const selectedProviders = Array.isArray(providers) && providers.length > 0
-    ? PROVIDER_REGISTRY.filter((provider) => providers.includes(provider.name))
-    : PROVIDER_REGISTRY;
 
-  const providerRuns = await Promise.all(selectedProviders.map((provider) =>
-    provider.search(query, mode, sourceQueryOverrides[provider.name], providerExecution).then((response) => {
+  const providerRuns = await Promise.all(PROVIDER_REGISTRY.map((provider) =>
+    provider.search(query, mode, sourceQueryOverrides[provider.name]).then((response) => {
       console.log(
-        `[Provider:${provider.name}] latency=${response.latencyMs}ms papers=${response.papers.length} degraded=${response.degraded} retries=${response.retryCount || 0}${response.error ? ` error=${response.error}` : ""}`,
+        `[Provider:${provider.name}] latency=${response.latencyMs}ms papers=${response.papers.length} degraded=${response.degraded}${response.error ? ` error=${response.error}` : ""}`,
       );
       return {
         provider: provider.name,
@@ -68,9 +58,6 @@ export async function runProviderPipeline({
         degraded: response.degraded,
         error: response.error,
         latencyMs: response.latencyMs,
-        retryCount: response.retryCount || 0,
-        statusCode: response.statusCode,
-        retryAfterSeconds: response.retryAfterSeconds ?? null,
       };
     })
   ));
@@ -111,7 +98,7 @@ export async function runProviderPipeline({
     .map((run) => run.provider);
 
   const coverage: CoverageReport = {
-    providers_queried: selectedProviders.length,
+    providers_queried: providerRuns.length,
     providers_failed: failedProviders.length,
     failed_provider_names: failedProviders,
     degraded: failedProviders.length > 0 || expansionDegraded,

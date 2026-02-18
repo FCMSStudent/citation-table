@@ -22,8 +22,7 @@ describe("research provider: arxiv", () => {
 
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: true, text: async () => xml }));
 
-    const result = await searchArxiv("sleep deprivation", "balanced");
-    const papers = result.papers;
+    const papers = await searchArxiv("sleep deprivation", "balanced");
     expect(papers).toHaveLength(1);
     expect(papers[0].id).toBe("1234.5678");
     expect(papers[0].doi).toBe("10.1000/arxiv.1");

@@ -50,8 +50,7 @@ describe("research provider: pubmed", () => {
 
     vi.stubGlobal("fetch", fetchMock);
 
-    const result = await searchPubMed("blood pressure", "balanced");
-    const papers = result.papers;
+    const papers = await searchPubMed("blood pressure", "balanced");
 
     expect(fetchMock).toHaveBeenCalledTimes(2);
     const esearchUrl = new URL(String(fetchMock.mock.calls[0][0]));
@@ -70,7 +69,7 @@ describe("research provider: pubmed", () => {
 
   it("returns empty when ESearch finds nothing", async () => {
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: true, json: async () => ({ esearchresult: { idlist: [] } }) }));
-    const papers = (await searchPubMed("no hits", "balanced")).papers;
+    const papers = await searchPubMed("no hits", "balanced");
     expect(papers).toEqual([]);
   });
 });

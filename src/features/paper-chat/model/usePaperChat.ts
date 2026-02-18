@@ -33,8 +33,8 @@ function parseStoredMessages(raw: string | null): ChatMessage[] {
   }
 }
 
-const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL ?? '';
-const CHAT_URL = SUPABASE_URL ? `${SUPABASE_URL}/functions/v1/chat-papers` : '';
+const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL || 'https://amzlrrrhjsqjndbrdume.supabase.co';
+const CHAT_URL = `${SUPABASE_URL}/functions/v1/chat-papers`;
 
 export function usePaperChat(reportId: string | undefined) {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
@@ -66,27 +66,8 @@ export function usePaperChat(reportId: string | undefined) {
     setIsStreaming(true);
 
     let assistantSoFar = '';
-    let lastFlushAt = 0;
-    const FLUSH_INTERVAL_MS = 80;
-    const flushAssistantSnapshot = (force = false) => {
-      const now = Date.now();
-      if (!force && now - lastFlushAt < FLUSH_INTERVAL_MS) return;
-      lastFlushAt = now;
-      const snapshot = assistantSoFar;
-      setMessages(prev => {
-        const last = prev[prev.length - 1];
-        if (last?.role === 'assistant') {
-          return prev.map((m, i) => i === prev.length - 1 ? { ...m, content: snapshot } : m);
-        }
-        return [...prev, { role: 'assistant', content: snapshot }];
-      });
-    };
 
     try {
-      if (!CHAT_URL) {
-        throw new Error('Supabase URL is not configured');
-      }
-
       // Get the user's session access token
       const client = getSupabase();
       const { data: { session } } = await client.auth.getSession();
@@ -145,7 +126,14 @@ export function usePaperChat(reportId: string | undefined) {
             const content = parsed.choices?.[0]?.delta?.content as string | undefined;
             if (content) {
               assistantSoFar += content;
-              flushAssistantSnapshot();
+              const snapshot = assistantSoFar;
+              setMessages(prev => {
+                const last = prev[prev.length - 1];
+                if (last?.role === 'assistant') {
+                  return prev.map((m, i) => i === prev.length - 1 ? { ...m, content: snapshot } : m);
+                }
+                return [...prev, { role: 'assistant', content: snapshot }];
+              });
             }
           } catch {
             textBuffer = line + '\n' + textBuffer;
@@ -168,12 +156,18 @@ export function usePaperChat(reportId: string | undefined) {
             const content = parsed.choices?.[0]?.delta?.content as string | undefined;
             if (content) {
               assistantSoFar += content;
-              flushAssistantSnapshot();
+              const snapshot = assistantSoFar;
+              setMessages(prev => {
+                const last = prev[prev.length - 1];
+                if (last?.role === 'assistant') {
+                  return prev.map((m, i) => i === prev.length - 1 ? { ...m, content: snapshot } : m);
+                }
+                return [...prev, { role: 'assistant', content: snapshot }];
+              });
             }
           } catch { /* ignore partial */ }
         }
       }
-      flushAssistantSnapshot(true);
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Failed to send message');
     } finally {
@@ -189,12 +183,5 @@ export function usePaperChat(reportId: string | undefined) {
     }
   }, [reportId]);
 
-  const retryLast = useCallback(() => {
-    if (isStreaming) return;
-    const lastUser = [...messages].reverse().find((msg) => msg.role === 'user');
-    if (!lastUser) return;
-    void sendMessage(lastUser.content);
-  }, [messages, isStreaming, sendMessage]);
-
-  return { messages, isStreaming, error, sendMessage, clearChat, retryLast };
+  return { messages, isStreaming, error, sendMessage, clearChat };
 }

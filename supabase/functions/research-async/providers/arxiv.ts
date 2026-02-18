@@ -1,6 +1,6 @@
-import type { ExpansionMode, ProviderQueryResult, UnifiedPaper } from "./types.ts";
+import type { ExpansionMode, UnifiedPaper } from "./types.ts";
 import { resolvePreparedQuery } from "./query-builder.ts";
-import { fetchWithRetry, HttpStatusError, parseRetryAfterSeconds, sleep } from "./http.ts";
+import { fetchWithRetry, sleep } from "./http.ts";
 
 const ARXIV_TIMEOUT_MS = 8_000;
 const ARXIV_MAX_RETRIES = 4;
@@ -21,9 +21,9 @@ export async function searchArxiv(
   query: string,
   mode: ExpansionMode = "balanced",
   precompiledQuery?: string,
-): Promise<ProviderQueryResult> {
+): Promise<UnifiedPaper[]> {
   const prepared = resolvePreparedQuery(query, "arxiv", mode, precompiledQuery);
-  if (!prepared.apiQuery) return { papers: [], retryCount: 0 };
+  if (!prepared.apiQuery) return [];
 
   const url = new URL("https://export.arxiv.org/api/query");
   url.searchParams.set("search_query", `all:${prepared.apiQuery}`);
@@ -37,7 +37,6 @@ export async function searchArxiv(
   );
 
   const rateLimit = createRateLimiter(ARXIV_MIN_INTERVAL_MS);
-  let retryCount = 0;
   await rateLimit();
   const response = await fetchWithRetry(
     url.toString(),
@@ -48,17 +47,12 @@ export async function searchArxiv(
       maxRetries: ARXIV_MAX_RETRIES,
       shouldRetryStatus: (status) => status === 429 || status >= 500,
       onRetry: ({ attempt, delayMs, reason }) => {
-        retryCount += 1;
         console.warn(`[ArXiv] Retry #${attempt} in ${delayMs}ms (${reason})`);
       },
     },
   );
   if (!response.ok) {
-    throw new HttpStatusError(
-      `[ArXiv] API error ${response.status}`,
-      response.status,
-      parseRetryAfterSeconds(response.headers.get("retry-after")),
-    );
+    throw new Error(`[ArXiv] API error ${response.status}`);
   }
 
   const xmlText = await response.text();
@@ -130,10 +124,5 @@ export async function searchArxiv(
   }
 
   console.log(`[ArXiv] Found ${papers.length} papers`);
-  return {
-    papers,
-    retryCount,
-    statusCode: response.status,
-    retryAfterSeconds: null,
-  };
+  return papers;
 }

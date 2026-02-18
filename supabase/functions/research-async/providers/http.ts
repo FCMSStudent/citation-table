@@ -11,29 +11,6 @@ export async function withTimeout<T>(promise: Promise<T>, timeoutMs: number, lab
   }
 }
 
-export class HttpStatusError extends Error {
-  status: number;
-  retryAfterSeconds: number | null;
-
-  constructor(message: string, status: number, retryAfterSeconds: number | null = null) {
-    super(message);
-    this.name = "HttpStatusError";
-    this.status = status;
-    this.retryAfterSeconds = retryAfterSeconds;
-  }
-}
-
-export function parseRetryAfterSeconds(value: string | null): number | null {
-  if (!value) return null;
-  const seconds = Number(value);
-  if (Number.isFinite(seconds) && seconds >= 0) return Math.trunc(seconds);
-  const parsedDate = Date.parse(value);
-  if (!Number.isFinite(parsedDate)) return null;
-  const diffMs = parsedDate - Date.now();
-  if (diffMs <= 0) return 0;
-  return Math.trunc(diffMs / 1000);
-}
-
 export async function fetchWithTimeout(
   input: RequestInfo | URL,
   init: RequestInit,
@@ -92,13 +69,6 @@ function getBackoffDelay(attempt: number, baseDelayMs: number, maxDelayMs: numbe
   return Math.min(maxDelayMs, baseDelayMs * (2 ** attempt));
 }
 
-function applyRetryAfterFloor(defaultDelayMs: number, response: Response): number {
-  if (response.status !== 429) return defaultDelayMs;
-  const retryAfterSeconds = parseRetryAfterSeconds(response.headers.get("retry-after"));
-  if (retryAfterSeconds === null) return defaultDelayMs;
-  return Math.max(defaultDelayMs, retryAfterSeconds * 1000);
-}
-
 export async function fetchWithRetry(
   input: RequestInfo | URL,
   init: RequestInit,
@@ -122,10 +92,7 @@ export async function fetchWithRetry(
       const retryableStatus = shouldRetryStatus(response.status);
       if (!retryableStatus || attempt === maxRetries) return response;
 
-      const delayMs = applyRetryAfterFloor(
-        getBackoffDelay(attempt, baseDelayMs, maxDelayMs),
-        response,
-      );
+      const delayMs = getBackoffDelay(attempt, baseDelayMs, maxDelayMs);
       options.onRetry?.({
         attempt: attempt + 1,
         delayMs,

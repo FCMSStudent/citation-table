@@ -788,7 +788,7 @@ export function defaultSearchRequestFromQuestion(question: string): SearchReques
       languages: ["en"],
       exclude_preprints: false,
     },
-    max_candidates: 300,
+    max_candidates: 2000,
     max_evidence_rows: 200,
     response_mode: "evidence_table_brief",
   };

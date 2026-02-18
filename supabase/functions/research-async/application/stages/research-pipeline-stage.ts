@@ -37,14 +37,12 @@ import {
   createStageContext,
   runStage,
   StageError,
-  type StageContext,
   type PipelineStage,
   type StageResult,
 } from "./pipeline-runtime.ts";
-import type { ProviderPipelineOptions, ProviderRunResult } from "../../providers/pipeline.ts";
 
-export const DETERMINISTIC_EXTRACTOR_VERSION = "deterministic_first_v1";
-export const LLM_MODEL = "gemini-2.5-flash";
+const DETERMINISTIC_EXTRACTOR_VERSION = "deterministic_first_v1";
+const LLM_MODEL = "gemini-2.5-flash";
 const DETERMINISTIC_FIELDS = [
   "study_id",
   "title",
@@ -208,8 +206,8 @@ function getPdfParseTimeoutMs(): number {
 }
 
 function getExtractionMaxCandidates(): number {
-  const raw = Number(Deno.env.get("EXTRACTION_MAX_CANDIDATES") || 25);
-  if (!Number.isFinite(raw)) return 25;
+  const raw = Number(Deno.env.get("EXTRACTION_MAX_CANDIDATES") || 45);
+  if (!Number.isFinite(raw)) return 45;
   return Math.min(60, Math.max(5, Math.trunc(raw)));
 }
 
@@ -314,15 +312,6 @@ function deduplicateAndMerge(s2Papers: UnifiedPaper[], openAlexPapers: UnifiedPa
 
   console.log(`[Deduplication] ${allPapers.length} total -> ${uniquePapers.size} unique papers`);
   return Array.from(uniquePapers);
-}
-
-function canonicalizeWithoutDedupe(candidates: UnifiedPaper[]): CanonicalPaper[] {
-  const rows: CanonicalPaper[] = [];
-  for (const candidate of candidates) {
-    const one = canonicalizePapers([candidate as InputPaper]);
-    if (one[0]) rows.push(one[0]);
-  }
-  return rows;
 }
 
 function toEnrichmentInputPaper(paper: UnifiedPaper): EnrichmentInputPaper {
@@ -755,18 +744,8 @@ function canonicalToFallbackStudy(paper: CanonicalPaper): StudyResult {
   };
 }
 
-export interface StageValidated {
-  pipelineStartedAt: number;
+interface StageValidated {
   question: string;
-  userId?: string;
-  cacheKey?: string;
-  providerHash?: string;
-  pipelineVersionId?: string;
-  seed?: number;
-  runInputHash?: string;
-  configSnapshot?: Record<string, unknown>;
-  providerProfile?: SearchSource[];
-  disableDedupe?: boolean;
   requestPayload: SearchRequestPayload;
   queryPipelineMode: QueryPipelineMode;
   extractionEngine: ExtractionEngine;
@@ -776,10 +755,9 @@ export interface StageValidated {
   pdfExtractorBearerToken?: string;
   pdfParseTimeoutMs: number;
   enrichmentContext: MetadataEnrichmentContext;
-  providerExecution?: ProviderPipelineOptions["providerExecution"];
 }
 
-export interface StagePrepared extends StageValidated {
+interface StagePrepared extends StageValidated {
   searchQuery: string;
   normalizedQueryForResponse?: string;
   queryProcessingMeta?: QueryProcessingMeta;
@@ -788,9 +766,8 @@ export interface StagePrepared extends StageValidated {
   shadowPreparedPromise?: Promise<Awaited<ReturnType<typeof prepareQueryProcessingV2>>>;
 }
 
-export interface StageRetrieved extends StagePrepared {
+interface StageRetrieved extends StagePrepared {
   coverage: CoverageReport;
-  providerRuns: ProviderRunResult[];
   papersByProvider: {
     semantic_scholar: UnifiedPaper[];
     openalex: UnifiedPaper[];
@@ -798,24 +775,24 @@ export interface StageRetrieved extends StagePrepared {
     pubmed: UnifiedPaper[];
   };
   providerCandidates: UnifiedPaper[];
-  totalPapersSearched: number;
+  enrichedLegacyPapers: UnifiedPaper[];
   papersWithAbstracts: UnifiedPaper[];
 }
 
-export interface StageCanonicalized extends StageRetrieved {
-  providerById: Record<string, UnifiedPaper>;
-  providerByDoi: Record<string, UnifiedPaper>;
+interface StageCanonicalized extends StageRetrieved {
+  providerById: Map<string, UnifiedPaper>;
+  providerByDoi: Map<string, UnifiedPaper>;
   canonicalCandidates: CanonicalPaper[];
 }
 
-export interface StageQualityFiltered extends StageCanonicalized {
+interface StageQualityFiltered extends StageCanonicalized {
   filtered_count: number;
   keptCapped: CanonicalPaper[];
   evidence_table: SearchResponsePayload["evidence_table"];
   brief: SearchResponsePayload["brief"];
 }
 
-export interface StageDeterministicExtracted extends StageQualityFiltered {
+interface StageDeterministicExtracted extends StageQualityFiltered {
   extractionStartedAt: number;
   extractionCandidates: UnifiedPaper[];
   extraction_input_total: number;
@@ -826,52 +803,10 @@ export interface StageDeterministicExtracted extends StageQualityFiltered {
   needsNullableLlmAugment: boolean;
 }
 
-export interface StageLlmAugmented extends StageDeterministicExtracted {
-  extraction_stats: Record<string, unknown>;
-  extraction_metadata: {
-    extractor_version: string;
-    prompt_hash: string | null;
-    model: string | null;
-    deterministic_flag: boolean;
-  };
-}
-
-class ValidateStage implements PipelineStage<{
-  question: string;
-  requestPayload: SearchRequestPayload;
-  enrichmentContext: MetadataEnrichmentContext;
-  pipelineStartedAt: number;
-  userId?: string;
-  cacheKey?: string;
-  providerHash?: string;
-  pipelineVersionId?: string;
-  seed?: number;
-  runInputHash?: string;
-  configSnapshot?: Record<string, unknown>;
-  providerProfile?: SearchSource[];
-  disableDedupe?: boolean;
-  extractionEngineOverride?: ExtractionEngine;
-  providerExecution?: ProviderPipelineOptions["providerExecution"];
-}, StageValidated> {
+class ValidateStage implements PipelineStage<{ question: string; requestPayload: SearchRequestPayload; enrichmentContext: MetadataEnrichmentContext }, StageValidated> {
   readonly name = "VALIDATE" as const;
 
-  async execute(input: {
-    question: string;
-    requestPayload: SearchRequestPayload;
-    enrichmentContext: MetadataEnrichmentContext;
-    pipelineStartedAt: number;
-    userId?: string;
-    cacheKey?: string;
-    providerHash?: string;
-    pipelineVersionId?: string;
-    seed?: number;
-    runInputHash?: string;
-    configSnapshot?: Record<string, unknown>;
-    providerProfile?: SearchSource[];
-    disableDedupe?: boolean;
-    extractionEngineOverride?: ExtractionEngine;
-    providerExecution?: ProviderPipelineOptions["providerExecution"];
-  }): Promise<StageResult<StageValidated>> {
+  async execute(input: { question: string; requestPayload: SearchRequestPayload; enrichmentContext: MetadataEnrichmentContext }): Promise<StageResult<StageValidated>> {
     const question = input.question.trim();
     if (!question) throw new StageError(this.name, "VALIDATION", "Question is required");
     if (!Number.isFinite(input.requestPayload.max_candidates) || input.requestPayload.max_candidates <= 0) {
@@ -881,32 +816,16 @@ class ValidateStage implements PipelineStage<{
 
     return {
       output: {
-        pipelineStartedAt: input.pipelineStartedAt,
         question,
-        userId: input.userId,
-        cacheKey: input.cacheKey,
-        providerHash: input.providerHash,
-        pipelineVersionId: input.pipelineVersionId,
-        seed: input.seed,
-        runInputHash: input.runInputHash,
-        configSnapshot: input.configSnapshot,
-        providerProfile: input.providerProfile,
-        disableDedupe: Boolean(input.disableDedupe),
         requestPayload: input.requestPayload,
         queryPipelineMode: getQueryPipelineMode(),
-        extractionEngine: (() => {
-          if (input.extractionEngineOverride === "llm" || input.extractionEngineOverride === "scripted" || input.extractionEngineOverride === "hybrid") {
-            return input.extractionEngineOverride;
-          }
-          return getExtractionEngine();
-        })(),
+        extractionEngine: getExtractionEngine(),
         extractionMaxCandidates: getExtractionMaxCandidates(),
         geminiApiKey: Deno.env.get("GOOGLE_GEMINI_API_KEY") || "",
         pdfExtractorUrl: Deno.env.get("PDF_EXTRACTOR_URL") || undefined,
         pdfExtractorBearerToken: Deno.env.get("PDF_EXTRACTOR_BEARER_TOKEN") || undefined,
         pdfParseTimeoutMs: getPdfParseTimeoutMs(),
         enrichmentContext: input.enrichmentContext,
-        providerExecution: input.providerExecution,
       },
     };
   }
@@ -962,13 +881,11 @@ class RetrieveProvidersStage implements PipelineStage<StagePrepared, StageRetrie
   readonly name = "RETRIEVE_PROVIDERS" as const;
 
   async execute(input: StagePrepared): Promise<StageResult<StageRetrieved>> {
-    const { coverage, providerRuns, papersByProvider, candidates: providerCandidates } = await runProviderPipeline({
+    const { coverage, papersByProvider, candidates: providerCandidates } = await runProviderPipeline({
       query: input.searchQuery,
       maxCandidates: input.requestPayload.max_candidates,
       mode: "balanced",
       sourceQueryOverrides: input.sourceQueryOverrides,
-      providers: input.providerProfile,
-      providerExecution: input.providerExecution,
     });
 
     const s2Papers = papersByProvider.semantic_scholar;
@@ -977,6 +894,7 @@ class RetrieveProvidersStage implements PipelineStage<StagePrepared, StageRetrie
     const pubmedPapers = papersByProvider.pubmed;
 
     const dedupedForLegacyFlow = deduplicateAndMerge(s2Papers, openAlexPapers, arxivPapers, pubmedPapers);
+    const enrichedLegacyPapers = await enrichWithMetadata(dedupedForLegacyFlow, input.enrichmentContext, "research-async");
     const enrichedProviderCandidates = await enrichWithMetadata(providerCandidates, input.enrichmentContext, "research-async");
     const papersWithAbstracts = enrichedProviderCandidates.filter((paper) => paper.abstract && paper.abstract.length > 50);
 
@@ -984,7 +902,6 @@ class RetrieveProvidersStage implements PipelineStage<StagePrepared, StageRetrie
       output: {
         ...input,
         coverage,
-        providerRuns,
         papersByProvider: {
           semantic_scholar: s2Papers,
           openalex: openAlexPapers,
@@ -992,7 +909,7 @@ class RetrieveProvidersStage implements PipelineStage<StagePrepared, StageRetrie
           pubmed: pubmedPapers,
         },
         providerCandidates: enrichedProviderCandidates,
-        totalPapersSearched: dedupedForLegacyFlow.length,
+        enrichedLegacyPapers,
         papersWithAbstracts,
       },
     };
@@ -1011,16 +928,14 @@ class CanonicalizeStage implements PipelineStage<StageRetrieved, StageCanonicali
       (left, right) => scorePaperCandidate(right, queryKeywords) - scorePaperCandidate(left, queryKeywords),
     );
     const cappedCandidates = rankedByQuery.slice(0, input.requestPayload.max_candidates);
-    const providerById: Record<string, UnifiedPaper> = {};
-    const providerByDoi: Record<string, UnifiedPaper> = {};
+    const providerById = new Map<string, UnifiedPaper>();
+    const providerByDoi = new Map<string, UnifiedPaper>();
     for (const candidate of cappedCandidates) {
-      providerById[candidate.id] = candidate;
+      providerById.set(candidate.id, candidate);
       const normalized = normalizeDoi(candidate.doi);
-      if (normalized && !providerByDoi[normalized]) providerByDoi[normalized] = candidate;
+      if (normalized && !providerByDoi.has(normalized)) providerByDoi.set(normalized, candidate);
     }
-    const canonicalCandidates = input.disableDedupe
-      ? canonicalizeWithoutDedupe(cappedCandidates)
-      : canonicalizePapers(cappedCandidates as InputPaper[]);
+    const canonicalCandidates = canonicalizePapers(cappedCandidates as InputPaper[]);
 
     return {
       output: {
@@ -1076,8 +991,8 @@ class DeterministicExtractStage implements PipelineStage<StageQualityFiltered, S
 
     const extractionCandidates = input.keptCapped.slice(0, input.extractionMaxCandidates).map((paper) => {
       const base = canonicalToUnifiedPaper(paper);
-      const providerMatch = input.providerById[paper.paper_id]
-        || (paper.doi ? input.providerByDoi[normalizeDoi(paper.doi) || ""] : undefined);
+      const providerMatch = input.providerById.get(paper.paper_id)
+        || (paper.doi ? input.providerByDoi.get(normalizeDoi(paper.doi) || "") : undefined);
       if (providerMatch?.pdfUrl) base.pdfUrl = providerMatch.pdfUrl;
       if (providerMatch?.landingPageUrl) base.landingPageUrl = providerMatch.landingPageUrl;
       return base;
@@ -1263,7 +1178,7 @@ class PersistStage implements PipelineStage<{
         stats,
         canonical_papers: state.keptCapped,
         normalized_query: state.normalizedQueryForResponse,
-        total_papers_searched: state.totalPapersSearched,
+        total_papers_searched: state.enrichedLegacyPapers.length,
         openalex_count: state.papersByProvider.openalex.length,
         semantic_scholar_count: state.papersByProvider.semantic_scholar.length,
         arxiv_count: state.papersByProvider.arxiv.length,
@@ -1287,45 +1202,6 @@ async function resolveShadowPreparedQuery(state: StageRetrieved): Promise<StageR
   }
 }
 
-function normalizeRetrievedPapers(papers: UnifiedPaper[]): UnifiedPaper[] {
-  return [...papers]
-    .map((paper) => ({
-      ...paper,
-      title: (paper.title || "").trim(),
-      abstract: (paper.abstract || "").trim(),
-      doi: normalizeDoi(paper.doi),
-      authors: Array.isArray(paper.authors) ? paper.authors.map((author) => String(author || "").trim()).filter(Boolean) : [],
-      referenced_ids: Array.isArray(paper.referenced_ids) ? paper.referenced_ids.map((id) => String(id || "").trim()).filter(Boolean) : [],
-    }))
-    .sort((left, right) => {
-      const leftRank = Number(left.rank_signal || 0);
-      const rightRank = Number(right.rank_signal || 0);
-      if (rightRank !== leftRank) return rightRank - leftRank;
-      if ((right.year || 0) !== (left.year || 0)) return (right.year || 0) - (left.year || 0);
-      return String(left.id || "").localeCompare(String(right.id || ""));
-    });
-}
-
-export async function normalizeRetrievedStage(state: StageRetrieved): Promise<StageRetrieved> {
-  const withShadow = await resolveShadowPreparedQuery(state);
-  const providerCandidates = normalizeRetrievedPapers(withShadow.providerCandidates || []);
-  const papersByProvider = {
-    semantic_scholar: normalizeRetrievedPapers(withShadow.papersByProvider?.semantic_scholar || []),
-    openalex: normalizeRetrievedPapers(withShadow.papersByProvider?.openalex || []),
-    arxiv: normalizeRetrievedPapers(withShadow.papersByProvider?.arxiv || []),
-    pubmed: normalizeRetrievedPapers(withShadow.papersByProvider?.pubmed || []),
-  };
-
-  return {
-    ...withShadow,
-    providerCandidates,
-    papersByProvider,
-    papersWithAbstracts: providerCandidates.filter((paper) => (paper.abstract || "").length > 50),
-    shadowPreparedPromise: undefined,
-    providerExecution: undefined,
-  };
-}
-
 export async function runResearchPipeline(
   question: string,
   requestPayload: SearchRequestPayload,
@@ -1334,7 +1210,6 @@ export async function runResearchPipeline(
     traceId?: string;
     runId?: string;
     emitEvent?: Parameters<typeof createStageContext>[0]["emitEvent"];
-    providerExecution?: ProviderPipelineOptions["providerExecution"];
   },
 ): Promise<PipelineResult> {
   const pipelineStartedAt = Date.now();
@@ -1347,103 +1222,22 @@ export async function runResearchPipeline(
     stageTimeoutsMs: {
       VALIDATE: 2_000,
       PREPARE_QUERY: 5_000,
-      RETRIEVE_PROVIDERS: 40_000,
+      RETRIEVE_PROVIDERS: 60_000,
       CANONICALIZE: 5_000,
       QUALITY_FILTER: 5_000,
-      DETERMINISTIC_EXTRACT: 75_000,
-      LLM_AUGMENT: 60_000,
+      DETERMINISTIC_EXTRACT: 120_000,
+      LLM_AUGMENT: 150_000,
       PERSIST: 2_000,
     },
   });
 
-  const validated = await runStage(new ValidateStage(), {
-    question,
-    requestPayload,
-    enrichmentContext,
-    pipelineStartedAt,
-    providerExecution: observability?.providerExecution,
-  }, stageCtx);
+  const validated = await runStage(new ValidateStage(), { question, requestPayload, enrichmentContext }, stageCtx);
   const prepared = await runStage(new PrepareQueryStage(), validated, stageCtx);
   const retrievedRaw = await runStage(new RetrieveProvidersStage(), prepared, stageCtx);
-  const retrieved = await normalizeRetrievedStage(retrievedRaw);
+  const retrieved = await resolveShadowPreparedQuery(retrievedRaw);
   const canonicalized = await runStage(new CanonicalizeStage(), retrieved, stageCtx);
   const qualityFiltered = await runStage(new QualityFilterStage(), canonicalized, stageCtx);
   const deterministicExtracted = await runStage(new DeterministicExtractStage(), qualityFiltered, stageCtx);
   const llmAugmented = await runStage(new LlmAugmentStage(), deterministicExtracted, stageCtx);
-  return await runStage(new PersistStage(), { pipelineStartedAt: llmAugmented.pipelineStartedAt, state: llmAugmented }, stageCtx);
-}
-
-export async function runIngestProviderStage(
-  input: {
-    question: string;
-    requestPayload: SearchRequestPayload;
-    enrichmentContext: MetadataEnrichmentContext;
-    pipelineStartedAt: number;
-    userId?: string;
-    cacheKey?: string;
-    providerHash?: string;
-    pipelineVersionId?: string;
-    seed?: number;
-    runInputHash?: string;
-    configSnapshot?: Record<string, unknown>;
-    providerProfile?: SearchSource[];
-    disableDedupe?: boolean;
-    extractionEngineOverride?: ExtractionEngine;
-    providerExecution?: ProviderPipelineOptions["providerExecution"];
-  },
-  stageCtx: StageContext,
-): Promise<StageRetrieved> {
-  const validated = await runStage(new ValidateStage(), input, stageCtx);
-  const prepared = await runStage(new PrepareQueryStage(), validated, stageCtx);
-  const retrieved = await runStage(new RetrieveProvidersStage(), prepared, stageCtx);
-  const resolved = await resolveShadowPreparedQuery(retrieved);
-  return {
-    ...resolved,
-    shadowPreparedPromise: undefined,
-    providerExecution: undefined,
-  };
-}
-
-export async function runNormalizeStage(
-  state: StageRetrieved,
-): Promise<StageRetrieved> {
-  return await normalizeRetrievedStage(state);
-}
-
-export async function runDedupeStage(
-  state: StageRetrieved,
-  stageCtx: StageContext,
-): Promise<StageCanonicalized> {
-  return await runStage(new CanonicalizeStage(), state, stageCtx);
-}
-
-export async function runQualityFilterStage(
-  state: StageCanonicalized,
-  stageCtx: StageContext,
-): Promise<StageQualityFiltered> {
-  return await runStage(new QualityFilterStage(), state, stageCtx);
-}
-
-export async function runDeterministicExtractStage(
-  state: StageQualityFiltered,
-  stageCtx: StageContext,
-): Promise<StageDeterministicExtracted> {
-  return await runStage(new DeterministicExtractStage(), state, stageCtx);
-}
-
-export async function runLlmAugmentStage(
-  state: StageDeterministicExtracted,
-  stageCtx: StageContext,
-): Promise<StageLlmAugmented> {
-  return await runStage(new LlmAugmentStage(), state, stageCtx);
-}
-
-export async function runCompileReportStage(
-  state: StageLlmAugmented,
-  stageCtx: StageContext,
-): Promise<PipelineResult> {
-  return await runStage(new PersistStage(), {
-    pipelineStartedAt: state.pipelineStartedAt,
-    state,
-  }, stageCtx);
+  return await runStage(new PersistStage(), { pipelineStartedAt, state: llmAugmented }, stageCtx);
 }

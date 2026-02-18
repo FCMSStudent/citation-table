@@ -4,9 +4,9 @@ declare const Deno: {
     get(name: string): string | undefined;
   };
 };
-import type { ExpansionMode, ProviderQueryResult, SemanticScholarPaper, UnifiedPaper } from "./types.ts";
+import type { ExpansionMode, SemanticScholarPaper, UnifiedPaper } from "./types.ts";
 import { resolvePreparedQuery } from "./query-builder.ts";
-import { fetchWithRetry, HttpStatusError, parseRetryAfterSeconds, sleep } from "./http.ts";
+import { fetchWithRetry, sleep } from "./http.ts";
 
 const SEMANTIC_SCHOLAR_TIMEOUT_MS = 8_000;
 const SEMANTIC_SCHOLAR_MAX_RETRIES = 4;
@@ -33,9 +33,9 @@ export async function searchSemanticScholar(
   query: string,
   mode: ExpansionMode = "balanced",
   precompiledQuery?: string,
-): Promise<ProviderQueryResult> {
+): Promise<UnifiedPaper[]> {
   const prepared = resolvePreparedQuery(query, "semantic_scholar", mode, precompiledQuery);
-  if (!prepared.apiQuery) return { papers: [], retryCount: 0 };
+  if (!prepared.apiQuery) return [];
 
   const fields = "paperId,title,abstract,year,authors,venue,citationCount,publicationTypes,externalIds,openAccessPdf,url,isRetracted,references.paperId";
   const baseUrl = new URL("https://api.semanticscholar.org/graph/v1/paper/search/bulk");
@@ -53,8 +53,6 @@ export async function searchSemanticScholar(
   const rateLimit = createRateLimiter(1_000);
   const papers: SemanticScholarPaper[] = [];
   let token: string | undefined;
-  let retryCount = 0;
-  let lastStatusCode = 200;
 
   for (let page = 0; page < SEMANTIC_SCHOLAR_MAX_PAGES; page += 1) {
     const pageUrl = new URL(baseUrl.toString());
@@ -69,20 +67,14 @@ export async function searchSemanticScholar(
         timeoutMs: SEMANTIC_SCHOLAR_TIMEOUT_MS,
         maxRetries: SEMANTIC_SCHOLAR_MAX_RETRIES,
         onRetry: ({ attempt, delayMs, reason }) => {
-          retryCount += 1;
           console.warn(`[SemanticScholar] Retry #${attempt} in ${delayMs}ms (${reason})`);
         },
       },
     );
 
     if (!response.ok) {
-      throw new HttpStatusError(
-        `[SemanticScholar] API error ${response.status}`,
-        response.status,
-        parseRetryAfterSeconds(response.headers.get("retry-after")),
-      );
+      throw new Error(`[SemanticScholar] API error ${response.status}`);
     }
-    lastStatusCode = response.status;
 
     const data = await response.json() as SemanticScholarBulkSearchResponse;
     const batch = data.data || [];
@@ -98,29 +90,24 @@ export async function searchSemanticScholar(
 
   console.log(`[SemanticScholar] Found ${papers.length} papers`);
 
-  return {
-    papers: papers.slice(0, SEMANTIC_SCHOLAR_RESULT_CAP).map((paper, idx) => ({
-      id: paper.paperId,
-      title: paper.title || "Untitled",
-      year: paper.year || new Date().getFullYear(),
-      abstract: paper.abstract || "",
-      authors: paper.authors?.map((author) => author.name) || ["Unknown"],
-      venue: paper.venue || "",
-      doi: paper.externalIds?.DOI || null,
-      pubmed_id: paper.externalIds?.PubMed || null,
-      openalex_id: null,
-      source: "semantic_scholar" as const,
-      citationCount: paper.citationCount,
-      publicationTypes: paper.publicationTypes ?? undefined,
-      pdfUrl: paper.openAccessPdf?.url || null,
-      landingPageUrl: paper.url || null,
-      referenced_ids: (paper.references || []).map((ref) => ref.paperId).filter(Boolean),
-      is_retracted: Boolean(paper.isRetracted),
-      preprint_status: (paper.publicationTypes || []).some((ptype) => /preprint/i.test(ptype)) ? "Preprint" : "Peer-reviewed",
-      rank_signal: 1 / (idx + 1),
-    })),
-    retryCount,
-    statusCode: lastStatusCode,
-    retryAfterSeconds: null,
-  };
+  return papers.slice(0, SEMANTIC_SCHOLAR_RESULT_CAP).map((paper, idx) => ({
+    id: paper.paperId,
+    title: paper.title || "Untitled",
+    year: paper.year || new Date().getFullYear(),
+    abstract: paper.abstract || "",
+    authors: paper.authors?.map((author) => author.name) || ["Unknown"],
+    venue: paper.venue || "",
+    doi: paper.externalIds?.DOI || null,
+    pubmed_id: paper.externalIds?.PubMed || null,
+    openalex_id: null,
+    source: "semantic_scholar" as const,
+    citationCount: paper.citationCount,
+    publicationTypes: paper.publicationTypes ?? undefined,
+    pdfUrl: paper.openAccessPdf?.url || null,
+    landingPageUrl: paper.url || null,
+    referenced_ids: (paper.references || []).map((ref) => ref.paperId).filter(Boolean),
+    is_retracted: Boolean(paper.isRetracted),
+    preprint_status: (paper.publicationTypes || []).some((ptype) => /preprint/i.test(ptype)) ? "Preprint" : "Peer-reviewed",
+    rank_signal: 1 / (idx + 1),
+  }));
 }

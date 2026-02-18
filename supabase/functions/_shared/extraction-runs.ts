@@ -71,13 +71,6 @@ export interface PersistExtractionRunInput {
   promptHash?: string | null;
   model?: string | null;
   deterministicFlag?: boolean;
-  pipelineVersionId?: string | null;
-  seed?: number | null;
-  inputHash?: string | null;
-  outputHash?: string | null;
-  configSnapshot?: Record<string, unknown> | null;
-  promptManifestHash?: string | null;
-  extractorBundleHash?: string | null;
   createdAt?: string;
   startedAt?: string;
   completedAt?: string | null;
@@ -112,7 +105,7 @@ interface SupabaseQueryBuilder<T = unknown> extends PromiseLike<SupabaseResponse
 }
 
 export interface SupabaseClientLike {
-  from(table: string): any;
+  from<T = unknown>(table: string): SupabaseQueryBuilder<T>;
   rpc<T = unknown>(fn: string, params?: Record<string, unknown>): Promise<SupabaseResponse<T>>;
 }
 
@@ -378,13 +371,6 @@ export async function persistExtractionRun(
       prompt_hash: input.promptHash ?? null,
       model: input.model ?? null,
       deterministic_flag: Boolean(input.deterministicFlag),
-      pipeline_version_id: input.pipelineVersionId ?? null,
-      seed: input.seed ?? null,
-      input_hash: input.inputHash ?? null,
-      output_hash: input.outputHash ?? null,
-      config_snapshot: input.configSnapshot ?? {},
-      prompt_manifest_hash: input.promptManifestHash ?? null,
-      extractor_bundle_hash: input.extractorBundleHash ?? null,
       canonical_papers: toJsonArray(input.canonicalPapers),
       error_message: input.errorMessage ?? null,
       created_by: input.userId ?? null,

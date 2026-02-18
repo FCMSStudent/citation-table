@@ -1,6 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
 import type { ReactNode } from 'react';
-import { useQuery } from '@tanstack/react-query';
 import { RefreshCw, Sparkles, AlertCircle, AlertTriangle } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import { Button } from '@/shared/ui/Button';
@@ -8,8 +7,7 @@ import { Badge } from '@/shared/ui/Badge';
 import { Skeleton } from '@/shared/ui/Skeleton';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/shared/ui/Tooltip';
 import { Popover, PopoverContent, PopoverTrigger } from '@/shared/ui/Popover';
-import { reportKeys, fetchReportSummary } from '@/entities/report/api/report.queries';
-import { useGenerateSummaryMutation } from '@/entities/report/api/report.mutations';
+import { getSupabase } from '@/integrations/supabase/fallback';
 import type { StudyResult, SynthesisData, SynthesisWarning, NarrativeSynthesisData } from '@/shared/types/research';
 
 interface NarrativeSynthesisProps {
@@ -225,31 +223,39 @@ export function NarrativeSynthesis({
   cachedSynthesis,
   truncateLines = 6,
 }: NarrativeSynthesisProps) {
-  const summaryQuery = useQuery({
-    queryKey: reportKeys.summary(reportId),
-    queryFn: () => fetchReportSummary(reportId),
-    initialData: cachedSynthesis ?? undefined,
-  });
-  const generateSummaryMutation = useGenerateSummaryMutation(reportId);
-  const rawSynthesis = summaryQuery.data ?? null;
-  const isGenerating = generateSummaryMutation.isPending;
-  const error =
-    (generateSummaryMutation.error instanceof Error ? generateSummaryMutation.error.message : null) ||
-    (summaryQuery.error instanceof Error ? summaryQuery.error.message : null);
+  const [rawSynthesis, setRawSynthesis] = useState<string | null>(cachedSynthesis || null);
+  const [isGenerating, setIsGenerating] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  void query;
 
   const generate = useCallback(async () => {
+    setIsGenerating(true);
+    setError(null);
+
     try {
-      await generateSummaryMutation.mutateAsync();
+      const client = getSupabase();
+      const { data: result, error: invokeError } = await client.functions.invoke('synthesize-papers', {
+        body: { report_id: reportId },
+      });
+
+      if (invokeError) {
+        throw new Error(invokeError.message || 'Failed to generate synthesis');
+      }
+
+      setRawSynthesis(result.synthesis);
     } catch (err) {
       console.error('Synthesis generation failed:', err);
+      setError(err instanceof Error ? err.message : 'Failed to generate synthesis');
+    } finally {
+      setIsGenerating(false);
     }
-  }, [generateSummaryMutation]);
+  }, [reportId]);
 
   useEffect(() => {
     if (!cachedSynthesis && studies.length > 0 && !rawSynthesis && !isGenerating) {
-      void generate();
+      generate();
     }
-  }, [cachedSynthesis, studies.length, rawSynthesis, isGenerating, generate]);
+  }, [cachedSynthesis, studies.length]); // eslint-disable-line react-hooks/exhaustive-deps
 
   if (isGenerating) {
     return (
