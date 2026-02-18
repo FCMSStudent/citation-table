@@ -4,6 +4,8 @@ import { fetchReport, isReportProcessing, reportKeys, type Report } from '@/enti
 interface UseReportReturn {
   report: Report | null;
   isLoading: boolean;
+  isFetching: boolean;
+  dataUpdatedAt: number;
   error: string | null;
   refetch: () => void;
 }
@@ -19,6 +21,8 @@ export function useReport(reportId: string | undefined): UseReportReturn {
   return {
     report: query.data ?? null,
     isLoading: query.isLoading,
+    isFetching: query.isFetching,
+    dataUpdatedAt: query.dataUpdatedAt,
     error: query.error instanceof Error ? query.error.message : null,
     refetch: () => {
       void query.refetch();

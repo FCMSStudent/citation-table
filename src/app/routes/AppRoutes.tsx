@@ -6,34 +6,41 @@ import ReportsPage from '@/features/reports-list/ui/ReportsPage';
 import ReportDetailPage from '@/features/report-detail/ui/ReportDetailPage';
 import NotFound from '@/pages/NotFound';
 import { ProtectedRoute } from '@/app/routes/ProtectedRoute';
+import { RouteErrorBoundary } from '@/app/routes/RouteErrorBoundary';
 
 export function AppRoutes() {
   return (
     <Routes>
-      <Route path="/auth" element={<AuthPage />} />
-      <Route path="/" element={<LandingPage />} />
+      <Route path="/auth" element={<RouteErrorBoundary><AuthPage /></RouteErrorBoundary>} />
+      <Route path="/" element={<RouteErrorBoundary><LandingPage /></RouteErrorBoundary>} />
       <Route
         path="/app"
         element={
-          <ProtectedRoute>
-            <SearchPage />
-          </ProtectedRoute>
+          <RouteErrorBoundary>
+            <ProtectedRoute>
+              <SearchPage />
+            </ProtectedRoute>
+          </RouteErrorBoundary>
         }
       />
       <Route
         path="/reports"
         element={
-          <ProtectedRoute>
-            <ReportsPage />
-          </ProtectedRoute>
+          <RouteErrorBoundary>
+            <ProtectedRoute>
+              <ReportsPage />
+            </ProtectedRoute>
+          </RouteErrorBoundary>
         }
       />
       <Route
         path="/reports/:id"
         element={
-          <ProtectedRoute>
-            <ReportDetailPage />
-          </ProtectedRoute>
+          <RouteErrorBoundary>
+            <ProtectedRoute>
+              <ReportDetailPage />
+            </ProtectedRoute>
+          </RouteErrorBoundary>
         }
       />
       <Route path="*" element={<NotFound />} />

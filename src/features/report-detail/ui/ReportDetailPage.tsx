@@ -3,17 +3,18 @@ import { useParams, Link } from 'react-router-dom';
 import { BookOpen, ArrowLeft, FileText } from 'lucide-react';
 import { useReport } from '@/entities/report/model/useReport';
 import { useStudyPdfs } from '@/entities/study/model/useStudyPdfs';
-import { SearchProgress } from '@/features/report-detail/ui/SearchProgress';
+import { RunStatusTimeline } from '@/features/report-detail/ui/RunStatusTimeline';
 import { ResultsTable } from '@/features/report-detail/ui/ResultsTable';
 import { PaperChat } from '@/features/paper-chat/ui/PaperChat';
 import { AddStudyDialog } from '@/features/study-management/ui/AddStudyDialog';
 import { Skeleton } from '@/shared/ui/Skeleton';
 import type { StudyResult } from '@/shared/types/research';
 import { cn } from '@/shared/lib/utils';
+import { ErrorBoundary } from '@/shared/ui/ErrorBoundary';
 
 const ReportDetail = () => {
   const { id } = useParams<{ id: string }>();
-  const { report, isLoading, error } = useReport(id);
+  const { report, isLoading, isFetching, dataUpdatedAt, error, refetch } = useReport(id);
   const { pdfs: pdfsByDoi } = useStudyPdfs(id);
   const [isScrolled, setIsScrolled] = useState(false);
 
@@ -72,6 +73,13 @@ const ReportDetail = () => {
           <div className="mx-auto max-w-xl rounded-lg border bg-card p-8 text-center">
             <h2 className="text-lg font-semibold text-foreground">Error</h2>
             <p className="mt-2 text-sm text-muted-foreground">{error}</p>
+            <button
+              type="button"
+              onClick={refetch}
+              className="mt-4 inline-flex rounded-md border px-3 py-1.5 text-sm text-foreground hover:bg-muted"
+            >
+              Retry
+            </button>
             <Link to="/reports" className="mt-4 inline-flex items-center gap-2 text-sm text-primary hover:underline">
               Back to Reports
             </Link>
@@ -91,33 +99,41 @@ const ReportDetail = () => {
               )}
             </div>
 
-            {/* Processing state */}
-            {report.status === 'processing' && (
-              <SearchProgress
-                status="processing"
-                createdAt={report.created_at}
-              />
-            )}
+            <section className="mb-6 rounded-lg border bg-card p-4 text-xs text-muted-foreground">
+              <h3 className="mb-2 text-sm font-semibold text-foreground">Run metadata</h3>
+              <div className="grid gap-1 sm:grid-cols-2">
+                <p>Run ID: {report.id}</p>
+                <p>Active extraction run: {report.active_extraction_run_id || '—'}</p>
+                <p>Created: {new Date(report.created_at).toLocaleString()}</p>
+                <p>Completed: {report.completed_at ? new Date(report.completed_at).toLocaleString() : '—'}</p>
+                <p>Normalized query: {report.normalized_query || '—'}</p>
+                <p>
+                  Provider coverage: {report.coverage_report
+                    ? `${report.coverage_report.providers_queried - report.coverage_report.providers_failed}/${report.coverage_report.providers_queried}`
+                    : '—'}
+                </p>
+              </div>
+            </section>
 
-            {/* Failed state */}
-            {report.status === 'failed' && (
-              <SearchProgress
-                status="failed"
-                createdAt={report.created_at}
-                errorMessage={report.error_message}
-              />
-            )}
+            <RunStatusTimeline
+              status={report.status}
+              errorMessage={report.error_message}
+              searchStats={report.search_stats || undefined}
+              extractionStats={report.extraction_stats || undefined}
+              activeExtractionRunId={report.active_extraction_run_id || undefined}
+              isFetching={isFetching}
+              dataUpdatedAt={dataUpdatedAt}
+              onRetry={refetch}
+            />
 
-            {/* Completed state - show results */}
-            {report.status === 'completed' && report.results && (() => {
-              return (
-              <>
-                {/* Results */}
-                <section>
+            {(report.results || report.partial_results) ? (
+              <section className="mt-6">
+                <ErrorBoundary title="Study table failed to render" onRetry={refetch}>
                   <ResultsTable
-                    results={report.results as unknown as StudyResult[]}
+                    results={(report.results || []) as unknown as StudyResult[]}
                     query={report.question}
                     normalizedQuery={report.normalized_query || undefined}
+                    activeExtractionRunId={report.active_extraction_run_id || undefined}
                     totalPapersSearched={report.total_papers_searched}
                     openalexCount={report.openalex_count}
                     semanticScholarCount={report.semantic_scholar_count}
@@ -133,17 +149,25 @@ const ReportDetail = () => {
                     partialResults={report.partial_results || undefined}
                     extractionStats={report.extraction_stats || undefined}
                   />
-                </section>
-
-              </>
-              );
-            })()}
+                </ErrorBoundary>
+              </section>
+            ) : (
+              <section className="mt-6 rounded-lg border bg-card p-6 text-sm text-muted-foreground">
+                No results yet. This report will populate as providers return studies.
+              </section>
+            )}
           </div>
-        ) : null}
+        ) : (
+          <div className="mx-auto max-w-xl rounded-lg border bg-card p-8 text-center text-sm text-muted-foreground">
+            Report not found.
+          </div>
+        )}
       </main>
 
-      {report?.status === 'completed' && id && (
-        <PaperChat reportId={id} mode="modal" defaultOpen />
+      {id && (
+        <ErrorBoundary title="Paper chat failed" onRetry={refetch}>
+          <PaperChat reportId={id} mode="modal" defaultOpen />
+        </ErrorBoundary>
       )}
     </div>
   );

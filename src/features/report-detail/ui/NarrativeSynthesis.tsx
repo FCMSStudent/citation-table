@@ -233,8 +233,9 @@ export function NarrativeSynthesis({
   const generateSummaryMutation = useGenerateSummaryMutation(reportId);
   const rawSynthesis = summaryQuery.data ?? null;
   const isGenerating = generateSummaryMutation.isPending;
-  const error = generateSummaryMutation.error instanceof Error ? generateSummaryMutation.error.message : null;
-  void query;
+  const error =
+    (generateSummaryMutation.error instanceof Error ? generateSummaryMutation.error.message : null) ||
+    (summaryQuery.error instanceof Error ? summaryQuery.error.message : null);
 
   const generate = useCallback(async () => {
     try {

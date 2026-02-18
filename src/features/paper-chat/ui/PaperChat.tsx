@@ -41,7 +41,7 @@ interface ChatPanelProps {
 }
 
 function ChatPanel({ reportId, starters, className }: ChatPanelProps) {
-  const { messages, isStreaming, error, sendMessage, clearChat } = usePaperChat(reportId);
+  const { messages, isStreaming, error, sendMessage, clearChat, retryLast } = usePaperChat(reportId);
   const [input, setInput] = useState('');
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -127,7 +127,7 @@ function ChatPanel({ reportId, starters, className }: ChatPanelProps) {
                 <ReactMarkdown>{msg.content}</ReactMarkdown>
               )}
               {msg.role === 'assistant' && isStreaming && i === messages.length - 1 && (
-                <span className="inline-block w-1.5 h-4 bg-primary/60 animate-pulse ml-0.5 align-text-bottom" />
+                <span className="inline-block w-1.5 h-4 bg-primary/60 animate-pulse motion-reduce:animate-none ml-0.5 align-text-bottom" />
               )}
             </div>
             {msg.role === 'user' && (
@@ -143,7 +143,10 @@ function ChatPanel({ reportId, starters, className }: ChatPanelProps) {
       {error && (
         <div className="px-4 py-2 flex items-center gap-2 text-xs text-destructive bg-destructive/10 border-t border-border">
           <AlertCircle className="h-3.5 w-3.5 flex-shrink-0" />
-          {error}
+          <span className="flex-1">{error}</span>
+          <Button type="button" size="sm" variant="outline" className="h-6 px-2 text-[11px]" onClick={retryLast}>
+            Retry
+          </Button>
         </div>
       )}
 
@@ -173,6 +176,7 @@ export function PaperChat({
   starters = DEFAULT_STARTERS,
 }: PaperChatProps) {
   const [open, setOpen] = useState(false);
+  const openButtonRef = useRef<HTMLButtonElement | null>(null);
 
   useEffect(() => {
     if (mode !== 'modal' || !defaultOpen) return;
@@ -192,6 +196,7 @@ export function PaperChat({
   return (
     <>
       <Button
+        ref={openButtonRef}
         type="button"
         size="sm"
         className="fixed bottom-5 right-5 z-30 rounded-full px-4 shadow-lg"
@@ -206,7 +211,13 @@ export function PaperChat({
       </Button>
 
       <Dialog open={open} onOpenChange={setOpen}>
-        <DialogContent className="w-[min(94vw,820px)] max-w-none h-[78vh] p-0 gap-0">
+        <DialogContent
+          className="w-[min(94vw,820px)] max-w-none h-[78vh] p-0 gap-0"
+          onCloseAutoFocus={(event) => {
+            event.preventDefault();
+            openButtonRef.current?.focus();
+          }}
+        >
           <div className="flex-1 min-h-0 p-4">
             <ChatPanel reportId={reportId} starters={starters} className="h-full" />
           </div>
