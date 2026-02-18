@@ -13,7 +13,7 @@ from typing import Dict, Optional, Literal
 from datetime import datetime
 from pathlib import Path
 
-from fastapi import FastAPI, HTTPException, Header
+from fastapi import FastAPI, HTTPException, Header, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 from scidownl import scihub_download
@@ -48,7 +48,7 @@ app = FastAPI(
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],  # In production, specify your frontend domain
-    allow_credentials=True,
+    allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -149,15 +149,14 @@ async def health_check():
         total = len(tasks)
     return {
         "status": "healthy",
-        "storage_dir": str(STORAGE_DIR),
         "active_tasks": active,
         "total_tasks_cached": total,
         "concurrency_limit": MAX_CONCURRENT_DOWNLOADS,
-        "pdf_extractor_auth_enabled": bool(PDF_EXTRACTOR_BEARER_TOKEN),
     }
 
 
-def validate_extractor_token(authorization: Optional[str]) -> None:
+async def verify_token(authorization: Optional[str] = Header(default=None)) -> None:
+    """Dependency to verify bearer token if PDF_EXTRACTOR_BEARER_TOKEN is set."""
     if not PDF_EXTRACTOR_BEARER_TOKEN:
         return
     if not authorization or not authorization.startswith("Bearer "):
@@ -167,15 +166,11 @@ def validate_extractor_token(authorization: Optional[str]) -> None:
         raise HTTPException(status_code=403, detail="Invalid bearer token")
 
 
-@app.post("/extract/studies", response_model=ExtractStudiesResponse)
-async def extract_studies_endpoint(
-    request: ExtractStudiesRequest,
-    authorization: Optional[str] = Header(default=None),
-):
+@app.post("/extract/studies", response_model=ExtractStudiesResponse, dependencies=[Depends(verify_token)])
+async def extract_studies_endpoint(request: ExtractStudiesRequest):
     """
     Deterministically extract study fields from PDFs (with abstract fallback).
     """
-    validate_extractor_token(authorization)
     try:
         return extract_studies_batch(request)
     except HTTPException:
@@ -184,7 +179,7 @@ async def extract_studies_endpoint(
         raise HTTPException(status_code=500, detail=f"Extraction failed: {str(exc)[:160]}")
 
 
-@app.post("/api/download", response_model=DownloadResponse, status_code=202)
+@app.post("/api/download", response_model=DownloadResponse, status_code=202, dependencies=[Depends(verify_token)])
 async def download_paper(request: DownloadRequest):
     """Request a paper download by DOI, PMID, or title."""
     task_id = str(uuid.uuid4())
@@ -222,7 +217,7 @@ async def download_paper(request: DownloadRequest):
     )
 
 
-@app.get("/api/status/{task_id}", response_model=TaskStatus)
+@app.get("/api/status/{task_id}", response_model=TaskStatus, dependencies=[Depends(verify_token)])
 async def get_task_status(task_id: str):
     """
     Get the status of a download task.
@@ -245,7 +240,7 @@ async def get_task_status(task_id: str):
     return TaskStatus(**task)
 
 
-@app.get("/api/tasks")
+@app.get("/api/tasks", dependencies=[Depends(verify_token)])
 async def list_tasks():
     """
     List all tasks (for debugging/monitoring).
