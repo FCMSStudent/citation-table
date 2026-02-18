@@ -13,7 +13,7 @@ import { cn } from '@/shared/lib/utils';
 
 const ReportDetail = () => {
   const { id } = useParams<{ id: string }>();
-  const { report, isLoading, error, refetch } = useReport(id);
+  const { report, isLoading, error } = useReport(id);
   const { pdfs: pdfsByDoi } = useStudyPdfs(id);
   const [isScrolled, setIsScrolled] = useState(false);
 
@@ -87,7 +87,7 @@ const ReportDetail = () => {
                 </p>
               </div>
               {report.status === 'completed' && id && (
-                <AddStudyDialog reportId={id} onStudyAdded={refetch} />
+                <AddStudyDialog reportId={id} />
               )}
             </div>
 

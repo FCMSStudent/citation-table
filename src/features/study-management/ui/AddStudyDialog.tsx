@@ -4,56 +4,31 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from 
 import { Button } from '@/shared/ui/Button';
 import { Input } from '@/shared/ui/Input';
 import { Label } from '@/shared/ui/Label';
-import { getSupabase } from '@/integrations/supabase/fallback';
+import { useAddStudyMutation } from '@/entities/report/api/report.mutations';
 import { toast } from 'sonner';
 
 interface AddStudyDialogProps {
   reportId: string;
-  onStudyAdded: () => void;
 }
 
-export function AddStudyDialog({ reportId, onStudyAdded }: AddStudyDialogProps) {
+export function AddStudyDialog({ reportId }: AddStudyDialogProps) {
   const [open, setOpen] = useState(false);
   const [doi, setDoi] = useState('');
-  const [isLoading, setIsLoading] = useState(false);
+  const addStudyMutation = useAddStudyMutation(reportId);
+  const isLoading = addStudyMutation.isPending;
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!doi.trim()) return;
 
-    setIsLoading(true);
     try {
-      const client = getSupabase();
-      const { data: { session } } = await client.auth.getSession();
-      if (!session?.access_token) {
-        toast.error('Please sign in to add studies');
-        return;
-      }
-
-      const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
-      const resp = await fetch(`${supabaseUrl}/functions/v1/add-study`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${session.access_token}`,
-          apikey: import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY,
-        },
-        body: JSON.stringify({ report_id: reportId, doi: doi.trim() }),
-      });
-
-      const data = await resp.json();
-      if (!resp.ok) {
-        throw new Error(data.error || 'Failed to add study');
-      }
+      const data = await addStudyMutation.mutateAsync(doi);
 
       toast.success(`Added: ${data.study?.title || 'Study added'}`);
       setDoi('');
       setOpen(false);
-      onStudyAdded();
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Failed to add study');
-    } finally {
-      setIsLoading(false);
     }
   };
 

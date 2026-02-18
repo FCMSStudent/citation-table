@@ -1,41 +1,21 @@
-import { useState, useEffect } from 'react';
-import { getSupabase } from '@/integrations/supabase/fallback';
+import { useQuery } from '@tanstack/react-query';
+import { fetchReports, hasProcessingReports, reportKeys, type ReportListParams } from '@/entities/report/api/report.queries';
 
-interface ReportSummary {
-  id: string;
-  question: string;
-  status: 'processing' | 'completed' | 'failed';
-  created_at: string;
-  results: unknown[] | null;
-}
+const DEFAULT_PARAMS: ReportListParams = { limit: 50 };
 
-export function useReports() {
-  const [reports, setReports] = useState<ReportSummary[]>([]);
-  const [isLoading, setIsLoading] = useState(true);
+export function useReports(params: ReportListParams = DEFAULT_PARAMS) {
+  const query = useQuery({
+    queryKey: reportKeys.list(params),
+    queryFn: () => fetchReports(params),
+    refetchInterval: ({ state }) => (hasProcessingReports(state.data) ? 5000 : false),
+  });
 
-  const fetchReports = async () => {
-    try {
-      const client = getSupabase();
-      const { data, error } = await client
-        .from('research_reports')
-        .select('id, question, status, created_at, results')
-        .order('created_at', { ascending: false })
-        .limit(50);
-
-      if (error) throw error;
-      setReports((data as unknown as ReportSummary[]) || []);
-    } catch (err) {
-      console.error('Error fetching reports:', err);
-    } finally {
-      setIsLoading(false);
-    }
+  return {
+    reports: query.data ?? [],
+    isLoading: query.isLoading,
+    error: query.error instanceof Error ? query.error.message : null,
+    refetch: () => {
+      void query.refetch();
+    },
   };
-
-  useEffect(() => {
-    fetchReports();
-    const interval = setInterval(fetchReports, 5000);
-    return () => clearInterval(interval);
-  }, []);
-
-  return { reports, isLoading, refetch: fetchReports };
 }
