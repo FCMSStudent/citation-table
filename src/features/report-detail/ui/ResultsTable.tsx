@@ -651,6 +651,25 @@ export function ResultsTable({
     });
   }, []);
 
+  // Perf: Pre-calculate a lookup Map for expanded snippets to avoid O(R*S) operations in the render loop.
+  // This reduces complexity from O(visible_rows * total_expanded_snippets) to O(total_expanded_snippets).
+  const snippetLookup = useMemo(() => {
+    const tempMap = new Map<string, string[]>();
+    for (const key of expandedSnippets) {
+      const lastDashIndex = key.lastIndexOf('-');
+      if (lastDashIndex === -1) continue;
+      const studyId = key.substring(0, lastDashIndex);
+      const index = key.substring(lastDashIndex + 1);
+      if (!tempMap.has(studyId)) tempMap.set(studyId, []);
+      tempMap.get(studyId)!.push(index);
+    }
+    const finalMap = new Map<string, string>();
+    for (const [studyId, indices] of tempMap.entries()) {
+      finalMap.set(studyId, indices.join(','));
+    }
+    return finalMap;
+  }, [expandedSnippets]);
+
   if (totalInputStudies === 0) return null;
 
   const pageWindow = buildReportPaginationWindow(currentPage, totalPages, 5);
@@ -950,10 +969,7 @@ export function ResultsTable({
                     onToggle={toggleRow}
                     highlightedStudyId={highlightedStudyId}
                     pdf={study.citation.doi ? pdfsByDoi[study.citation.doi] : undefined}
-                    expandedSnippetIndices={Array.from(expandedSnippets)
-                      .filter(id => id.startsWith(`${study.study_id}-`))
-                      .map(id => id.split('-').pop())
-                      .join(',')}
+                    expandedSnippetIndices={snippetLookup.get(study.study_id) || ''}
                     onToggleSnippet={toggleSnippet}
                   />
                 ))}
