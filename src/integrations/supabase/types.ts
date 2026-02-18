@@ -14,6 +14,45 @@ export type Database = {
   }
   public: {
     Tables: {
+      canonical_record_cache: {
+        Row: {
+          cache_version: string
+          created_at: string
+          expires_at: string
+          fingerprint: string
+          hit_count: number
+          id: string
+          last_hit_at: string | null
+          payload: Json
+          payload_hash: string | null
+          updated_at: string
+        }
+        Insert: {
+          cache_version?: string
+          created_at?: string
+          expires_at: string
+          fingerprint: string
+          hit_count?: number
+          id?: string
+          last_hit_at?: string | null
+          payload?: Json
+          payload_hash?: string | null
+          updated_at?: string
+        }
+        Update: {
+          cache_version?: string
+          created_at?: string
+          expires_at?: string
+          fingerprint?: string
+          hit_count?: number
+          id?: string
+          last_hit_at?: string | null
+          payload?: Json
+          payload_hash?: string | null
+          updated_at?: string
+        }
+        Relationships: []
+      }
       dedup_source_priority: {
         Row: {
           created_at: string
@@ -32,6 +71,93 @@ export type Database = {
           id?: string
           source?: string
           trust_score?: number
+        }
+        Relationships: []
+      }
+      doi_cache: {
+        Row: {
+          cache_version: string
+          created_at: string
+          expires_at: string
+          hit_count: number
+          id: string
+          last_hit_at: string | null
+          normalized_doi: string
+          payload: Json
+          source: string | null
+          updated_at: string
+        }
+        Insert: {
+          cache_version?: string
+          created_at?: string
+          expires_at: string
+          hit_count?: number
+          id?: string
+          last_hit_at?: string | null
+          normalized_doi: string
+          payload?: Json
+          source?: string | null
+          updated_at?: string
+        }
+        Update: {
+          cache_version?: string
+          created_at?: string
+          expires_at?: string
+          hit_count?: number
+          id?: string
+          last_hit_at?: string | null
+          normalized_doi?: string
+          payload?: Json
+          source?: string | null
+          updated_at?: string
+        }
+        Relationships: []
+      }
+      extraction_cache: {
+        Row: {
+          cache_key: string
+          created_at: string
+          expires_at: string | null
+          extractor_version: string
+          hit_count: number
+          id: string
+          last_hit_at: string | null
+          model: string
+          output_hash: string | null
+          output_payload: Json
+          prompt_hash: string
+          study_id: string
+          updated_at: string
+        }
+        Insert: {
+          cache_key: string
+          created_at?: string
+          expires_at?: string | null
+          extractor_version: string
+          hit_count?: number
+          id?: string
+          last_hit_at?: string | null
+          model: string
+          output_hash?: string | null
+          output_payload?: Json
+          prompt_hash: string
+          study_id: string
+          updated_at?: string
+        }
+        Update: {
+          cache_key?: string
+          created_at?: string
+          expires_at?: string | null
+          extractor_version?: string
+          hit_count?: number
+          id?: string
+          last_hit_at?: string | null
+          model?: string
+          output_hash?: string | null
+          output_payload?: Json
+          prompt_hash?: string
+          study_id?: string
+          updated_at?: string
         }
         Relationships: []
       }
@@ -620,6 +746,78 @@ export type Database = {
         }
         Relationships: []
       }
+      pipeline_versions: {
+        Row: {
+          config_hash: string
+          config_snapshot: Json
+          created_at: string
+          extractor_bundle_hash: string
+          id: string
+          prompt_manifest_hash: string
+          seed: number
+        }
+        Insert: {
+          config_hash: string
+          config_snapshot?: Json
+          created_at?: string
+          extractor_bundle_hash: string
+          id?: string
+          prompt_manifest_hash: string
+          seed?: number
+        }
+        Update: {
+          config_hash?: string
+          config_snapshot?: Json
+          created_at?: string
+          extractor_bundle_hash?: string
+          id?: string
+          prompt_manifest_hash?: string
+          seed?: number
+        }
+        Relationships: []
+      }
+      provider_rate_limit_state: {
+        Row: {
+          blocked_until: string | null
+          circuit_state: string
+          consecutive_failures: number
+          id: string
+          in_flight: number
+          last_refill_at: string
+          max_tokens: number
+          provider: string
+          refill_rate: number
+          tokens_remaining: number
+          updated_at: string
+        }
+        Insert: {
+          blocked_until?: string | null
+          circuit_state?: string
+          consecutive_failures?: number
+          id?: string
+          in_flight?: number
+          last_refill_at?: string
+          max_tokens?: number
+          provider: string
+          refill_rate?: number
+          tokens_remaining?: number
+          updated_at?: string
+        }
+        Update: {
+          blocked_until?: string | null
+          circuit_state?: string
+          consecutive_failures?: number
+          id?: string
+          in_flight?: number
+          last_refill_at?: string
+          max_tokens?: number
+          provider?: string
+          refill_rate?: number
+          tokens_remaining?: number
+          updated_at?: string
+        }
+        Relationships: []
+      }
       rate_limits: {
         Row: {
           client_ip: string
@@ -638,6 +836,39 @@ export type Database = {
           created_at?: string
           function_name?: string
           id?: string
+        }
+        Relationships: []
+      }
+      research_cache_events: {
+        Row: {
+          cache_name: string
+          created_at: string
+          event_type: string
+          id: string
+          key_hash: string | null
+          metadata: Json
+          report_id: string | null
+          run_id: string | null
+        }
+        Insert: {
+          cache_name: string
+          created_at?: string
+          event_type: string
+          id?: string
+          key_hash?: string | null
+          metadata?: Json
+          report_id?: string | null
+          run_id?: string | null
+        }
+        Update: {
+          cache_name?: string
+          created_at?: string
+          event_type?: string
+          id?: string
+          key_hash?: string | null
+          metadata?: Json
+          report_id?: string | null
+          run_id?: string | null
         }
         Relationships: []
       }
@@ -699,6 +930,42 @@ export type Database = {
             referencedColumns: ["id"]
           },
         ]
+      }
+      research_metrics_samples: {
+        Row: {
+          created_at: string
+          id: string
+          metric_name: string
+          metric_value: number
+          observed_at: string
+          report_id: string | null
+          run_id: string | null
+          tags: Json
+          unit: string | null
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          metric_name: string
+          metric_value: number
+          observed_at?: string
+          report_id?: string | null
+          run_id?: string | null
+          tags?: Json
+          unit?: string | null
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          metric_name?: string
+          metric_value?: number
+          observed_at?: string
+          report_id?: string | null
+          run_id?: string | null
+          tags?: Json
+          unit?: string | null
+        }
+        Relationships: []
       }
       research_reports: {
         Row: {
@@ -838,6 +1105,108 @@ export type Database = {
         }
         Relationships: []
       }
+      research_stage_outputs: {
+        Row: {
+          created_at: string
+          id: string
+          input_hash: string
+          output_hash: string
+          payload: Json
+          pipeline_version_id: string | null
+          producer_job_id: string | null
+          report_id: string
+          stage: string
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          input_hash: string
+          output_hash: string
+          payload?: Json
+          pipeline_version_id?: string | null
+          producer_job_id?: string | null
+          report_id: string
+          stage: string
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          input_hash?: string
+          output_hash?: string
+          payload?: Json
+          pipeline_version_id?: string | null
+          producer_job_id?: string | null
+          report_id?: string
+          stage?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "research_stage_outputs_pipeline_version_id_fkey"
+            columns: ["pipeline_version_id"]
+            isOneToOne: false
+            referencedRelation: "pipeline_versions"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "research_stage_outputs_report_id_fkey"
+            columns: ["report_id"]
+            isOneToOne: false
+            referencedRelation: "research_reports"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      research_trace_spans: {
+        Row: {
+          attributes: Json
+          created_at: string
+          duration_ms: number | null
+          ended_at: string | null
+          id: string
+          provider: string | null
+          report_id: string | null
+          retry_count: number
+          run_id: string
+          span_name: string
+          stage: string | null
+          started_at: string
+          status: string
+          trace_id: string
+        }
+        Insert: {
+          attributes?: Json
+          created_at?: string
+          duration_ms?: number | null
+          ended_at?: string | null
+          id?: string
+          provider?: string | null
+          report_id?: string | null
+          retry_count?: number
+          run_id: string
+          span_name: string
+          stage?: string | null
+          started_at: string
+          status: string
+          trace_id: string
+        }
+        Update: {
+          attributes?: Json
+          created_at?: string
+          duration_ms?: number | null
+          ended_at?: string | null
+          id?: string
+          provider?: string | null
+          report_id?: string | null
+          retry_count?: number
+          run_id?: string
+          span_name?: string
+          stage?: string | null
+          started_at?: string
+          status?: string
+          trace_id?: string
+        }
+        Relationships: []
+      }
       study_pdfs: {
         Row: {
           created_at: string
@@ -889,6 +1258,28 @@ export type Database = {
         Returns: number
       }
       next_run_index: { Args: { p_report_id: string }; Returns: number }
+      provider_rate_limit_record_result: {
+        Args: {
+          p_error?: string
+          p_latency_ms?: number
+          p_provider: string
+          p_retry_after_seconds?: number
+          p_status?: number
+          p_success: boolean
+        }
+        Returns: undefined
+      }
+      provider_rate_limit_try_acquire: {
+        Args: { p_provider: string; p_tokens?: number }
+        Returns: {
+          acquired: boolean
+          blocked_until: string
+          circuit_state: string
+          in_flight: number
+          tokens_remaining: number
+          wait_ms: number
+        }[]
+      }
       report_has_doi: {
         Args: { p_doi: string; p_report_id: string }
         Returns: boolean
