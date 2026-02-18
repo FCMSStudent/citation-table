@@ -32,7 +32,7 @@ const STATUS_CONFIG = {
 };
 
 export function ReportCard({ id, question, status, createdAt, resultCount }: ReportCardProps) {
-  const config = STATUS_CONFIG[status];
+  const config = STATUS_CONFIG[status] ?? STATUS_CONFIG.processing;
   const StatusIcon = config.icon;
 
   const timeAgo = getTimeAgo(createdAt);
