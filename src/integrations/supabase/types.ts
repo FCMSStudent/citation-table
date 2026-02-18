@@ -14,6 +14,810 @@ export type Database = {
   }
   public: {
     Tables: {
+      canonical_record_cache: {
+        Row: {
+          cache_version: string
+          created_at: string
+          expires_at: string
+          fingerprint: string
+          hit_count: number
+          id: string
+          last_hit_at: string | null
+          payload: Json
+          payload_hash: string | null
+          updated_at: string
+        }
+        Insert: {
+          cache_version?: string
+          created_at?: string
+          expires_at: string
+          fingerprint: string
+          hit_count?: number
+          id?: string
+          last_hit_at?: string | null
+          payload?: Json
+          payload_hash?: string | null
+          updated_at?: string
+        }
+        Update: {
+          cache_version?: string
+          created_at?: string
+          expires_at?: string
+          fingerprint?: string
+          hit_count?: number
+          id?: string
+          last_hit_at?: string | null
+          payload?: Json
+          payload_hash?: string | null
+          updated_at?: string
+        }
+        Relationships: []
+      }
+      dedup_source_priority: {
+        Row: {
+          created_at: string
+          id: string
+          source: string
+          trust_score: number
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          source: string
+          trust_score?: number
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          source?: string
+          trust_score?: number
+        }
+        Relationships: []
+      }
+      doi_cache: {
+        Row: {
+          cache_version: string
+          created_at: string
+          expires_at: string
+          hit_count: number
+          id: string
+          last_hit_at: string | null
+          normalized_doi: string
+          payload: Json
+          source: string | null
+          updated_at: string
+        }
+        Insert: {
+          cache_version?: string
+          created_at?: string
+          expires_at: string
+          hit_count?: number
+          id?: string
+          last_hit_at?: string | null
+          normalized_doi: string
+          payload?: Json
+          source?: string | null
+          updated_at?: string
+        }
+        Update: {
+          cache_version?: string
+          created_at?: string
+          expires_at?: string
+          hit_count?: number
+          id?: string
+          last_hit_at?: string | null
+          normalized_doi?: string
+          payload?: Json
+          source?: string | null
+          updated_at?: string
+        }
+        Relationships: []
+      }
+      extraction_cache: {
+        Row: {
+          cache_key: string
+          created_at: string
+          expires_at: string | null
+          extractor_version: string
+          hit_count: number
+          id: string
+          last_hit_at: string | null
+          model: string
+          output_hash: string | null
+          output_payload: Json
+          prompt_hash: string
+          study_id: string
+          updated_at: string
+        }
+        Insert: {
+          cache_key: string
+          created_at?: string
+          expires_at?: string | null
+          extractor_version: string
+          hit_count?: number
+          id?: string
+          last_hit_at?: string | null
+          model: string
+          output_hash?: string | null
+          output_payload?: Json
+          prompt_hash: string
+          study_id: string
+          updated_at?: string
+        }
+        Update: {
+          cache_key?: string
+          created_at?: string
+          expires_at?: string | null
+          extractor_version?: string
+          hit_count?: number
+          id?: string
+          last_hit_at?: string | null
+          model?: string
+          output_hash?: string | null
+          output_payload?: Json
+          prompt_hash?: string
+          study_id?: string
+          updated_at?: string
+        }
+        Relationships: []
+      }
+      extraction_column_instructions: {
+        Row: {
+          column_key: string
+          created_at: string
+          data_type: string
+          display_order: number
+          enum_values: Json | null
+          extract_prompt: string
+          id: string
+          is_enabled: boolean
+          label: string
+          normalizer: Json | null
+          nullable: boolean
+          regex_pattern: string | null
+          required: boolean
+          set_id: string
+          source_priority: Json | null
+        }
+        Insert: {
+          column_key: string
+          created_at?: string
+          data_type?: string
+          display_order?: number
+          enum_values?: Json | null
+          extract_prompt?: string
+          id?: string
+          is_enabled?: boolean
+          label: string
+          normalizer?: Json | null
+          nullable?: boolean
+          regex_pattern?: string | null
+          required?: boolean
+          set_id: string
+          source_priority?: Json | null
+        }
+        Update: {
+          column_key?: string
+          created_at?: string
+          data_type?: string
+          display_order?: number
+          enum_values?: Json | null
+          extract_prompt?: string
+          id?: string
+          is_enabled?: boolean
+          label?: string
+          normalizer?: Json | null
+          nullable?: boolean
+          regex_pattern?: string | null
+          required?: boolean
+          set_id?: string
+          source_priority?: Json | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "extraction_column_instructions_set_id_fkey"
+            columns: ["set_id"]
+            isOneToOne: false
+            referencedRelation: "extraction_column_sets"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      extraction_column_sets: {
+        Row: {
+          created_at: string
+          description: string | null
+          id: string
+          name: string
+          scope: string
+          version: number
+        }
+        Insert: {
+          created_at?: string
+          description?: string | null
+          id?: string
+          name: string
+          scope?: string
+          version?: number
+        }
+        Update: {
+          created_at?: string
+          description?: string | null
+          id?: string
+          name?: string
+          scope?: string
+          version?: number
+        }
+        Relationships: []
+      }
+      extraction_run_cells: {
+        Row: {
+          confidence: number | null
+          created_at: string
+          evidence: Json | null
+          id: string
+          row_id: string
+          run_column_id: string
+          status: string | null
+          value_boolean: boolean | null
+          value_json: Json | null
+          value_null: boolean | null
+          value_number: number | null
+          value_text: string | null
+        }
+        Insert: {
+          confidence?: number | null
+          created_at?: string
+          evidence?: Json | null
+          id?: string
+          row_id: string
+          run_column_id: string
+          status?: string | null
+          value_boolean?: boolean | null
+          value_json?: Json | null
+          value_null?: boolean | null
+          value_number?: number | null
+          value_text?: string | null
+        }
+        Update: {
+          confidence?: number | null
+          created_at?: string
+          evidence?: Json | null
+          id?: string
+          row_id?: string
+          run_column_id?: string
+          status?: string | null
+          value_boolean?: boolean | null
+          value_json?: Json | null
+          value_null?: boolean | null
+          value_number?: number | null
+          value_text?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "extraction_run_cells_row_id_fkey"
+            columns: ["row_id"]
+            isOneToOne: false
+            referencedRelation: "extraction_run_rows"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "extraction_run_cells_run_column_id_fkey"
+            columns: ["run_column_id"]
+            isOneToOne: false
+            referencedRelation: "extraction_run_columns"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      extraction_run_columns: {
+        Row: {
+          column_key: string
+          created_at: string
+          data_type: string
+          display_order: number | null
+          enum_values: Json | null
+          extract_prompt: string | null
+          id: string
+          is_enabled: boolean | null
+          label: string
+          normalizer: Json | null
+          nullable: boolean | null
+          regex_pattern: string | null
+          required: boolean | null
+          run_id: string
+          source_instruction_id: string | null
+          source_priority: Json | null
+        }
+        Insert: {
+          column_key: string
+          created_at?: string
+          data_type?: string
+          display_order?: number | null
+          enum_values?: Json | null
+          extract_prompt?: string | null
+          id?: string
+          is_enabled?: boolean | null
+          label: string
+          normalizer?: Json | null
+          nullable?: boolean | null
+          regex_pattern?: string | null
+          required?: boolean | null
+          run_id: string
+          source_instruction_id?: string | null
+          source_priority?: Json | null
+        }
+        Update: {
+          column_key?: string
+          created_at?: string
+          data_type?: string
+          display_order?: number | null
+          enum_values?: Json | null
+          extract_prompt?: string | null
+          id?: string
+          is_enabled?: boolean | null
+          label?: string
+          normalizer?: Json | null
+          nullable?: boolean | null
+          regex_pattern?: string | null
+          required?: boolean | null
+          run_id?: string
+          source_instruction_id?: string | null
+          source_priority?: Json | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "extraction_run_columns_run_id_fkey"
+            columns: ["run_id"]
+            isOneToOne: false
+            referencedRelation: "extraction_runs"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      extraction_run_rows: {
+        Row: {
+          canonical_paper: Json | null
+          created_at: string
+          id: string
+          paper_id: string | null
+          row_rank: number
+          run_id: string
+        }
+        Insert: {
+          canonical_paper?: Json | null
+          created_at?: string
+          id?: string
+          paper_id?: string | null
+          row_rank: number
+          run_id: string
+        }
+        Update: {
+          canonical_paper?: Json | null
+          created_at?: string
+          id?: string
+          paper_id?: string | null
+          row_rank?: number
+          run_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "extraction_run_rows_run_id_fkey"
+            columns: ["run_id"]
+            isOneToOne: false
+            referencedRelation: "extraction_runs"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      extraction_runs: {
+        Row: {
+          brief_json: Json | null
+          canonical_papers: Json | null
+          column_set_id: string | null
+          completed_at: string | null
+          coverage_report: Json | null
+          created_at: string
+          created_by: string | null
+          deterministic_flag: boolean | null
+          engine: string
+          error_message: string | null
+          evidence_table: Json | null
+          extraction_stats: Json | null
+          extractor_version: string | null
+          id: string
+          lit_request: Json | null
+          lit_response: Json | null
+          model: string | null
+          normalized_query: string | null
+          parent_run_id: string | null
+          partial_results: Json | null
+          prompt_hash: string | null
+          question: string | null
+          report_id: string
+          results: Json | null
+          run_index: number
+          search_stats: Json | null
+          started_at: string | null
+          status: string
+          trigger: string
+        }
+        Insert: {
+          brief_json?: Json | null
+          canonical_papers?: Json | null
+          column_set_id?: string | null
+          completed_at?: string | null
+          coverage_report?: Json | null
+          created_at?: string
+          created_by?: string | null
+          deterministic_flag?: boolean | null
+          engine?: string
+          error_message?: string | null
+          evidence_table?: Json | null
+          extraction_stats?: Json | null
+          extractor_version?: string | null
+          id?: string
+          lit_request?: Json | null
+          lit_response?: Json | null
+          model?: string | null
+          normalized_query?: string | null
+          parent_run_id?: string | null
+          partial_results?: Json | null
+          prompt_hash?: string | null
+          question?: string | null
+          report_id: string
+          results?: Json | null
+          run_index: number
+          search_stats?: Json | null
+          started_at?: string | null
+          status?: string
+          trigger: string
+        }
+        Update: {
+          brief_json?: Json | null
+          canonical_papers?: Json | null
+          column_set_id?: string | null
+          completed_at?: string | null
+          coverage_report?: Json | null
+          created_at?: string
+          created_by?: string | null
+          deterministic_flag?: boolean | null
+          engine?: string
+          error_message?: string | null
+          evidence_table?: Json | null
+          extraction_stats?: Json | null
+          extractor_version?: string | null
+          id?: string
+          lit_request?: Json | null
+          lit_response?: Json | null
+          model?: string | null
+          normalized_query?: string | null
+          parent_run_id?: string | null
+          partial_results?: Json | null
+          prompt_hash?: string | null
+          question?: string | null
+          report_id?: string
+          results?: Json | null
+          run_index?: number
+          search_stats?: Json | null
+          started_at?: string | null
+          status?: string
+          trigger?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "extraction_runs_column_set_id_fkey"
+            columns: ["column_set_id"]
+            isOneToOne: false
+            referencedRelation: "extraction_column_sets"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "extraction_runs_report_id_fkey"
+            columns: ["report_id"]
+            isOneToOne: false
+            referencedRelation: "research_reports"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      lit_paper_cache: {
+        Row: {
+          created_at: string
+          expires_at: string
+          id: string
+          paper_id: string
+          paper_payload: Json | null
+          updated_at: string
+        }
+        Insert: {
+          created_at?: string
+          expires_at: string
+          id?: string
+          paper_id: string
+          paper_payload?: Json | null
+          updated_at?: string
+        }
+        Update: {
+          created_at?: string
+          expires_at?: string
+          id?: string
+          paper_id?: string
+          paper_payload?: Json | null
+          updated_at?: string
+        }
+        Relationships: []
+      }
+      lit_query_cache: {
+        Row: {
+          cache_key: string
+          created_at: string
+          expires_at: string
+          id: string
+          request_payload: Json | null
+          response_payload: Json | null
+          updated_at: string
+        }
+        Insert: {
+          cache_key: string
+          created_at?: string
+          expires_at: string
+          id?: string
+          request_payload?: Json | null
+          response_payload?: Json | null
+          updated_at?: string
+        }
+        Update: {
+          cache_key?: string
+          created_at?: string
+          expires_at?: string
+          id?: string
+          request_payload?: Json | null
+          response_payload?: Json | null
+          updated_at?: string
+        }
+        Relationships: []
+      }
+      metadata_enrichment_cache: {
+        Row: {
+          confidence: number | null
+          created_at: string
+          doi_norm: string | null
+          expires_at: string
+          fetched_at: string | null
+          id: string
+          lookup_key: string
+          lookup_kind: string
+          provider_payloads: Json | null
+          reason_codes: Json | null
+          resolved_metadata: Json | null
+          status: string
+          title_fingerprint: string | null
+          updated_at: string
+        }
+        Insert: {
+          confidence?: number | null
+          created_at?: string
+          doi_norm?: string | null
+          expires_at: string
+          fetched_at?: string | null
+          id?: string
+          lookup_key: string
+          lookup_kind?: string
+          provider_payloads?: Json | null
+          reason_codes?: Json | null
+          resolved_metadata?: Json | null
+          status?: string
+          title_fingerprint?: string | null
+          updated_at?: string
+        }
+        Update: {
+          confidence?: number | null
+          created_at?: string
+          doi_norm?: string | null
+          expires_at?: string
+          fetched_at?: string | null
+          id?: string
+          lookup_key?: string
+          lookup_kind?: string
+          provider_payloads?: Json | null
+          reason_codes?: Json | null
+          resolved_metadata?: Json | null
+          status?: string
+          title_fingerprint?: string | null
+          updated_at?: string
+        }
+        Relationships: []
+      }
+      metadata_enrichment_events: {
+        Row: {
+          confidence: number | null
+          created_at: string
+          fields_applied: Json | null
+          function_name: string
+          id: string
+          latency_ms: number | null
+          lookup_key: string | null
+          mode: string
+          outcome: string
+          paper_id: string | null
+          provider_statuses: Json | null
+          providers_attempted: Json | null
+          reason_codes: Json | null
+          report_id: string | null
+          search_id: string | null
+          stack: string
+          used_cache: boolean | null
+          user_id: string | null
+        }
+        Insert: {
+          confidence?: number | null
+          created_at?: string
+          fields_applied?: Json | null
+          function_name: string
+          id?: string
+          latency_ms?: number | null
+          lookup_key?: string | null
+          mode: string
+          outcome: string
+          paper_id?: string | null
+          provider_statuses?: Json | null
+          providers_attempted?: Json | null
+          reason_codes?: Json | null
+          report_id?: string | null
+          search_id?: string | null
+          stack: string
+          used_cache?: boolean | null
+          user_id?: string | null
+        }
+        Update: {
+          confidence?: number | null
+          created_at?: string
+          fields_applied?: Json | null
+          function_name?: string
+          id?: string
+          latency_ms?: number | null
+          lookup_key?: string | null
+          mode?: string
+          outcome?: string
+          paper_id?: string | null
+          provider_statuses?: Json | null
+          providers_attempted?: Json | null
+          reason_codes?: Json | null
+          report_id?: string | null
+          search_id?: string | null
+          stack?: string
+          used_cache?: boolean | null
+          user_id?: string | null
+        }
+        Relationships: []
+      }
+      metadata_enrichment_jobs: {
+        Row: {
+          attempt_count: number
+          completed_at: string | null
+          created_at: string
+          id: string
+          last_error: string | null
+          max_attempts: number
+          next_run_at: string
+          payload: Json
+          report_id: string | null
+          search_id: string | null
+          stack: string
+          started_at: string | null
+          status: string
+          updated_at: string
+          user_id: string | null
+        }
+        Insert: {
+          attempt_count?: number
+          completed_at?: string | null
+          created_at?: string
+          id?: string
+          last_error?: string | null
+          max_attempts?: number
+          next_run_at?: string
+          payload?: Json
+          report_id?: string | null
+          search_id?: string | null
+          stack: string
+          started_at?: string | null
+          status?: string
+          updated_at?: string
+          user_id?: string | null
+        }
+        Update: {
+          attempt_count?: number
+          completed_at?: string | null
+          created_at?: string
+          id?: string
+          last_error?: string | null
+          max_attempts?: number
+          next_run_at?: string
+          payload?: Json
+          report_id?: string | null
+          search_id?: string | null
+          stack?: string
+          started_at?: string | null
+          status?: string
+          updated_at?: string
+          user_id?: string | null
+        }
+        Relationships: []
+      }
+      pipeline_versions: {
+        Row: {
+          config_hash: string
+          config_snapshot: Json
+          created_at: string
+          extractor_bundle_hash: string
+          id: string
+          prompt_manifest_hash: string
+          seed: number
+        }
+        Insert: {
+          config_hash: string
+          config_snapshot?: Json
+          created_at?: string
+          extractor_bundle_hash: string
+          id?: string
+          prompt_manifest_hash: string
+          seed?: number
+        }
+        Update: {
+          config_hash?: string
+          config_snapshot?: Json
+          created_at?: string
+          extractor_bundle_hash?: string
+          id?: string
+          prompt_manifest_hash?: string
+          seed?: number
+        }
+        Relationships: []
+      }
+      provider_rate_limit_state: {
+        Row: {
+          blocked_until: string | null
+          circuit_state: string
+          consecutive_failures: number
+          id: string
+          in_flight: number
+          last_refill_at: string
+          max_tokens: number
+          provider: string
+          refill_rate: number
+          tokens_remaining: number
+          updated_at: string
+        }
+        Insert: {
+          blocked_until?: string | null
+          circuit_state?: string
+          consecutive_failures?: number
+          id?: string
+          in_flight?: number
+          last_refill_at?: string
+          max_tokens?: number
+          provider: string
+          refill_rate?: number
+          tokens_remaining?: number
+          updated_at?: string
+        }
+        Update: {
+          blocked_until?: string | null
+          circuit_state?: string
+          consecutive_failures?: number
+          id?: string
+          in_flight?: number
+          last_refill_at?: string
+          max_tokens?: number
+          provider?: string
+          refill_rate?: number
+          tokens_remaining?: number
+          updated_at?: string
+        }
+        Relationships: []
+      }
       rate_limits: {
         Row: {
           client_ip: string
@@ -35,57 +839,371 @@ export type Database = {
         }
         Relationships: []
       }
+      research_cache_events: {
+        Row: {
+          cache_name: string
+          created_at: string
+          event_type: string
+          id: string
+          key_hash: string | null
+          metadata: Json
+          report_id: string | null
+          run_id: string | null
+        }
+        Insert: {
+          cache_name: string
+          created_at?: string
+          event_type: string
+          id?: string
+          key_hash?: string | null
+          metadata?: Json
+          report_id?: string | null
+          run_id?: string | null
+        }
+        Update: {
+          cache_name?: string
+          created_at?: string
+          event_type?: string
+          id?: string
+          key_hash?: string | null
+          metadata?: Json
+          report_id?: string | null
+          run_id?: string | null
+        }
+        Relationships: []
+      }
+      research_jobs: {
+        Row: {
+          attempts: number
+          created_at: string
+          dedupe_key: string
+          id: string
+          last_error: string | null
+          lease_expires_at: string | null
+          lease_owner: string | null
+          max_attempts: number
+          payload: Json
+          provider: string
+          report_id: string
+          stage: string
+          status: string
+          updated_at: string
+        }
+        Insert: {
+          attempts?: number
+          created_at?: string
+          dedupe_key: string
+          id?: string
+          last_error?: string | null
+          lease_expires_at?: string | null
+          lease_owner?: string | null
+          max_attempts?: number
+          payload?: Json
+          provider?: string
+          report_id: string
+          stage?: string
+          status?: string
+          updated_at?: string
+        }
+        Update: {
+          attempts?: number
+          created_at?: string
+          dedupe_key?: string
+          id?: string
+          last_error?: string | null
+          lease_expires_at?: string | null
+          lease_owner?: string | null
+          max_attempts?: number
+          payload?: Json
+          provider?: string
+          report_id?: string
+          stage?: string
+          status?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "research_jobs_report_id_fkey"
+            columns: ["report_id"]
+            isOneToOne: false
+            referencedRelation: "research_reports"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      research_metrics_samples: {
+        Row: {
+          created_at: string
+          id: string
+          metric_name: string
+          metric_value: number
+          observed_at: string
+          report_id: string | null
+          run_id: string | null
+          tags: Json
+          unit: string | null
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          metric_name: string
+          metric_value: number
+          observed_at?: string
+          report_id?: string | null
+          run_id?: string | null
+          tags?: Json
+          unit?: string | null
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          metric_name?: string
+          metric_value?: number
+          observed_at?: string
+          report_id?: string | null
+          run_id?: string | null
+          tags?: Json
+          unit?: string | null
+        }
+        Relationships: []
+      }
       research_reports: {
         Row: {
+          active_column_set_id: string | null
+          active_extraction_run_id: string | null
           arxiv_count: number | null
+          brief_json: Json | null
           completed_at: string | null
+          coverage_report: Json | null
           created_at: string
           error_message: string | null
+          evidence_table: Json | null
+          extraction_run_count: number | null
           id: string
+          lit_request: Json | null
+          lit_response: Json | null
           narrative_synthesis: string | null
           normalized_query: string | null
           openalex_count: number | null
           pubmed_count: number | null
           question: string
           results: Json | null
+          search_stats: Json | null
           semantic_scholar_count: number | null
           status: string
           total_papers_searched: number | null
           user_id: string | null
         }
         Insert: {
+          active_column_set_id?: string | null
+          active_extraction_run_id?: string | null
           arxiv_count?: number | null
+          brief_json?: Json | null
           completed_at?: string | null
+          coverage_report?: Json | null
           created_at?: string
           error_message?: string | null
+          evidence_table?: Json | null
+          extraction_run_count?: number | null
           id?: string
+          lit_request?: Json | null
+          lit_response?: Json | null
           narrative_synthesis?: string | null
           normalized_query?: string | null
           openalex_count?: number | null
           pubmed_count?: number | null
           question: string
           results?: Json | null
+          search_stats?: Json | null
           semantic_scholar_count?: number | null
           status?: string
           total_papers_searched?: number | null
           user_id?: string | null
         }
         Update: {
+          active_column_set_id?: string | null
+          active_extraction_run_id?: string | null
           arxiv_count?: number | null
+          brief_json?: Json | null
           completed_at?: string | null
+          coverage_report?: Json | null
           created_at?: string
           error_message?: string | null
+          evidence_table?: Json | null
+          extraction_run_count?: number | null
           id?: string
+          lit_request?: Json | null
+          lit_response?: Json | null
           narrative_synthesis?: string | null
           normalized_query?: string | null
           openalex_count?: number | null
           pubmed_count?: number | null
           question?: string
           results?: Json | null
+          search_stats?: Json | null
           semantic_scholar_count?: number | null
           status?: string
           total_papers_searched?: number | null
           user_id?: string | null
+        }
+        Relationships: []
+      }
+      research_run_events: {
+        Row: {
+          created_at: string
+          duration: number | null
+          duration_ms: number | null
+          error_category: string | null
+          error_code: string | null
+          event_at: string
+          event_type: string | null
+          id: string
+          input_hash: string | null
+          message: string | null
+          output_hash: string | null
+          report_id: string | null
+          run_id: string | null
+          stage: string
+          status: string
+          trace_id: string | null
+        }
+        Insert: {
+          created_at?: string
+          duration?: number | null
+          duration_ms?: number | null
+          error_category?: string | null
+          error_code?: string | null
+          event_at: string
+          event_type?: string | null
+          id?: string
+          input_hash?: string | null
+          message?: string | null
+          output_hash?: string | null
+          report_id?: string | null
+          run_id?: string | null
+          stage: string
+          status: string
+          trace_id?: string | null
+        }
+        Update: {
+          created_at?: string
+          duration?: number | null
+          duration_ms?: number | null
+          error_category?: string | null
+          error_code?: string | null
+          event_at?: string
+          event_type?: string | null
+          id?: string
+          input_hash?: string | null
+          message?: string | null
+          output_hash?: string | null
+          report_id?: string | null
+          run_id?: string | null
+          stage?: string
+          status?: string
+          trace_id?: string | null
+        }
+        Relationships: []
+      }
+      research_stage_outputs: {
+        Row: {
+          created_at: string
+          id: string
+          input_hash: string
+          output_hash: string
+          payload: Json
+          pipeline_version_id: string | null
+          producer_job_id: string | null
+          report_id: string
+          stage: string
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          input_hash: string
+          output_hash: string
+          payload?: Json
+          pipeline_version_id?: string | null
+          producer_job_id?: string | null
+          report_id: string
+          stage: string
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          input_hash?: string
+          output_hash?: string
+          payload?: Json
+          pipeline_version_id?: string | null
+          producer_job_id?: string | null
+          report_id?: string
+          stage?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "research_stage_outputs_pipeline_version_id_fkey"
+            columns: ["pipeline_version_id"]
+            isOneToOne: false
+            referencedRelation: "pipeline_versions"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "research_stage_outputs_report_id_fkey"
+            columns: ["report_id"]
+            isOneToOne: false
+            referencedRelation: "research_reports"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      research_trace_spans: {
+        Row: {
+          attributes: Json
+          created_at: string
+          duration_ms: number | null
+          ended_at: string | null
+          id: string
+          provider: string | null
+          report_id: string | null
+          retry_count: number
+          run_id: string
+          span_name: string
+          stage: string | null
+          started_at: string
+          status: string
+          trace_id: string
+        }
+        Insert: {
+          attributes?: Json
+          created_at?: string
+          duration_ms?: number | null
+          ended_at?: string | null
+          id?: string
+          provider?: string | null
+          report_id?: string | null
+          retry_count?: number
+          run_id: string
+          span_name: string
+          stage?: string | null
+          started_at: string
+          status: string
+          trace_id: string
+        }
+        Update: {
+          attributes?: Json
+          created_at?: string
+          duration_ms?: number | null
+          ended_at?: string | null
+          id?: string
+          provider?: string | null
+          report_id?: string | null
+          retry_count?: number
+          run_id?: string
+          span_name?: string
+          stage?: string | null
+          started_at?: string
+          status?: string
+          trace_id?: string
         }
         Relationships: []
       }
@@ -135,7 +1253,152 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
-      [_ in never]: never
+      append_study_to_report: {
+        Args: { p_report_id: string; p_study: Json }
+        Returns: number
+      }
+      next_run_index: { Args: { p_report_id: string }; Returns: number }
+      provider_rate_limit_record_result: {
+        Args: {
+          p_error?: string
+          p_latency_ms?: number
+          p_provider: string
+          p_retry_after_seconds?: number
+          p_status?: number
+          p_success: boolean
+        }
+        Returns: undefined
+      }
+      provider_rate_limit_try_acquire: {
+        Args: { p_provider: string; p_tokens?: number }
+        Returns: {
+          acquired: boolean
+          blocked_until: string
+          circuit_state: string
+          in_flight: number
+          tokens_remaining: number
+          wait_ms: number
+        }[]
+      }
+      report_has_doi: {
+        Args: { p_doi: string; p_report_id: string }
+        Returns: boolean
+      }
+      research_jobs_claim: {
+        Args: {
+          p_batch_size?: number
+          p_lease_seconds?: number
+          p_worker_id: string
+        }
+        Returns: {
+          attempts: number
+          created_at: string
+          dedupe_key: string
+          id: string
+          last_error: string | null
+          lease_expires_at: string | null
+          lease_owner: string | null
+          max_attempts: number
+          payload: Json
+          provider: string
+          report_id: string
+          stage: string
+          status: string
+          updated_at: string
+        }[]
+        SetofOptions: {
+          from: "*"
+          to: "research_jobs"
+          isOneToOne: false
+          isSetofReturn: true
+        }
+      }
+      research_jobs_complete: {
+        Args: { p_job_id: string; p_worker_id: string }
+        Returns: {
+          attempts: number
+          created_at: string
+          dedupe_key: string
+          id: string
+          last_error: string | null
+          lease_expires_at: string | null
+          lease_owner: string | null
+          max_attempts: number
+          payload: Json
+          provider: string
+          report_id: string
+          stage: string
+          status: string
+          updated_at: string
+        }[]
+        SetofOptions: {
+          from: "*"
+          to: "research_jobs"
+          isOneToOne: false
+          isSetofReturn: true
+        }
+      }
+      research_jobs_enqueue: {
+        Args: {
+          p_dedupe_key: string
+          p_max_attempts?: number
+          p_payload: Json
+          p_provider: string
+          p_report_id: string
+          p_stage: string
+        }
+        Returns: {
+          attempts: number
+          created_at: string
+          dedupe_key: string
+          id: string
+          last_error: string | null
+          lease_expires_at: string | null
+          lease_owner: string | null
+          max_attempts: number
+          payload: Json
+          provider: string
+          report_id: string
+          stage: string
+          status: string
+          updated_at: string
+        }[]
+        SetofOptions: {
+          from: "*"
+          to: "research_jobs"
+          isOneToOne: false
+          isSetofReturn: true
+        }
+      }
+      research_jobs_fail: {
+        Args: { p_error?: string; p_job_id: string; p_worker_id: string }
+        Returns: {
+          attempts: number
+          created_at: string
+          dedupe_key: string
+          id: string
+          last_error: string | null
+          lease_expires_at: string | null
+          lease_owner: string | null
+          max_attempts: number
+          payload: Json
+          provider: string
+          report_id: string
+          stage: string
+          status: string
+          updated_at: string
+        }[]
+        SetofOptions: {
+          from: "*"
+          to: "research_jobs"
+          isOneToOne: false
+          isSetofReturn: true
+        }
+      }
+      update_study_by_doi: {
+        Args: { p_doi: string; p_report_id: string; p_study: Json }
+        Returns: number
+      }
     }
     Enums: {
       [_ in never]: never
