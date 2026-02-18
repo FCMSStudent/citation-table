@@ -35,7 +35,7 @@ export async function searchSemanticScholar(
   precompiledQuery?: string,
 ): Promise<ProviderQueryResult> {
   const prepared = resolvePreparedQuery(query, "semantic_scholar", mode, precompiledQuery);
-  if (!prepared.apiQuery) return [];
+  if (!prepared.apiQuery) return { papers: [], retryCount: 0 };
 
   const fields = "paperId,title,abstract,year,authors,venue,citationCount,publicationTypes,externalIds,openAccessPdf,url,isRetracted,references.paperId";
   const baseUrl = new URL("https://api.semanticscholar.org/graph/v1/paper/search/bulk");

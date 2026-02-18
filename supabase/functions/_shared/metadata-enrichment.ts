@@ -353,7 +353,7 @@ function toCrossrefCandidate(item: CrossrefWork): EnrichmentCandidate {
     year: safeNumber(issuedYear),
     citationCount: safeNumber(item?.["is-referenced-by-count"]),
     journal: venue,
-    raw: item,
+    raw: item as unknown as Record<string, unknown>,
   };
 }
 
@@ -372,7 +372,7 @@ function toOpenAlexCandidate(item: OpenAlexWorkLite): EnrichmentCandidate {
     year: safeNumber(item?.publication_year),
     citationCount: safeNumber(item?.cited_by_count),
     journal: venue,
-    raw: item,
+    raw: item as unknown as Record<string, unknown>,
   };
 }
 

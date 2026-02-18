@@ -69,7 +69,7 @@ describe('Phase 2 stress simulation', () => {
       // Simulate background polling lifecycle derivation for 100 reports.
       for (const report of reports) {
         deriveRunPhase({
-          status: report.status,
+          status: report.status as "completed" | "failed" | "processing",
           searchStats: { latency_ms: 1200, candidates_total: 5000, candidates_filtered: 2500, retrieved_total: 1200 },
           extractionStats: {
             total_inputs: 1200,

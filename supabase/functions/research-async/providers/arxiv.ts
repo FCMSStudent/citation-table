@@ -23,7 +23,7 @@ export async function searchArxiv(
   precompiledQuery?: string,
 ): Promise<ProviderQueryResult> {
   const prepared = resolvePreparedQuery(query, "arxiv", mode, precompiledQuery);
-  if (!prepared.apiQuery) return [];
+  if (!prepared.apiQuery) return { papers: [], retryCount: 0 };
 
   const url = new URL("https://export.arxiv.org/api/query");
   url.searchParams.set("search_query", `all:${prepared.apiQuery}`);

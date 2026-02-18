@@ -112,7 +112,7 @@ interface SupabaseQueryBuilder<T = unknown> extends PromiseLike<SupabaseResponse
 }
 
 export interface SupabaseClientLike {
-  from<T = unknown>(table: string): SupabaseQueryBuilder<T>;
+  from(table: string): any;
   rpc<T = unknown>(fn: string, params?: Record<string, unknown>): Promise<SupabaseResponse<T>>;
 }
 
