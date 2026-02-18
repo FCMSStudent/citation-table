@@ -1,6 +1,7 @@
 import { useState, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { getSupabase } from '@/integrations/supabase/fallback';
+import type { LiteratureSearchResponse } from '@/shared/types/research';
 
 interface UseResearchReturn {
   isLoading: boolean;
@@ -25,12 +26,12 @@ export function useResearch(): UseResearchReturn {
     try {
       const client = getSupabase();
 
-      const { data, error: fnError } = await client.functions.invoke<{ report_id: string }>('research-async', {
-        body: { question },
+      const { data, error: fnError } = await client.functions.invoke<LiteratureSearchResponse>('research-async/v1/lit/search', {
+        body: { query: question },
       });
 
       if (fnError) throw new Error(fnError.message || 'Failed to start search');
-      const reportId = data?.report_id;
+      const reportId = data?.search_id;
 
       if (reportId) {
         navigate(`/reports/${reportId}`);

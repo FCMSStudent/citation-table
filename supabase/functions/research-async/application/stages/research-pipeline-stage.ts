@@ -206,8 +206,8 @@ function getPdfParseTimeoutMs(): number {
 }
 
 function getExtractionMaxCandidates(): number {
-  const raw = Number(Deno.env.get("EXTRACTION_MAX_CANDIDATES") || 45);
-  if (!Number.isFinite(raw)) return 45;
+  const raw = Number(Deno.env.get("EXTRACTION_MAX_CANDIDATES") || 25);
+  if (!Number.isFinite(raw)) return 25;
   return Math.min(60, Math.max(5, Math.trunc(raw)));
 }
 
@@ -775,7 +775,7 @@ interface StageRetrieved extends StagePrepared {
     pubmed: UnifiedPaper[];
   };
   providerCandidates: UnifiedPaper[];
-  enrichedLegacyPapers: UnifiedPaper[];
+  totalPapersSearched: number;
   papersWithAbstracts: UnifiedPaper[];
 }
 
@@ -894,7 +894,6 @@ class RetrieveProvidersStage implements PipelineStage<StagePrepared, StageRetrie
     const pubmedPapers = papersByProvider.pubmed;
 
     const dedupedForLegacyFlow = deduplicateAndMerge(s2Papers, openAlexPapers, arxivPapers, pubmedPapers);
-    const enrichedLegacyPapers = await enrichWithMetadata(dedupedForLegacyFlow, input.enrichmentContext, "research-async");
     const enrichedProviderCandidates = await enrichWithMetadata(providerCandidates, input.enrichmentContext, "research-async");
     const papersWithAbstracts = enrichedProviderCandidates.filter((paper) => paper.abstract && paper.abstract.length > 50);
 
@@ -909,7 +908,7 @@ class RetrieveProvidersStage implements PipelineStage<StagePrepared, StageRetrie
           pubmed: pubmedPapers,
         },
         providerCandidates: enrichedProviderCandidates,
-        enrichedLegacyPapers,
+        totalPapersSearched: dedupedForLegacyFlow.length,
         papersWithAbstracts,
       },
     };
@@ -1178,7 +1177,7 @@ class PersistStage implements PipelineStage<{
         stats,
         canonical_papers: state.keptCapped,
         normalized_query: state.normalizedQueryForResponse,
-        total_papers_searched: state.enrichedLegacyPapers.length,
+        total_papers_searched: state.totalPapersSearched,
         openalex_count: state.papersByProvider.openalex.length,
         semantic_scholar_count: state.papersByProvider.semantic_scholar.length,
         arxiv_count: state.papersByProvider.arxiv.length,
@@ -1222,11 +1221,11 @@ export async function runResearchPipeline(
     stageTimeoutsMs: {
       VALIDATE: 2_000,
       PREPARE_QUERY: 5_000,
-      RETRIEVE_PROVIDERS: 60_000,
+      RETRIEVE_PROVIDERS: 40_000,
       CANONICALIZE: 5_000,
       QUALITY_FILTER: 5_000,
-      DETERMINISTIC_EXTRACT: 120_000,
-      LLM_AUGMENT: 150_000,
+      DETERMINISTIC_EXTRACT: 75_000,
+      LLM_AUGMENT: 60_000,
       PERSIST: 2_000,
     },
   });
