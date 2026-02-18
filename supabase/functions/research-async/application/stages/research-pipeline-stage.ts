@@ -1206,12 +1206,19 @@ export async function runResearchPipeline(
   question: string,
   requestPayload: SearchRequestPayload,
   enrichmentContext: MetadataEnrichmentContext,
+  observability?: {
+    traceId?: string;
+    runId?: string;
+    emitEvent?: Parameters<typeof createStageContext>[0]["emitEvent"];
+  },
 ): Promise<PipelineResult> {
   const pipelineStartedAt = Date.now();
   console.log(`[Pipeline] Processing query="${question}" max_candidates=${requestPayload.max_candidates}`);
 
   const stageCtx = createStageContext({
-    pipelineId: `research:${pipelineStartedAt}`,
+    traceId: observability?.traceId,
+    runId: observability?.runId,
+    emitEvent: observability?.emitEvent,
     stageTimeoutsMs: {
       VALIDATE: 2_000,
       PREPARE_QUERY: 5_000,

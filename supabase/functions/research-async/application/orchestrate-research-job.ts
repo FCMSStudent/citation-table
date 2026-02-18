@@ -14,6 +14,7 @@ import {
   writeSearchCache,
 } from "../infrastructure/repositories/research-repository.ts";
 import { recordQueryProcessingEvent } from "../observability/query-processing-events.ts";
+import { createResearchRunEventEmitter } from "../observability/research-run-events.ts";
 import { hashKey, type ResearchJobRecord, type StudyResult, type SupabaseClientLike } from "../domain/models/research.ts";
 import type { MetadataEnrichmentStore } from "../../_shared/metadata-enrichment-store.ts";
 
@@ -141,6 +142,13 @@ export async function processPipelineJob(
   }
 
   await markReportProcessing(supabase, reportId);
+  const traceId = crypto.randomUUID();
+  const runId = job.id;
+  const emitEvent = createResearchRunEventEmitter(supabase, {
+    traceId,
+    runId,
+    reportId,
+  });
 
   const metadataMode = selectEffectiveEnrichmentMode(metadataRuntime);
   const data = await runResearchPipeline(question, litRequest, {
@@ -152,9 +160,15 @@ export async function processPipelineJob(
     searchId: reportId,
     retryMax: metadataRuntime.retryMax,
     maxLatencyMs: metadataRuntime.maxLatencyMs,
+  }, {
+    traceId,
+    runId,
+    emitEvent,
   });
   const stageCtx = createStageContext({
-    pipelineId: `research-persist:${reportId}`,
+    traceId,
+    runId,
+    emitEvent,
     stageTimeoutsMs: { PERSIST: 20_000 },
   });
   await runStage(new PersistPipelineStage(), {

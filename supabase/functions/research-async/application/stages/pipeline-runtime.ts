@@ -14,20 +14,22 @@ export type PipelineStageName =
 export type StageErrorCategory = "VALIDATION" | "TIMEOUT" | "EXTERNAL" | "TRANSIENT" | "INTERNAL";
 
 export interface StageEvent {
-  pipeline_id: string;
+  trace_id: string;
+  run_id: string;
   stage: PipelineStageName;
   status: "started" | "completed" | "idempotent" | "failed";
   at: string;
-  duration_ms?: number;
+  duration?: number;
   error_category?: StageErrorCategory;
   message?: string;
 }
 
 export interface StageContext {
-  pipelineId: string;
+  traceId: string;
+  runId: string;
   stageTimeoutsMs: Partial<Record<PipelineStageName, number>>;
   idempotencyCache: Map<string, unknown>;
-  emitEvent: (event: StageEvent) => void;
+  emitEvent: (event: StageEvent) => Promise<void> | void;
   now: () => number;
 }
 
@@ -84,23 +86,26 @@ function idempotencyKeyFor(stage: PipelineStageName, input: unknown): string {
 function defaultEmitEvent(event: StageEvent): void {
   const parts = [
     "[PipelineStage]",
-    `pipeline=${event.pipeline_id}`,
+    `trace_id=${event.trace_id}`,
+    `run_id=${event.run_id}`,
     `stage=${event.stage}`,
     `status=${event.status}`,
   ];
-  if (typeof event.duration_ms === "number") parts.push(`duration_ms=${event.duration_ms}`);
+  if (typeof event.duration === "number") parts.push(`duration=${event.duration}`);
   if (event.error_category) parts.push(`error_category=${event.error_category}`);
   if (event.message) parts.push(`message=${event.message}`);
   console.log(parts.join(" "));
 }
 
 export function createStageContext(params: {
-  pipelineId: string;
+  traceId?: string;
+  runId?: string;
   stageTimeoutsMs?: Partial<Record<PipelineStageName, number>>;
-  emitEvent?: (event: StageEvent) => void;
+  emitEvent?: (event: StageEvent) => Promise<void> | void;
 }): StageContext {
   return {
-    pipelineId: params.pipelineId,
+    traceId: params.traceId || crypto.randomUUID(),
+    runId: params.runId || crypto.randomUUID(),
     stageTimeoutsMs: params.stageTimeoutsMs || {},
     idempotencyCache: new Map<string, unknown>(),
     emitEvent: params.emitEvent || defaultEmitEvent,
@@ -113,8 +118,9 @@ export async function runStage<I, O>(stage: PipelineStage<I, O>, input: I, ctx: 
   const at = new Date().toISOString();
 
   if (ctx.idempotencyCache.has(key)) {
-    ctx.emitEvent({
-      pipeline_id: ctx.pipelineId,
+    await ctx.emitEvent({
+      trace_id: ctx.traceId,
+      run_id: ctx.runId,
       stage: stage.name,
       status: "idempotent",
       at,
@@ -124,8 +130,9 @@ export async function runStage<I, O>(stage: PipelineStage<I, O>, input: I, ctx: 
   }
 
   const startedAt = ctx.now();
-  ctx.emitEvent({
-    pipeline_id: ctx.pipelineId,
+  await ctx.emitEvent({
+    trace_id: ctx.traceId,
+    run_id: ctx.runId,
     stage: stage.name,
     status: "started",
     at,
@@ -135,22 +142,24 @@ export async function runStage<I, O>(stage: PipelineStage<I, O>, input: I, ctx: 
   try {
     const result = await withTimeout(stage.execute(input, ctx), timeoutMs, `stage:${stage.name}`);
     ctx.idempotencyCache.set(key, result.output);
-    ctx.emitEvent({
-      pipeline_id: ctx.pipelineId,
+    await ctx.emitEvent({
+      trace_id: ctx.traceId,
+      run_id: ctx.runId,
       stage: stage.name,
       status: "completed",
       at: new Date().toISOString(),
-      duration_ms: ctx.now() - startedAt,
+      duration: ctx.now() - startedAt,
     });
     return result.output;
   } catch (err) {
     const stageError = normalizeStageError(stage.name, err);
-    ctx.emitEvent({
-      pipeline_id: ctx.pipelineId,
+    await ctx.emitEvent({
+      trace_id: ctx.traceId,
+      run_id: ctx.runId,
       stage: stage.name,
       status: "failed",
       at: new Date().toISOString(),
-      duration_ms: ctx.now() - startedAt,
+      duration: ctx.now() - startedAt,
       error_category: stageError.category,
       message: stageError.message,
     });
