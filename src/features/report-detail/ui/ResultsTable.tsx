@@ -1,9 +1,11 @@
-import { Fragment, memo, useCallback, useEffect, useMemo, useState } from 'react';
+import { Fragment, memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
+  Check,
   ChevronDown,
   ChevronLeft,
   ChevronRight,
   ChevronUp,
+  Copy,
   Download,
   ExternalLink,
   FileText,
@@ -34,6 +36,7 @@ import { downloadRISFile } from '@/shared/lib/risExport';
 import { downloadCSV } from '@/shared/lib/csvExport';
 import { downloadPaperCSV } from '@/shared/lib/csvPaperExport';
 import { calculateRelevanceScore, getOutcomeText, isLowValueStudy } from '@/utils/relevanceScore';
+import { toast } from '@/shared/ui/Sonner';
 import { cn, sanitizeUrl } from '@/shared/lib/utils';
 
 type ViewMode = 'summary' | 'studies';
@@ -393,6 +396,8 @@ export function ResultsTable({
   const [referenceListOpen, setReferenceListOpen] = useState(false);
   const [prefsLoaded, setPrefsLoaded] = useState(false);
   const [firstInteractionTracked, setFirstInteractionTracked] = useState(false);
+  const [copied, setCopied] = useState(false);
+  const copyTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const totalInputStudies = results.length + (partialResults?.length || 0);
 
   useEffect(() => {
@@ -551,6 +556,22 @@ export function ResultsTable({
 
     return { claims, references };
   }, [briefSentences, mainStudies]);
+
+  const handleCopyFindings = useCallback(() => {
+    const findingsText = summaryData.claims.map((c) => c.text).join('\n');
+    navigator.clipboard.writeText(findingsText).then(() => {
+      setCopied(true);
+      toast.success('Findings copied to clipboard');
+      if (copyTimerRef.current) clearTimeout(copyTimerRef.current);
+      copyTimerRef.current = setTimeout(() => setCopied(false), 2000);
+    });
+  }, [summaryData.claims]);
+
+  useEffect(() => {
+    return () => {
+      if (copyTimerRef.current) clearTimeout(copyTimerRef.current);
+    };
+  }, []);
 
   const activeFilterCount = useMemo(() => {
     let count = 0;
@@ -875,8 +896,23 @@ export function ResultsTable({
 
           {summaryData.claims.length > 0 && (
             <div className="rounded-lg border bg-card p-4">
-              <h3 className="text-sm font-semibold text-foreground">Key findings</h3>
-              <ol className="mt-3 space-y-2">
+              <div className="mb-3 flex items-center justify-between">
+                <h3 className="text-sm font-semibold text-foreground">Key findings</h3>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={handleCopyFindings}
+                  className="h-8 gap-2 text-muted-foreground hover:text-foreground"
+                >
+                  {copied ? (
+                    <Check className="h-3.5 w-3.5 text-emerald-500" />
+                  ) : (
+                    <Copy className="h-3.5 w-3.5" />
+                  )}
+                  {copied ? 'Copied' : 'Copy'}
+                </Button>
+              </div>
+              <ol className="space-y-2">
                 {summaryData.claims.map((claim, idx) => (
                   <li key={`${idx}-${claim.text.slice(0, 20)}`} className="text-sm leading-relaxed text-foreground">
                     {claim.text}{' '}

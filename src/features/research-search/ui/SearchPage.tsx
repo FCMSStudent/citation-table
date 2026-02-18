@@ -30,7 +30,13 @@ const Index = () => {
           <FileText className="h-4 w-4" />
           Reports
         </Link>
-        <Button variant="ghost" size="sm" onClick={signOut} className="text-muted-foreground">
+        <Button
+          variant="ghost"
+          size="sm"
+          onClick={signOut}
+          className="text-muted-foreground"
+          aria-label="Log out"
+        >
           <LogOut className="h-4 w-4" />
         </Button>
       </PageHeader>
