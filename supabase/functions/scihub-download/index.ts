@@ -119,6 +119,7 @@ async function reExtractStudyFromPdf(
     return;
   }
 
+  // Read the current study for this DOI from the report (read-only, for context)
   const { data: report, error: reportError } = await supabase
     .from("research_reports")
     .select("user_id, question, normalized_query, lit_request, lit_response, results, partial_results, extraction_stats, evidence_table, brief_json, coverage_report, search_stats")
@@ -137,9 +138,8 @@ async function reExtractStudyFromPdf(
   }
 
   const pdfBase64 = arrayBufferToBase64(pdfData);
-  const updatedResults = Array.isArray(report.results) ? [...report.results] : [];
 
-  for (const { index, study } of matchingStudies) {
+  for (const { study } of matchingStudies) {
     const systemPrompt = `You are an evidence extraction assistant.
 
 Given a single research study and its full-text PDF, improve extraction quality using PDF evidence.
@@ -219,8 +219,8 @@ ${JSON.stringify(study, null, 2)}`;
       if (jsonStr.endsWith("```")) jsonStr = jsonStr.slice(0, -3);
 
       const parsedStudy = JSON.parse(jsonStr.trim()) as ReportStudy;
-      updatedResults[index] = {
-        ...updatedResults[index],
+      const mergedStudy = {
+        ...study,
         ...parsedStudy,
         citation: {
           ...(study.citation || {}),
@@ -231,24 +231,29 @@ ${JSON.stringify(study, null, 2)}`;
         study_id: study.study_id,
       };
 
-      console.log(`[scihub-download] Re-extracted study ${study.study_id} from PDF`);
+      // Atomic update — no read-modify-write race
+      const { data: updatedCount } = await supabase.rpc("update_study_by_doi", {
+        p_report_id: reportId,
+        p_doi: normalizeDoi(doi).toLowerCase(),
+        p_study: mergedStudy,
+      });
+
+      console.log(`[scihub-download] Atomically re-extracted study ${study.study_id} from PDF (updated=${updatedCount})`);
     } catch (err) {
       console.error(`[scihub-download] Failed to re-extract study ${study.study_id}:`, err);
     }
   }
 
-  const { error: updateError } = await supabase
+  // Persist extraction run snapshot (read fresh results after atomic updates)
+  const { data: freshReport } = await supabase
     .from("research_reports")
-    .update({ results: updatedResults })
-    .eq("id", reportId);
+    .select("results, extraction_stats")
+    .eq("id", reportId)
+    .single();
+  const updatedResults = (freshReport?.results as unknown[]) || [];
 
-  if (updateError) {
-    console.error("[scihub-download] Failed to persist PDF re-extracted studies:", updateError);
-    return;
-  }
-
-  const priorExtractionStats = (report.extraction_stats && typeof report.extraction_stats === "object")
-    ? { ...(report.extraction_stats as Record<string, unknown>) }
+  const priorExtractionStats = (freshReport?.extraction_stats && typeof freshReport.extraction_stats === "object")
+    ? { ...(freshReport.extraction_stats as Record<string, unknown>) }
     : {};
   const previousCount = Number(priorExtractionStats.pdf_reextract_count || 0);
   const extractionStats = {

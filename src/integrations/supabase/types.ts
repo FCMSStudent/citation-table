@@ -884,7 +884,15 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
+      append_study_to_report: {
+        Args: { p_report_id: string; p_study: Json }
+        Returns: number
+      }
       next_run_index: { Args: { p_report_id: string }; Returns: number }
+      report_has_doi: {
+        Args: { p_doi: string; p_report_id: string }
+        Returns: boolean
+      }
       research_jobs_claim: {
         Args: {
           p_batch_size?: number
@@ -995,6 +1003,10 @@ export type Database = {
           isOneToOne: false
           isSetofReturn: true
         }
+      }
+      update_study_by_doi: {
+        Args: { p_doi: string; p_report_id: string; p_study: Json }
+        Returns: number
       }
     }
     Enums: {

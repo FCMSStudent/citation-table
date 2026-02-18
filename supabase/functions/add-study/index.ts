@@ -127,7 +127,7 @@ serve(async (req) => {
     // Verify report ownership
     const { data: report, error: reportError } = await supabase
       .from("research_reports")
-      .select("user_id, question, normalized_query, results, partial_results, extraction_stats, evidence_table, brief_json, coverage_report, search_stats, lit_request, lit_response")
+      .select("user_id, question, normalized_query, partial_results, extraction_stats, evidence_table, brief_json, coverage_report, search_stats, lit_request, lit_response")
       .eq("id", report_id)
       .single();
 
@@ -138,9 +138,12 @@ serve(async (req) => {
       });
     }
 
-    // Check for duplicate DOI
-    const existingResults = (report.results as StudyResult[]) || [];
-    if (existingResults.some((r) => r.citation?.doi === doi)) {
+    // Atomic duplicate check — no RMW race
+    const { data: hasDoi } = await supabase.rpc("report_has_doi", {
+      p_report_id: report_id,
+      p_doi: doi,
+    });
+    if (hasDoi) {
       return new Response(JSON.stringify({ error: "This DOI already exists in the report" }), {
         status: 409,
         headers: { ...corsHeaders, "Content-Type": "application/json" },
@@ -195,17 +198,25 @@ serve(async (req) => {
         source: "manual",
       };
 
-      const updatedResults = [...existingResults, manualStudy];
-      const { error: reportUpdateError } = await supabase
-        .from("research_reports")
-        .update({ results: updatedResults })
-        .eq("id", report_id);
-      if (reportUpdateError) {
+      // Atomic append — no read-modify-write race
+      const { error: appendError } = await supabase.rpc("append_study_to_report", {
+        p_report_id: report_id,
+        p_study: manualStudy,
+      });
+      if (appendError) {
         return new Response(JSON.stringify({ error: "Failed to save study" }), {
           status: 500,
           headers: { ...corsHeaders, "Content-Type": "application/json" },
         });
       }
+
+      // Read updated results for extraction run snapshot
+      const { data: updatedReport } = await supabase
+        .from("research_reports")
+        .select("results")
+        .eq("id", report_id)
+        .single();
+      const updatedResults = (updatedReport?.results as StudyResult[]) || [];
 
       const litResponse = typeof report.lit_response === "object" && report.lit_response
         ? { ...(report.lit_response as Record<string, unknown>) }
@@ -344,20 +355,27 @@ Extract structured data from this paper's abstract.`;
     study.source = "manual";
     study.study_id = study.study_id || doi;
 
-    // Append to results
-    const updatedResults = [...existingResults, study];
-    const { error: updateError } = await supabase
-      .from("research_reports")
-      .update({ results: updatedResults })
-      .eq("id", report_id);
+    // Atomic append — no read-modify-write race
+    const { error: appendError2 } = await supabase.rpc("append_study_to_report", {
+      p_report_id: report_id,
+      p_study: study,
+    });
 
-    if (updateError) {
-      console.error("[add-study] Update error:", updateError);
+    if (appendError2) {
+      console.error("[add-study] Append error:", appendError2);
       return new Response(JSON.stringify({ error: "Failed to save study" }), {
         status: 500,
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }
+
+    // Read updated results for extraction run snapshot
+    const { data: updatedReport2 } = await supabase
+      .from("research_reports")
+      .select("results")
+      .eq("id", report_id)
+      .single();
+    const updatedResults = (updatedReport2?.results as StudyResult[]) || [];
 
     const litResponse = typeof report.lit_response === "object" && report.lit_response
       ? { ...(report.lit_response as Record<string, unknown>) }
