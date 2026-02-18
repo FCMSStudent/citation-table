@@ -388,6 +388,31 @@ export function ResultsTable({
   const [currentPage, setCurrentPage] = useState(1);
   const [expandedRows, setExpandedRows] = useState<Set<string>>(new Set());
   const [expandedSnippets, setExpandedSnippets] = useState<Set<string>>(new Set());
+
+  // Bolt: Pre-calculate a lookup map for expanded snippet indices by study ID.
+  // This avoids expensive O(S) filtering and string manipulation inside the StudyRow render loop,
+  // reducing complexity from O(N*S) to O(S + N) where N is items on page and S is total expanded snippets.
+  const expandedSnippetMap = useMemo(() => {
+    const map = new Map<string, string[]>();
+    for (const id of expandedSnippets) {
+      const lastDashIndex = id.lastIndexOf('-');
+      if (lastDashIndex === -1) continue;
+      const studyId = id.substring(0, lastDashIndex);
+      const snippetIdx = id.substring(lastDashIndex + 1);
+
+      if (!map.has(studyId)) {
+        map.set(studyId, []);
+      }
+      map.get(studyId)!.push(snippetIdx);
+    }
+
+    const result = new Map<string, string>();
+    for (const [studyId, indices] of map.entries()) {
+      result.set(studyId, indices.join(','));
+    }
+    return result;
+  }, [expandedSnippets]);
+
   const [highlightedStudyId, setHighlightedStudyId] = useState<string | null>(null);
   const [pendingScrollStudyId, setPendingScrollStudyId] = useState<string | null>(null);
   const [referenceListOpen, setReferenceListOpen] = useState(false);
@@ -463,19 +488,14 @@ export function ResultsTable({
   }, [results, partialResults, query]);
 
   // Consolidate sorting, filtering, and tier separation into a single efficient pipeline.
-  // Combining these reduces the number of full passes over the dataset (O(N)).
+  // Bolt: Filter before sorting to reduce the number of items passed to the sort algorithm,
+  // especially beneficial when many studies are filtered out by UI criteria.
   const { mainStudies, excludedStudies } = useMemo(() => {
-    const sorted = [...scoredStudies].sort((a, b) => {
-      if (a.completenessTier !== b.completenessTier) {
-        return a.completenessTier === 'strict' ? -1 : 1;
-      }
-      return sortBy === 'year' ? b.year - a.year : b.relevanceScore - a.relevanceScore;
-    });
-
     const main: ScoredStudy[] = [];
     const excluded: ScoredStudy[] = [];
 
-    for (const study of sorted) {
+    for (const study of scoredStudies) {
+      // 1. Filter out studies that don't match UI criteria
       if (!matchesReportStudyDesignFilter(study, studyDesign)) continue;
 
       const outcomesText = getOutcomeText(study);
@@ -484,13 +504,24 @@ export function ResultsTable({
 
       if (debouncedFind && !getCachedStudySearchBlob(study).includes(debouncedFind)) continue;
 
-      // Single-pass separation into main and excluded (low-value) studies.
+      // 2. Separate into main and excluded (low-value) studies.
       if (isLowValueStudy(study, study.relevanceScore)) {
         excluded.push(study);
       } else {
         main.push(study);
       }
     }
+
+    // 3. Sort only the filtered results.
+    const sortFn = (a: ScoredStudy, b: ScoredStudy) => {
+      if (a.completenessTier !== b.completenessTier) {
+        return a.completenessTier === 'strict' ? -1 : 1;
+      }
+      return sortBy === 'year' ? b.year - a.year : b.relevanceScore - a.relevanceScore;
+    };
+
+    main.sort(sortFn);
+    excluded.sort(sortFn);
 
     return { mainStudies: main, excludedStudies: excluded };
   }, [scoredStudies, sortBy, studyDesign, explicitOnly, debouncedFind]);
@@ -511,7 +542,11 @@ export function ResultsTable({
 
   const summaryData = useMemo(() => {
     const claimsSource = (briefSentences || []).slice(0, 3);
-    const studyById = new Map(mainStudies.map((study) => [study.study_id, study]));
+    // Bolt: Use for...of loop to initialize Map, avoiding intermediate array allocations (O(N) memory).
+    const studyById = new Map<string, ScoredStudy>();
+    for (const study of mainStudies) {
+      studyById.set(study.study_id, study);
+    }
     const numberByStudyId = new Map<string, number>();
     const references: SummaryReference[] = [];
 
@@ -950,10 +985,7 @@ export function ResultsTable({
                     onToggle={toggleRow}
                     highlightedStudyId={highlightedStudyId}
                     pdf={study.citation.doi ? pdfsByDoi[study.citation.doi] : undefined}
-                    expandedSnippetIndices={Array.from(expandedSnippets)
-                      .filter(id => id.startsWith(`${study.study_id}-`))
-                      .map(id => id.split('-').pop())
-                      .join(',')}
+                    expandedSnippetIndices={expandedSnippetMap.get(study.study_id) || ''}
                     onToggleSnippet={toggleSnippet}
                   />
                 ))}
