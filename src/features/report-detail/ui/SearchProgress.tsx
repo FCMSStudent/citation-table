@@ -1,11 +1,13 @@
 import { useState, useEffect } from 'react';
 import { Loader2, Search, Brain, FileText, CheckCircle2, AlertCircle } from 'lucide-react';
 import { Progress } from '@/shared/ui/Progress';
+import { Button } from '@/shared/ui/Button';
 
 interface SearchProgressProps {
   status: 'processing' | 'completed' | 'failed';
   createdAt: string;
   errorMessage?: string | null;
+  onRetry?: () => void;
 }
 
 const STAGES = [
@@ -15,8 +17,11 @@ const STAGES = [
 ];
 
 const TOTAL_ESTIMATED_MS = STAGES.reduce((s, st) => s + st.durationMs, 0); // 50s
+const LONGER_THAN_EXPECTED_MS = TOTAL_ESTIMATED_MS;
+const WARNING_MS = 2 * 60 * 1000;
+const TIMEOUT_HINT_MS = 5 * 60 * 1000;
 
-export function SearchProgress({ status, createdAt, errorMessage }: SearchProgressProps) {
+export function SearchProgress({ status, createdAt, errorMessage, onRetry }: SearchProgressProps) {
   const [elapsedMs, setElapsedMs] = useState(0);
 
   useEffect(() => {
@@ -35,6 +40,11 @@ export function SearchProgress({ status, createdAt, errorMessage }: SearchProgre
         <AlertCircle className="mx-auto mb-4 h-10 w-10 text-destructive" />
         <h2 className="text-lg font-semibold text-foreground">Search Failed</h2>
         <p className="mt-2 text-sm text-muted-foreground">{errorMessage || 'An unexpected error occurred.'}</p>
+        {onRetry && (
+          <Button className="mt-4" variant="outline" onClick={onRetry}>
+            Retry
+          </Button>
+        )}
       </div>
     );
   }
@@ -58,6 +68,20 @@ export function SearchProgress({ status, createdAt, errorMessage }: SearchProgre
   const progressPercent = Math.min((elapsedMs / TOTAL_ESTIMATED_MS) * 95, 95); // cap at 95% until done
   const remainingSeconds = Math.max(0, Math.ceil((TOTAL_ESTIMATED_MS - elapsedMs) / 1000));
   const CurrentIcon = STAGES[currentStageIndex].icon;
+  const isTakingLong = elapsedMs >= LONGER_THAN_EXPECTED_MS;
+  const isWarning = elapsedMs >= WARNING_MS;
+  const showTimeoutHint = elapsedMs >= TIMEOUT_HINT_MS;
+
+  let statusText = `~${remainingSeconds}s remaining`;
+  if (isTakingLong) {
+    statusText = 'Taking longer than expected…';
+  }
+  if (isWarning) {
+    statusText = 'Still working. This may indicate a backend delay.';
+  }
+  if (showTimeoutHint) {
+    statusText = 'This search appears stuck. You can retry now.';
+  }
 
   return (
     <div className="mx-auto max-w-xl space-y-6 rounded-lg border bg-card p-8">
@@ -80,13 +104,26 @@ export function SearchProgress({ status, createdAt, errorMessage }: SearchProgre
       <Progress value={progressPercent} className="h-2" />
 
       <div className="flex items-center justify-between text-xs text-muted-foreground">
-        <span>
-          {remainingSeconds > 0
-            ? `~${remainingSeconds}s remaining`
-            : 'Almost done…'}
-        </span>
+        <span>{statusText}</span>
         <span>{Math.round(progressPercent)}%</span>
       </div>
+
+      {isWarning && (
+        <div className="rounded-md border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-700 dark:text-amber-300">
+          We are still waiting for completion from the server.
+        </div>
+      )}
+
+      {showTimeoutHint && onRetry && (
+        <div className="rounded-md border border-destructive/30 bg-destructive/5 px-3 py-3">
+          <p className="text-sm text-muted-foreground">
+            The search has exceeded the normal processing window.
+          </p>
+          <Button className="mt-3" size="sm" variant="outline" onClick={onRetry}>
+            Retry
+          </Button>
+        </div>
+      )}
 
       {/* Stage indicators */}
       <div className="space-y-2">

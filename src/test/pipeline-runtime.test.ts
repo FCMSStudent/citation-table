@@ -2,32 +2,29 @@ import { describe, it, expect, vi } from "vitest";
 import {
   createStageContext,
   runStage,
-  StageError,
   type PipelineStage,
-  type StageResult,
   type StageEvent,
-  type StageContext,
 } from "../../supabase/functions/research-async/application/stages/pipeline-runtime.ts";
 import { hashKey } from "../../supabase/functions/research-async/domain/models/research.ts";
 
 // ---------- helpers ----------
-function successStage(name: string, output: unknown): PipelineStage<unknown, unknown> {
+function successStage(name: PipelineStage<unknown, unknown>["name"], output: unknown): PipelineStage<unknown, unknown> {
   return {
-    name: name as any,
+    name,
     execute: async () => ({ output }),
   };
 }
 
-function failStage(name: string, error: Error): PipelineStage<unknown, unknown> {
+function failStage(name: PipelineStage<unknown, unknown>["name"], error: Error): PipelineStage<unknown, unknown> {
   return {
-    name: name as any,
+    name,
     execute: async () => { throw error; },
   };
 }
 
-function slowStage(name: string, ms: number, output: unknown): PipelineStage<unknown, unknown> {
+function slowStage(name: PipelineStage<unknown, unknown>["name"], ms: number, output: unknown): PipelineStage<unknown, unknown> {
   return {
-    name: name as any,
+    name,
     execute: () => new Promise((res) => setTimeout(() => res({ output }), ms)),
   };
 }

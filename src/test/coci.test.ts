@@ -17,6 +17,16 @@ async function getMockedSupabase() {
   return mod.supabase;
 }
 
+function mockSession(
+  supabase: Awaited<ReturnType<typeof getMockedSupabase>>,
+  session: { access_token: string } | null,
+) {
+  vi.mocked(supabase.auth.getSession).mockResolvedValue({
+    data: { session },
+    error: null,
+  } as Awaited<ReturnType<typeof supabase.auth.getSession>>);
+}
+
 describe('COCI Integration', () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -27,10 +37,7 @@ describe('COCI Integration', () => {
   describe('fetchCociForDoi', () => {
     it('should throw error if not authenticated', async () => {
       const supabase = await getMockedSupabase();
-      vi.mocked(supabase.auth.getSession).mockResolvedValue({
-        data: { session: null },
-        error: null,
-      } as any);
+      mockSession(supabase, null);
 
       await expect(fetchCociForDoi('10.1000/xyz')).rejects.toThrow(
         'Authentication required'
@@ -39,10 +46,7 @@ describe('COCI Integration', () => {
 
     it('should throw error if VITE_SUPABASE_URL is not configured', async () => {
       const supabase = await getMockedSupabase();
-      vi.mocked(supabase.auth.getSession).mockResolvedValue({
-        data: { session: { access_token: 'test-token' } },
-        error: null,
-      } as any);
+      mockSession(supabase, { access_token: 'test-token' });
       import.meta.env.VITE_SUPABASE_URL = '';
 
       await expect(fetchCociForDoi('10.1000/xyz')).rejects.toThrow(
@@ -52,10 +56,7 @@ describe('COCI Integration', () => {
 
     it('should make request to correct endpoint with encoded DOI', async () => {
       const supabase = await getMockedSupabase();
-      vi.mocked(supabase.auth.getSession).mockResolvedValue({
-        data: { session: { access_token: 'test-token' } },
-        error: null,
-      } as any);
+      mockSession(supabase, { access_token: 'test-token' });
 
       const mockResponse = {
         doi: '10.1000/xyz',
@@ -89,10 +90,7 @@ describe('COCI Integration', () => {
 
     it('should include API key in headers if available', async () => {
       const supabase = await getMockedSupabase();
-      vi.mocked(supabase.auth.getSession).mockResolvedValue({
-        data: { session: { access_token: 'test-token' } },
-        error: null,
-      } as any);
+      mockSession(supabase, { access_token: 'test-token' });
       import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY = 'test-api-key';
 
       vi.mocked(globalThis.fetch).mockResolvedValueOnce({
@@ -116,10 +114,7 @@ describe('COCI Integration', () => {
 
     it('should throw error on non-ok response', async () => {
       const supabase = await getMockedSupabase();
-      vi.mocked(supabase.auth.getSession).mockResolvedValue({
-        data: { session: { access_token: 'test-token' } },
-        error: null,
-      } as any);
+      mockSession(supabase, { access_token: 'test-token' });
 
       vi.mocked(globalThis.fetch).mockResolvedValueOnce({
         ok: false,
@@ -134,10 +129,7 @@ describe('COCI Integration', () => {
 
     it('should handle DOIs with special characters', async () => {
       const supabase = await getMockedSupabase();
-      vi.mocked(supabase.auth.getSession).mockResolvedValue({
-        data: { session: { access_token: 'test-token' } },
-        error: null,
-      } as any);
+      mockSession(supabase, { access_token: 'test-token' });
 
       const doi = '10.1000/xyz(2023)';
       const encodedDoi = encodeURIComponent(doi);

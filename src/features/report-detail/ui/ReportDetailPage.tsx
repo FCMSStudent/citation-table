@@ -96,6 +96,7 @@ const ReportDetail = () => {
               <SearchProgress
                 status="processing"
                 createdAt={report.created_at}
+                onRetry={refetch}
               />
             )}
 
@@ -105,6 +106,7 @@ const ReportDetail = () => {
                 status="failed"
                 createdAt={report.created_at}
                 errorMessage={report.error_message}
+                onRetry={refetch}
               />
             )}
 

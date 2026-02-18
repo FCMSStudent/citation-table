@@ -3,7 +3,12 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2.49.1";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SUPABASE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
-const SUPABASE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
+
+interface ClaimedJob {
+  id: string;
+  status: string;
+  report_id?: string;
+}
 
 function getClient() {
   return createClient(SUPABASE_URL, SUPABASE_KEY);
@@ -38,7 +43,8 @@ Deno.test("research_jobs: enqueue → claim → complete lifecycle", async () =>
       p_batch_size: 10,
       p_lease_seconds: 60,
     });
-    const myJob = (claimed || []).find((j: any) => j.id === job.id);
+    const claimedJobs = Array.isArray(claimed) ? (claimed as ClaimedJob[]) : [];
+    const myJob = claimedJobs.find((j) => j.id === job.id);
     assertExists(myJob);
     assertEquals(myJob.status, "leased");
 
@@ -122,11 +128,11 @@ Deno.test("append_study_to_report: 10 concurrent appends lose no writes", async 
       .select("results")
       .eq("id", reportId)
       .single();
-    const arr = report?.results as any[];
+    const arr = Array.isArray(report?.results) ? (report.results as Array<{ study_id?: string }>) : [];
     assertEquals(arr.length, 10);
 
     // Verify all IDs present
-    const ids = new Set(arr.map((s: any) => s.study_id));
+    const ids = new Set(arr.map((s) => s.study_id).filter((id): id is string => typeof id === "string"));
     assertEquals(ids.size, 10);
   } finally {
     await supabase.from("research_reports").delete().eq("id", reportId);
@@ -158,8 +164,11 @@ Deno.test("research_jobs_claim: concurrent claims don't double-assign", async ()
       supabase.rpc("research_jobs_claim", { p_worker_id: "w3", p_batch_size: 3, p_lease_seconds: 60 }),
     ]);
 
-    const allClaimed = claims.flatMap((c) => (c.data || []).filter((j: any) => j.report_id === reportId));
-    const claimedIds = allClaimed.map((j: any) => j.id);
+    const allClaimed = claims.flatMap((c) => {
+      const data = Array.isArray(c.data) ? (c.data as ClaimedJob[]) : [];
+      return data.filter((j) => j.report_id === reportId);
+    });
+    const claimedIds = allClaimed.map((j) => j.id);
     const uniqueIds = new Set(claimedIds);
 
     // No job claimed twice

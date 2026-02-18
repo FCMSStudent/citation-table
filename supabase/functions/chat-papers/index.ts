@@ -237,7 +237,7 @@ serve(async (req) => {
     }
 
     const allStudies = asContextStudies(report.results);
-    const allPartialStudies = allStudies.filter((s: any) => !isCompleteStudy(s));
+    const allPartialStudies = allStudies.filter((s) => !isCompleteStudy(s));
     const queryText = (report.normalized_query || report.question || "").toLowerCase();
 
     const strictStudies = allStudies.filter(isCompleteStudy);

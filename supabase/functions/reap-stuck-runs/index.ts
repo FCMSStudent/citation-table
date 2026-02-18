@@ -6,7 +6,7 @@ const corsHeaders = {
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
 };
 
-const STUCK_THRESHOLD_MINUTES = 30;
+const STUCK_THRESHOLD_MINUTES = 15;
 
 serve(async (req) => {
   if (req.method === "OPTIONS") {

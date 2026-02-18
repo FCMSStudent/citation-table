@@ -1,5 +1,10 @@
-// deno-lint-ignore-file no-explicit-any
-type SupabaseClient = { from: (...args: any[]) => any; rpc: (...args: any[]) => any; auth: any; functions: any; storage: any; };
+type SupabaseClient = {
+  from: (...args: unknown[]) => unknown;
+  rpc: (...args: unknown[]) => unknown;
+  auth: unknown;
+  functions: unknown;
+  storage: unknown;
+};
 import type {
   CanonicalPaper,
   CoverageReport,
