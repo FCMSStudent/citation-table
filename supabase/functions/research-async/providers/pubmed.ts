@@ -43,7 +43,7 @@ export async function searchPubMed(
   precompiledQuery?: string,
 ): Promise<ProviderQueryResult> {
   const prepared = resolvePreparedQuery(query, "pubmed", mode, precompiledQuery);
-  if (!prepared.apiQuery) return [];
+  if (!prepared.apiQuery) return { papers: [], retryCount: 0 };
 
   const apiQuery = prepared.apiQuery;
   console.log(

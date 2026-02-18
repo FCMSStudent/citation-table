@@ -40,7 +40,7 @@ describe('a11y checks', () => {
     );
 
     const results = await axe(container);
-    expect(results).toHaveNoViolations();
+    expect((results as any).violations?.length ?? 0).toBe(0);
   });
 
   it('StudyTableVirtualized renders table semantics and passes axe', async () => {
@@ -68,6 +68,6 @@ describe('a11y checks', () => {
         'aria-valid-attr-value': { enabled: false },
       },
     });
-    expect(results).toHaveNoViolations();
+    expect((results as any).violations?.length ?? 0).toBe(0);
   });
 });
