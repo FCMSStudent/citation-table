@@ -47,14 +47,19 @@ export async function runProviderPipeline({
   const retrievalStartedAt = Date.now();
 
   const providerRuns = await Promise.all(PROVIDER_REGISTRY.map((provider) =>
-    provider.search(query, mode, sourceQueryOverrides[provider.name]).then((response) => ({
-      provider: provider.name,
-      papers: response.papers,
-      failed: response.degraded,
-      degraded: response.degraded,
-      error: response.error,
-      latencyMs: response.latencyMs,
-    }))
+    provider.search(query, mode, sourceQueryOverrides[provider.name]).then((response) => {
+      console.log(
+        `[Provider:${provider.name}] latency=${response.latencyMs}ms papers=${response.papers.length} degraded=${response.degraded}${response.error ? ` error=${response.error}` : ""}`,
+      );
+      return {
+        provider: provider.name,
+        papers: response.papers,
+        failed: response.degraded,
+        degraded: response.degraded,
+        error: response.error,
+        latencyMs: response.latencyMs,
+      };
+    })
   ));
 
   const papersByProvider = emptyProviderBuckets();

@@ -18,10 +18,15 @@ export interface StageEvent {
   run_id: string;
   stage: PipelineStageName;
   status: "started" | "completed" | "idempotent" | "failed";
+  event_type: "START" | "SUCCESS" | "FAILURE" | "IDEMPOTENT";
   at: string;
   duration?: number;
+  duration_ms?: number;
   error_category?: StageErrorCategory;
+  error_code?: string;
   message?: string;
+  input_hash?: string;
+  output_hash?: string;
 }
 
 export interface StageContext {
@@ -89,7 +94,7 @@ function defaultEmitEvent(event: StageEvent): void {
     `trace_id=${event.trace_id}`,
     `run_id=${event.run_id}`,
     `stage=${event.stage}`,
-    `status=${event.status}`,
+    `event_type=${event.event_type}`,
   ];
   if (typeof event.duration === "number") parts.push(`duration=${event.duration}`);
   if (event.error_category) parts.push(`error_category=${event.error_category}`);
@@ -115,6 +120,7 @@ export function createStageContext(params: {
 
 export async function runStage<I, O>(stage: PipelineStage<I, O>, input: I, ctx: StageContext): Promise<O> {
   const key = idempotencyKeyFor(stage.name, input);
+  const inputHash = key.split(":")[1] || "";
   const at = new Date().toISOString();
 
   if (ctx.idempotencyCache.has(key)) {
@@ -123,7 +129,9 @@ export async function runStage<I, O>(stage: PipelineStage<I, O>, input: I, ctx: 
       run_id: ctx.runId,
       stage: stage.name,
       status: "idempotent",
+      event_type: "IDEMPOTENT",
       at,
+      input_hash: inputHash,
       message: "cached_result",
     });
     return ctx.idempotencyCache.get(key) as O;
@@ -135,33 +143,46 @@ export async function runStage<I, O>(stage: PipelineStage<I, O>, input: I, ctx: 
     run_id: ctx.runId,
     stage: stage.name,
     status: "started",
+    event_type: "START",
     at,
+    input_hash: inputHash,
   });
 
   const timeoutMs = Math.max(250, ctx.stageTimeoutsMs[stage.name] || 30_000);
   try {
     const result = await withTimeout(stage.execute(input, ctx), timeoutMs, `stage:${stage.name}`);
     ctx.idempotencyCache.set(key, result.output);
+    const durationMs = ctx.now() - startedAt;
+    const outputHash = hashKey(JSON.stringify(result.output)).slice(0, 12);
     await ctx.emitEvent({
       trace_id: ctx.traceId,
       run_id: ctx.runId,
       stage: stage.name,
       status: "completed",
+      event_type: "SUCCESS",
       at: new Date().toISOString(),
-      duration: ctx.now() - startedAt,
+      duration: durationMs,
+      duration_ms: durationMs,
+      input_hash: inputHash,
+      output_hash: outputHash,
     });
     return result.output;
   } catch (err) {
     const stageError = normalizeStageError(stage.name, err);
+    const durationMs = ctx.now() - startedAt;
     await ctx.emitEvent({
       trace_id: ctx.traceId,
       run_id: ctx.runId,
       stage: stage.name,
       status: "failed",
+      event_type: "FAILURE",
       at: new Date().toISOString(),
-      duration: ctx.now() - startedAt,
+      duration: durationMs,
+      duration_ms: durationMs,
       error_category: stageError.category,
+      error_code: `${stageError.category}:${stage.name}`,
       message: stageError.message,
+      input_hash: inputHash,
     });
     throw stageError;
   }

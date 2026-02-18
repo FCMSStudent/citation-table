@@ -785,10 +785,15 @@ export type Database = {
         Row: {
           created_at: string
           duration: number | null
+          duration_ms: number | null
           error_category: string | null
+          error_code: string | null
           event_at: string
+          event_type: string | null
           id: string
+          input_hash: string | null
           message: string | null
+          output_hash: string | null
           report_id: string | null
           run_id: string | null
           stage: string
@@ -798,10 +803,15 @@ export type Database = {
         Insert: {
           created_at?: string
           duration?: number | null
+          duration_ms?: number | null
           error_category?: string | null
+          error_code?: string | null
           event_at: string
+          event_type?: string | null
           id?: string
+          input_hash?: string | null
           message?: string | null
+          output_hash?: string | null
           report_id?: string | null
           run_id?: string | null
           stage: string
@@ -811,10 +821,15 @@ export type Database = {
         Update: {
           created_at?: string
           duration?: number | null
+          duration_ms?: number | null
           error_category?: string | null
+          error_code?: string | null
           event_at?: string
+          event_type?: string | null
           id?: string
+          input_hash?: string | null
           message?: string | null
+          output_hash?: string | null
           report_id?: string | null
           run_id?: string | null
           stage?: string
