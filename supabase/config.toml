@@ -17,3 +17,6 @@ verify_jwt = false
 
 [functions.coci]
 verify_jwt = false
+
+[functions.reap-stuck-runs]
+verify_jwt = false
