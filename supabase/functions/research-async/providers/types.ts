@@ -61,3 +61,20 @@ export interface UnifiedPaper {
   preprint_status?: "Preprint" | "Peer-reviewed";
   rank_signal?: number;
 }
+
+export interface ProviderSearchResponse {
+  papers: UnifiedPaper[];
+  latencyMs: number;
+  degraded: boolean;
+  error?: string;
+}
+
+export interface ProviderAdapter {
+  name: SearchSource;
+  healthUrl: string;
+  search: (
+    query: string,
+    mode: ExpansionMode,
+    precompiledQuery?: string,
+  ) => Promise<ProviderSearchResponse>;
+}

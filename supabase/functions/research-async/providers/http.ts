@@ -11,6 +11,37 @@ export async function withTimeout<T>(promise: Promise<T>, timeoutMs: number, lab
   }
 }
 
+export async function fetchWithTimeout(
+  input: RequestInfo | URL,
+  init: RequestInit,
+  timeoutMs: number,
+  label: string,
+): Promise<Response> {
+  const controller = new AbortController();
+  const upstreamSignal = init.signal;
+  const timeoutId = setTimeout(() => {
+    controller.abort(new Error(`${label} timed out after ${timeoutMs}ms`));
+  }, timeoutMs) as unknown as ReturnType<typeof setTimeout>;
+
+  const forwardAbort = () => controller.abort(upstreamSignal?.reason);
+  if (upstreamSignal) {
+    if (upstreamSignal.aborted) forwardAbort();
+    else upstreamSignal.addEventListener("abort", forwardAbort, { once: true });
+  }
+
+  try {
+    return await fetch(input, { ...init, signal: controller.signal });
+  } catch (error) {
+    if (controller.signal.aborted && !upstreamSignal?.aborted) {
+      throw new Error(`${label} timed out after ${timeoutMs}ms`);
+    }
+    throw error;
+  } finally {
+    clearTimeout(timeoutId);
+    upstreamSignal?.removeEventListener("abort", forwardAbort);
+  }
+}
+
 export function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
@@ -51,8 +82,9 @@ export async function fetchWithRetry(
 
   for (let attempt = 0; attempt <= maxRetries; attempt += 1) {
     try {
-      const response = await withTimeout(
-        fetch(input, init),
+      const response = await fetchWithTimeout(
+        input,
+        init,
         options.timeoutMs,
         `${options.label}-attempt-${attempt + 1}`,
       );
