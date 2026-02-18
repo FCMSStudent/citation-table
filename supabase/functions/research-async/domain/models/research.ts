@@ -78,6 +78,12 @@ export interface PipelineResult {
   results: StudyResult[];
   partial_results: StudyResult[];
   extraction_stats: Record<string, unknown>;
+  extraction_metadata?: {
+    extractor_version: string;
+    prompt_hash: string | null;
+    model: string | null;
+    deterministic_flag: boolean;
+  };
   evidence_table: SearchResponsePayload["evidence_table"];
   brief: SearchResponsePayload["brief"];
   coverage: CoverageReport;

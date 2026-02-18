@@ -67,6 +67,10 @@ export interface PersistExtractionRunInput {
   errorMessage?: string | null;
   columnSetId?: string | null;
   parentRunId?: string | null;
+  extractorVersion?: string | null;
+  promptHash?: string | null;
+  model?: string | null;
+  deterministicFlag?: boolean;
   createdAt?: string;
   startedAt?: string;
   completedAt?: string | null;
@@ -363,6 +367,10 @@ export async function persistExtractionRun(
       coverage_report: input.coverageReport ?? {},
       search_stats: input.searchStats ?? {},
       extraction_stats: input.extractionStats ?? {},
+      extractor_version: input.extractorVersion ?? null,
+      prompt_hash: input.promptHash ?? null,
+      model: input.model ?? null,
+      deterministic_flag: Boolean(input.deterministicFlag),
       canonical_papers: toJsonArray(input.canonicalPapers),
       error_message: input.errorMessage ?? null,
       created_by: input.userId ?? null,

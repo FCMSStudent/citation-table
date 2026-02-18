@@ -41,6 +41,115 @@ import {
   type StageResult,
 } from "./pipeline-runtime.ts";
 
+const DETERMINISTIC_EXTRACTOR_VERSION = "deterministic_first_v1";
+const LLM_MODEL = "gemini-2.5-flash";
+const DETERMINISTIC_FIELDS = [
+  "study_id",
+  "title",
+  "year",
+  "study_design",
+  "outcomes[].outcome_measured",
+  "outcomes[].citation_snippet",
+  "citation.formatted",
+  "abstract_excerpt",
+  "preprint_status",
+  "review_type",
+  "source",
+];
+const NULLABLE_LLM_FIELDS = [
+  "sample_size",
+  "population",
+  "outcomes[].key_result",
+  "outcomes[].intervention",
+  "outcomes[].comparator",
+  "outcomes[].effect_size",
+  "outcomes[].p_value",
+  "citation.doi",
+  "citation.pubmed_id",
+  "citation.openalex_id",
+  "citationCount",
+  "pdf_url",
+  "landing_page_url",
+];
+
+function hashString(raw: string): string {
+  let hash = 2166136261;
+  for (let i = 0; i < raw.length; i += 1) {
+    hash ^= raw.charCodeAt(i);
+    hash += (hash << 1) + (hash << 4) + (hash << 7) + (hash << 8) + (hash << 24);
+  }
+  return (hash >>> 0).toString(16).padStart(8, "0");
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+}
+
+function isNullableText(value: unknown): value is string | null {
+  return value === null || typeof value === "string";
+}
+
+function hasNullableGaps(study: StudyResult): boolean {
+  if (study.sample_size === null || study.population === null) return true;
+  if (!study.citation?.doi || !study.citation?.pubmed_id || !study.citation?.openalex_id) return true;
+  if (study.citationCount === undefined || study.citationCount === null) return true;
+  if (study.pdf_url === null || study.pdf_url === undefined) return true;
+  if (study.landing_page_url === null || study.landing_page_url === undefined) return true;
+  return (study.outcomes || []).some((outcome) =>
+    !outcome.key_result
+    || !outcome.intervention
+    || !outcome.comparator
+    || !outcome.effect_size
+    || !outcome.p_value
+  );
+}
+
+function outcomeMatchKey(outcome: Outcome): string {
+  return `${outcome.outcome_measured.toLowerCase().trim()}|${outcome.citation_snippet.toLowerCase().trim()}`;
+}
+
+function mergeNullableLlmFields(deterministic: StudyResult[], llmStudies: StudyResult[]): StudyResult[] {
+  const llmById = new Map<string, StudyResult>();
+  for (const study of llmStudies) {
+    if (study?.study_id) llmById.set(study.study_id, study);
+  }
+
+  return deterministic.map((base) => {
+    const llm = llmById.get(base.study_id);
+    if (!llm) return base;
+
+    const mergedOutcomes = (base.outcomes || []).map((baseOutcome, index) => {
+      const byKey = (llm.outcomes || []).find((candidate) => outcomeMatchKey(candidate) === outcomeMatchKey(baseOutcome));
+      const llmOutcome = byKey || llm.outcomes?.[index];
+      if (!llmOutcome) return baseOutcome;
+      return {
+        ...baseOutcome,
+        key_result: baseOutcome.key_result ?? llmOutcome.key_result ?? null,
+        intervention: baseOutcome.intervention ?? llmOutcome.intervention ?? null,
+        comparator: baseOutcome.comparator ?? llmOutcome.comparator ?? null,
+        effect_size: baseOutcome.effect_size ?? llmOutcome.effect_size ?? null,
+        p_value: baseOutcome.p_value ?? llmOutcome.p_value ?? null,
+      };
+    });
+
+    return {
+      ...base,
+      sample_size: base.sample_size ?? llm.sample_size ?? null,
+      population: base.population ?? llm.population ?? null,
+      outcomes: mergedOutcomes,
+      citation: {
+        ...base.citation,
+        doi: base.citation?.doi ?? llm.citation?.doi ?? null,
+        pubmed_id: base.citation?.pubmed_id ?? llm.citation?.pubmed_id ?? null,
+        openalex_id: base.citation?.openalex_id ?? llm.citation?.openalex_id ?? null,
+      },
+      citationCount: base.citationCount ?? llm.citationCount,
+      pdf_url: base.pdf_url ?? llm.pdf_url ?? null,
+      landing_page_url: base.landing_page_url ?? llm.landing_page_url ?? null,
+    };
+  });
+}
+
 function formatCitation(paper: UnifiedPaper): string {
   const authors = paper.authors.slice(0, 3).join(", ");
   const etAl = paper.authors.length > 3 ? " et al." : "";
@@ -312,11 +421,145 @@ function mergeExtractedStudies(studies: StudyResult[]): StudyResult[] {
   return Array.from(byStudyId.values());
 }
 
+function validateLlmStudyPayload(raw: unknown): StudyResult[] {
+  const allowedStudyKeys = new Set([
+    "study_id",
+    "title",
+    "year",
+    "study_design",
+    "sample_size",
+    "population",
+    "outcomes",
+    "citation",
+    "abstract_excerpt",
+    "preprint_status",
+    "review_type",
+    "source",
+    "citationCount",
+    "pdf_url",
+    "landing_page_url",
+  ]);
+  const allowedOutcomeKeys = new Set([
+    "outcome_measured",
+    "key_result",
+    "citation_snippet",
+    "intervention",
+    "comparator",
+    "effect_size",
+    "p_value",
+  ]);
+  const allowedCitationKeys = new Set(["doi", "pubmed_id", "openalex_id", "formatted"]);
+  const validDesigns = new Set(["RCT", "cohort", "cross-sectional", "review", "unknown"]);
+  const validPreprint = new Set(["Preprint", "Peer-reviewed"]);
+  const validReviewType = new Set(["None", "Systematic review", "Meta-analysis"]);
+  const validSources = new Set(["openalex", "semantic_scholar", "arxiv", "pubmed"]);
+
+  const payloadArray = Array.isArray(raw)
+    ? raw
+    : isRecord(raw) && Array.isArray(raw.results)
+      ? raw.results
+      : isRecord(raw) && Array.isArray(raw.studies)
+        ? raw.studies
+        : isRecord(raw) && Array.isArray(raw.data)
+          ? raw.data
+          : null;
+
+  if (!payloadArray) {
+    throw new Error("LLM response must be an array of studies");
+  }
+
+  const validated: StudyResult[] = [];
+
+  for (const entry of payloadArray) {
+    if (!isRecord(entry)) throw new Error("LLM response item must be an object");
+    for (const key of Object.keys(entry)) {
+      if (!allowedStudyKeys.has(key)) throw new Error(`Unexpected study field: ${key}`);
+    }
+
+    if (typeof entry.study_id !== "string" || !entry.study_id.trim()) throw new Error("study_id must be a non-empty string");
+    if (typeof entry.title !== "string" || !entry.title.trim()) throw new Error("title must be a non-empty string");
+    if (typeof entry.year !== "number" || !Number.isFinite(entry.year)) throw new Error("year must be a finite number");
+    if (!validDesigns.has(String(entry.study_design))) throw new Error("invalid study_design");
+    if (entry.sample_size !== null && (typeof entry.sample_size !== "number" || !Number.isFinite(entry.sample_size))) {
+      throw new Error("sample_size must be number|null");
+    }
+    if (!isNullableText(entry.population)) throw new Error("population must be string|null");
+    if (typeof entry.abstract_excerpt !== "string" || !entry.abstract_excerpt.trim()) throw new Error("abstract_excerpt must be a non-empty string");
+    if (!validPreprint.has(String(entry.preprint_status))) throw new Error("invalid preprint_status");
+    if (!validReviewType.has(String(entry.review_type))) throw new Error("invalid review_type");
+    if (!validSources.has(String(entry.source))) throw new Error("invalid source");
+    if (entry.citationCount !== undefined && entry.citationCount !== null && (typeof entry.citationCount !== "number" || !Number.isFinite(entry.citationCount))) {
+      throw new Error("citationCount must be number|null");
+    }
+    if (entry.pdf_url !== undefined && !isNullableText(entry.pdf_url)) throw new Error("pdf_url must be string|null");
+    if (entry.landing_page_url !== undefined && !isNullableText(entry.landing_page_url)) throw new Error("landing_page_url must be string|null");
+
+    if (!Array.isArray(entry.outcomes)) throw new Error("outcomes must be an array");
+    const outcomes: Outcome[] = entry.outcomes.map((outcome) => {
+      if (!isRecord(outcome)) throw new Error("outcome must be an object");
+      for (const key of Object.keys(outcome)) {
+        if (!allowedOutcomeKeys.has(key)) throw new Error(`Unexpected outcome field: ${key}`);
+      }
+      if (typeof outcome.outcome_measured !== "string" || !outcome.outcome_measured.trim()) throw new Error("outcome_measured must be a non-empty string");
+      if (!isNullableText(outcome.key_result)) throw new Error("key_result must be string|null");
+      if (typeof outcome.citation_snippet !== "string" || !outcome.citation_snippet.trim()) throw new Error("citation_snippet must be a non-empty string");
+      if (!isNullableText(outcome.intervention)) throw new Error("intervention must be string|null");
+      if (!isNullableText(outcome.comparator)) throw new Error("comparator must be string|null");
+      if (!isNullableText(outcome.effect_size)) throw new Error("effect_size must be string|null");
+      if (!isNullableText(outcome.p_value)) throw new Error("p_value must be string|null");
+      return {
+        outcome_measured: outcome.outcome_measured,
+        key_result: outcome.key_result,
+        citation_snippet: outcome.citation_snippet,
+        intervention: outcome.intervention,
+        comparator: outcome.comparator,
+        effect_size: outcome.effect_size,
+        p_value: outcome.p_value,
+      };
+    });
+
+    if (!isRecord(entry.citation)) throw new Error("citation must be an object");
+    for (const key of Object.keys(entry.citation)) {
+      if (!allowedCitationKeys.has(key)) throw new Error(`Unexpected citation field: ${key}`);
+    }
+    if (!isNullableText(entry.citation.doi)) throw new Error("citation.doi must be string|null");
+    if (!isNullableText(entry.citation.pubmed_id)) throw new Error("citation.pubmed_id must be string|null");
+    if (!isNullableText(entry.citation.openalex_id)) throw new Error("citation.openalex_id must be string|null");
+    if (typeof entry.citation.formatted !== "string" || !entry.citation.formatted.trim()) throw new Error("citation.formatted must be a non-empty string");
+
+    validated.push({
+      study_id: entry.study_id,
+      title: entry.title,
+      year: entry.year,
+      study_design: entry.study_design as StudyResult["study_design"],
+      sample_size: entry.sample_size,
+      population: entry.population,
+      outcomes,
+      citation: {
+        doi: entry.citation.doi,
+        pubmed_id: entry.citation.pubmed_id,
+        openalex_id: entry.citation.openalex_id,
+        formatted: entry.citation.formatted,
+      },
+      abstract_excerpt: entry.abstract_excerpt,
+      preprint_status: entry.preprint_status as StudyResult["preprint_status"],
+      review_type: entry.review_type as StudyResult["review_type"],
+      source: entry.source as StudyResult["source"],
+      citationCount: entry.citationCount ?? undefined,
+      pdf_url: entry.pdf_url ?? null,
+      landing_page_url: entry.landing_page_url ?? null,
+    });
+  }
+
+  return validated;
+}
+
 async function extractStudyData(
   papers: UnifiedPaper[],
   question: string,
   openaiApiKey: string,
-): Promise<StudyResult[]> {
+  deterministicByStudyId: Map<string, StudyResult>,
+): Promise<{ studies: StudyResult[]; model: string; promptHash: string }> {
   const papersContext = papers.map((p, i) => ({
     index: i,
     title: p.title,
@@ -330,74 +573,26 @@ async function extractStudyData(
     citationCount: p.citationCount,
     pdfUrl: p.pdfUrl,
     landingPageUrl: p.landingPageUrl,
+    deterministic: deterministicByStudyId.get(p.id) || null,
   }));
 
-  const systemPrompt = `You are a rigorous medical research data extractor following strict evidence-based principles.
+  const systemPrompt = `You are a deterministic-first medical extraction augmenter.
 
-CRITICAL EXTRACTION RULES (per meta prompt):
-1. Extract ONLY from Abstract and explicitly labeled Results sections
-2. NEVER infer study design - if not explicitly stated, return "unknown"
-3. Population descriptions MUST be extracted verbatim from the source
-4. Sample size: return only clearly stated total (e.g., "n=150", "150 participants"); otherwise null
-5. Each study may report MULTIPLE outcomes - represent as separate objects in outcomes array
-6. Each outcome MUST have its own citation_snippet (verbatim text from abstract)
-7. Numerical values (CI, p-values, effect sizes) MUST be extracted verbatim - no rounding
-8. Terms like "significant" or association language allowed ONLY if quoted or explicitly used in source
-9. NO causal language unless the abstract explicitly states causation
-12. For each outcome, extract "intervention" (the treatment/exposure) and "comparator" (control group) verbatim. Return null if not stated.
-13. For each outcome, extract "effect_size" (verbatim: Cohen's d, OR, RR, HR, SMD, etc.) and "p_value" (verbatim p-value or CI). Return null if not stated.
-10. Classify preprint_status: "Preprint" if preprint/not peer-reviewed, else "Peer-reviewed"
-11. Classify review_type: "Meta-analysis" for meta-analyses (MUST flag), "Systematic review" for systematic reviews, else "None"
-
-STUDY DESIGN CLASSIFICATION:
-- "RCT": Randomized controlled trials, clinical trials with randomization
-- "cohort": Cohort studies, longitudinal studies, prospective/retrospective follow-up studies
-- "cross-sectional": Cross-sectional surveys, prevalence studies, single time-point observations
-- "review": Narrative reviews, literature reviews, systematic reviews, meta-analyses, scoping reviews
-- "unknown": Editorials, commentaries, case reports, case series, letters to the editor, opinion pieces, guidelines, conference abstracts, or any paper that does not clearly fit one of the above designs. When in doubt, classify as "unknown".
-
-OUTPUT SCHEMA - return valid JSON array matching this exact structure:
-[{
-  "study_id": "string (paper ID)",
-  "title": "string",
-  "year": number,
-  "study_design": "RCT" | "cohort" | "cross-sectional" | "review" | "unknown",
-  "sample_size": number | null,
-  "population": "verbatim population description" | null,
-  "outcomes": [{
-    "outcome_measured": "string describing what was measured",
-    "key_result": "verbatim finding with exact numbers/CI/p-values" | null,
-    "citation_snippet": "verbatim text from abstract supporting this result",
-    "intervention": "treatment/exposure" | null,
-    "comparator": "control/comparison group" | null,
-    "effect_size": "verbatim effect size (e.g., Cohen's d, OR, RR, HR)" | null,
-    "p_value": "verbatim p-value or CI" | null
-  }],
-  "citation": {
-    "doi": "string" | null,
-    "pubmed_id": "string" | null,
-    "openalex_id": "string" | null,
-    "formatted": "APA formatted citation"
-  },
-  "abstract_excerpt": "representative excerpt from abstract",
-  "preprint_status": "Preprint" | "Peer-reviewed",
-  "review_type": "None" | "Systematic review" | "Meta-analysis",
-  "source": "openalex" | "semantic_scholar" | "arxiv" | "pubmed",
-  "citationCount": number | null
-}]
-
-Return ONLY valid JSON array. No markdown, no explanation.`;
+Rules:
+1. Treat provided deterministic JSON as locked baseline.
+2. Do not change non-nullable deterministic fields.
+3. You may only fill nullable fields when currently null.
+4. Keep the same study_ids and outcomes alignment.
+5. Return strict JSON only; no markdown.`;
 
   const userPrompt = `Research Question: "${question}"
 
 Papers to analyze:
 ${JSON.stringify(papersContext, null, 2)}
 
-Extract structured data from each paper's abstract following the strict rules. Remember:
-- Multiple outcomes per study as separate objects in outcomes array
-- Each outcome needs its own citation_snippet, intervention, comparator, effect_size, and p_value
-- No inference - null for missing data
-- Verbatim extraction for populations, numerical results, interventions, and comparators`;
+Fill only nullable fields for each deterministic study.`;
+
+  const promptHash = hashString(systemPrompt);
 
   console.log(`[LLM] Sending ${papers.length} papers for extraction via Gemini`);
 
@@ -408,7 +603,7 @@ Extract structured data from each paper's abstract following the strict rules. R
       Authorization: `Bearer ${openaiApiKey}`,
     },
     body: JSON.stringify({
-      model: "gemini-2.5-flash",
+      model: LLM_MODEL,
       messages: [
         { role: "system", content: systemPrompt },
         { role: "user", content: userPrompt },
@@ -436,8 +631,9 @@ Extract structured data from each paper's abstract following the strict rules. R
   if (jsonStr.endsWith("```")) jsonStr = jsonStr.slice(0, -3);
 
   try {
-    const results = JSON.parse(jsonStr.trim());
-    console.log(`[LLM] Parsed ${results.length} study results`);
+    const parsed = JSON.parse(jsonStr.trim());
+    const results = validateLlmStudyPayload(parsed);
+    console.log(`[LLM] Parsed and validated ${results.length} study results`);
     for (const study of results) {
       const matchedPaper = papers.find((p) => p.id === study.study_id);
       if (matchedPaper) {
@@ -445,10 +641,10 @@ Extract structured data from each paper's abstract following the strict rules. R
         study.landing_page_url = matchedPaper.landingPageUrl || null;
       }
     }
-    return results;
+    return { studies: results, model: LLM_MODEL, promptHash };
   } catch (parseError) {
-    console.error("[LLM] JSON parse error:", parseError);
-    throw new Error("Failed to parse LLM response as JSON");
+    console.error("[LLM] JSON parse/validation error:", parseError);
+    throw new Error("Failed strict JSON schema validation for LLM response");
   }
 }
 
@@ -601,10 +797,10 @@ interface StageDeterministicExtracted extends StageQualityFiltered {
   extractionCandidates: UnifiedPaper[];
   extraction_input_total: number;
   deterministicResults: Awaited<ReturnType<typeof extractStudiesDeterministic>>;
+  deterministicMerged: StudyResult[];
   results: StudyResult[];
   partial_results: StudyResult[];
-  needsLlmPrimary: boolean;
-  needsHybridLlmFallback: boolean;
+  needsNullableLlmAugment: boolean;
 }
 
 class ValidateStage implements PipelineStage<{ question: string; requestPayload: SearchRequestPayload; enrichmentContext: MetadataEnrichmentContext }, StageValidated> {
@@ -785,10 +981,10 @@ class DeterministicExtractStage implements PipelineStage<StageQualityFiltered, S
           extractionCandidates: [],
           extraction_input_total: 0,
           deterministicResults: [],
+          deterministicMerged: [],
           results: [],
           partial_results: [],
-          needsLlmPrimary: false,
-          needsHybridLlmFallback: false,
+          needsNullableLlmAugment: false,
         },
       };
     }
@@ -804,25 +1000,6 @@ class DeterministicExtractStage implements PipelineStage<StageQualityFiltered, S
     const extraction_input_total = extractionCandidates.length;
     const extractionStartedAt = Date.now();
 
-    if (input.extractionEngine === "llm") {
-      if (!input.geminiApiKey) {
-        throw new StageError(this.name, "VALIDATION", "GOOGLE_GEMINI_API_KEY required when EXTRACTION_ENGINE=llm");
-      }
-      return {
-        output: {
-          ...input,
-          extractionStartedAt,
-          extractionCandidates,
-          extraction_input_total,
-          deterministicResults: [],
-          results: [],
-          partial_results: [],
-          needsLlmPrimary: true,
-          needsHybridLlmFallback: false,
-        },
-      };
-    }
-
     const deterministicInputs = extractionCandidates.map((paper) => toDeterministicInput(paper));
     const deterministicResults = await extractStudiesDeterministic(deterministicInputs, {
       question: input.question,
@@ -835,6 +1012,9 @@ class DeterministicExtractStage implements PipelineStage<StageQualityFiltered, S
       deterministicResults.map((row) => row.study as unknown as StudyResult),
     );
     const deterministicTiers = applyCompletenessTiers(deterministicMerged as unknown as DeterministicStudyResult[]);
+    const needsNullableLlmAugment = input.extractionEngine !== "scripted"
+      && Boolean(input.geminiApiKey)
+      && deterministicMerged.some(hasNullableGaps);
 
     return {
       output: {
@@ -843,78 +1023,74 @@ class DeterministicExtractStage implements PipelineStage<StageQualityFiltered, S
         extractionCandidates,
         extraction_input_total,
         deterministicResults,
+        deterministicMerged,
         results: deterministicTiers.complete as unknown as StudyResult[],
         partial_results: deterministicTiers.partial as unknown as StudyResult[],
-        needsLlmPrimary: false,
-        needsHybridLlmFallback: input.extractionEngine === "hybrid" && deterministicTiers.complete.length === 0 && Boolean(input.geminiApiKey),
+        needsNullableLlmAugment,
       },
     };
   }
 }
 
-class LlmAugmentStage implements PipelineStage<StageDeterministicExtracted, StageDeterministicExtracted & { extraction_stats: Record<string, unknown> }> {
+class LlmAugmentStage implements PipelineStage<
+  StageDeterministicExtracted,
+  StageDeterministicExtracted & {
+    extraction_stats: Record<string, unknown>;
+    extraction_metadata: {
+      extractor_version: string;
+      prompt_hash: string | null;
+      model: string | null;
+      deterministic_flag: boolean;
+    };
+  }
+> {
   readonly name = "LLM_AUGMENT" as const;
 
-  async execute(input: StageDeterministicExtracted): Promise<StageResult<StageDeterministicExtracted & { extraction_stats: Record<string, unknown> }>> {
+  async execute(input: StageDeterministicExtracted): Promise<StageResult<
+    StageDeterministicExtracted & {
+      extraction_stats: Record<string, unknown>;
+      extraction_metadata: {
+        extractor_version: string;
+        prompt_hash: string | null;
+        model: string | null;
+        deterministic_flag: boolean;
+      };
+    }
+  >> {
+    let deterministicMerged = [...input.deterministicMerged];
     let results = [...input.results];
     let partial_results = [...input.partial_results];
     let llmFallbackApplied = false;
+    let llmPromptHash: string | null = null;
+    let llmModel: string | null = null;
 
-    if (input.needsLlmPrimary) {
+    if (input.needsNullableLlmAugment && input.geminiApiKey) {
       try {
         const batchSize = 15;
-        const extractionBatches: Promise<StudyResult[]>[] = [];
-        for (let i = 0; i < input.extractionCandidates.length; i += batchSize) {
-          extractionBatches.push(extractStudyData(input.extractionCandidates.slice(i, i + batchSize), input.question, input.geminiApiKey));
+        const extractionBatches: Promise<{ studies: StudyResult[]; model: string; promptHash: string }>[] = [];
+        const deterministicByStudyId = new Map<string, StudyResult>();
+        for (const study of input.deterministicMerged) {
+          if (study?.study_id) deterministicByStudyId.set(study.study_id, study);
         }
-        const extracted = (await Promise.all(extractionBatches)).flat();
-        const mergedByStudy = mergeExtractedStudies(extracted);
-        const tiers = applyCompletenessTiers(mergedByStudy as unknown as DeterministicStudyResult[]);
+        for (let i = 0; i < input.extractionCandidates.length; i += batchSize) {
+          extractionBatches.push(extractStudyData(
+            input.extractionCandidates.slice(i, i + batchSize),
+            input.question,
+            input.geminiApiKey,
+            deterministicByStudyId,
+          ));
+        }
+        const extracted = await Promise.all(extractionBatches);
+        llmModel = extracted[0]?.model || LLM_MODEL;
+        llmPromptHash = extracted[0]?.promptHash || null;
+        const llmExtracted = mergeExtractedStudies(extracted.flatMap((batch) => batch.studies));
+        deterministicMerged = mergeNullableLlmFields(input.deterministicMerged, llmExtracted);
+        const tiers = applyCompletenessTiers(deterministicMerged as unknown as DeterministicStudyResult[]);
         results = tiers.complete as unknown as StudyResult[];
         partial_results = tiers.partial as unknown as StudyResult[];
+        llmFallbackApplied = true;
       } catch (error) {
-        console.warn("[Pipeline] LLM extraction fallback triggered:", error);
-        partial_results = input.keptCapped.slice(0, 50).map(canonicalToFallbackStudy);
-      }
-
-      return {
-        output: {
-          ...input,
-          results,
-          partial_results,
-          extraction_stats: {
-            total_inputs: input.extractionCandidates.length,
-            extracted_total: results.length + partial_results.length,
-            complete_total: results.length,
-            partial_total: partial_results.length,
-            used_pdf: 0,
-            used_abstract_fallback: 0,
-            failures: 0,
-            fallback_reasons: {},
-            engine: "llm",
-            llm_fallback_applied: false,
-            latency_ms: Date.now() - input.extractionStartedAt,
-          },
-        },
-      };
-    }
-
-    if (input.needsHybridLlmFallback && input.geminiApiKey) {
-      try {
-        const batchSize = 15;
-        const llmBatches: Promise<StudyResult[]>[] = [];
-        for (let i = 0; i < input.extractionCandidates.length; i += batchSize) {
-          llmBatches.push(extractStudyData(input.extractionCandidates.slice(i, i + batchSize), input.question, input.geminiApiKey));
-        }
-        const llmExtracted = (await Promise.all(llmBatches)).flat();
-        const llmMerged = mergeExtractedStudies(llmExtracted);
-        const llmTiers = applyCompletenessTiers(llmMerged as unknown as DeterministicStudyResult[]);
-        if (llmTiers.complete.length > 0) {
-          results = llmTiers.complete as unknown as StudyResult[];
-          llmFallbackApplied = true;
-        }
-      } catch (error) {
-        console.warn("[Pipeline] Hybrid LLM fallback failed:", error);
+        console.warn("[Pipeline] Nullable LLM augmentation failed:", error);
       }
     }
 
@@ -925,16 +1101,27 @@ class LlmAugmentStage implements PipelineStage<StageDeterministicExtracted, Stag
     return {
       output: {
         ...input,
+        deterministicMerged,
         results,
         partial_results,
-        extraction_stats: summarizeExtractionResults(input.deterministicResults, {
-          totalInputs: input.extractionCandidates.length,
-          completeTotal: results.length,
-          partialTotal: partial_results.length,
-          latencyMs: Date.now() - input.extractionStartedAt,
-          engine: input.extractionEngine,
-          llmFallbackApplied,
-        }) as unknown as Record<string, unknown>,
+        extraction_stats: {
+          ...(summarizeExtractionResults(input.deterministicResults, {
+            totalInputs: input.extractionCandidates.length,
+            completeTotal: results.length,
+            partialTotal: partial_results.length,
+            latencyMs: Date.now() - input.extractionStartedAt,
+            engine: input.extractionEngine,
+            llmFallbackApplied,
+          }) as unknown as Record<string, unknown>),
+          deterministic_fields: DETERMINISTIC_FIELDS,
+          llm_nullable_fields: NULLABLE_LLM_FIELDS,
+        },
+        extraction_metadata: {
+          extractor_version: DETERMINISTIC_EXTRACTOR_VERSION,
+          prompt_hash: llmPromptHash,
+          model: llmModel,
+          deterministic_flag: true,
+        },
       },
     };
   }
@@ -942,11 +1129,30 @@ class LlmAugmentStage implements PipelineStage<StageDeterministicExtracted, Stag
 
 class PersistStage implements PipelineStage<{
   pipelineStartedAt: number;
-  state: StageDeterministicExtracted & { extraction_stats: Record<string, unknown> };
+  state: StageDeterministicExtracted & {
+    extraction_stats: Record<string, unknown>;
+    extraction_metadata: {
+      extractor_version: string;
+      prompt_hash: string | null;
+      model: string | null;
+      deterministic_flag: boolean;
+    };
+  };
 }, PipelineResult> {
   readonly name = "PERSIST" as const;
 
-  async execute(input: { pipelineStartedAt: number; state: StageDeterministicExtracted & { extraction_stats: Record<string, unknown> } }): Promise<StageResult<PipelineResult>> {
+  async execute(input: {
+    pipelineStartedAt: number;
+    state: StageDeterministicExtracted & {
+      extraction_stats: Record<string, unknown>;
+      extraction_metadata: {
+        extractor_version: string;
+        prompt_hash: string | null;
+        model: string | null;
+        deterministic_flag: boolean;
+      };
+    };
+  }): Promise<StageResult<PipelineResult>> {
     const state = input.state;
     const stats: SearchStats = {
       latency_ms: Date.now() - input.pipelineStartedAt,
@@ -965,6 +1171,7 @@ class PersistStage implements PipelineStage<{
         results: state.results,
         partial_results: state.partial_results,
         extraction_stats: state.extraction_stats,
+        extraction_metadata: state.extraction_metadata,
         evidence_table: state.evidence_table,
         brief: state.brief,
         coverage: state.coverage,

@@ -277,6 +277,10 @@ ${JSON.stringify(study, null, 2)}`;
       coverageReport: (report.coverage_report as Record<string, unknown>) || {},
       searchStats: (report.search_stats as Record<string, unknown>) || {},
       extractionStats,
+      extractorVersion: "pdf_reextract_v1",
+      promptHash: null,
+      model: "gemini-2.5-flash",
+      deterministicFlag: false,
       canonicalPapers: [],
     });
     litResponse.active_run_id = runSnapshot.runId;

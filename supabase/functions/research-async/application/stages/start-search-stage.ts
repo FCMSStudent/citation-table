@@ -71,6 +71,10 @@ export async function handleStartSearch(
         coverage: replayed.coverage,
         stats: replayed.stats,
         extractionStats: {},
+        extractorVersion: "cache_replay_v1",
+        promptHash: null,
+        model: null,
+        deterministicFlag: false,
         canonicalPapers: [],
       });
       replayed.active_run_id = runSnapshot.runId;

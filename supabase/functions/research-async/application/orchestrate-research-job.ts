@@ -68,6 +68,10 @@ class PersistPipelineStage implements PipelineStage<{
       coverage: input.data.coverage,
       stats: input.data.stats,
       extractionStats: input.data.extraction_stats || {},
+      extractorVersion: input.data.extraction_metadata?.extractor_version || "unknown",
+      promptHash: input.data.extraction_metadata?.prompt_hash ?? null,
+      model: input.data.extraction_metadata?.model ?? null,
+      deterministicFlag: Boolean(input.data.extraction_metadata?.deterministic_flag),
       canonicalPapers: input.data.canonical_papers || [],
     });
     responsePayload.active_run_id = runSnapshot.runId;

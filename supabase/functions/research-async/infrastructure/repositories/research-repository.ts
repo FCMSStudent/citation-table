@@ -105,6 +105,10 @@ export async function createExtractionRunForSearch(
     stats?: SearchStats;
     extractionStats?: Record<string, unknown>;
     canonicalPapers?: CanonicalPaper[];
+    extractorVersion?: string;
+    promptHash?: string | null;
+    model?: string | null;
+    deterministicFlag?: boolean;
   },
 ): Promise<{ runId: string; runIndex: number }> {
   const persisted = await persistExtractionRun(supabase, {
@@ -124,6 +128,10 @@ export async function createExtractionRunForSearch(
     coverageReport: (params.coverage as unknown as Record<string, unknown>) || {},
     searchStats: (params.stats as unknown as Record<string, unknown>) || {},
     extractionStats: params.extractionStats || {},
+    extractorVersion: params.extractorVersion ?? null,
+    promptHash: params.promptHash ?? null,
+    model: params.model ?? null,
+    deterministicFlag: Boolean(params.deterministicFlag),
     canonicalPapers: params.canonicalPapers || [],
     completedAt: new Date().toISOString(),
   });
