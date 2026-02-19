@@ -1,0 +1,10 @@
+
+> vite_react_shadcn_ts@0.0.0 dev /app
+> vite
+
+Re-optimizing dependencies because lockfile has changed
+
+  VITE v5.4.21  ready in 446 ms
+
+  ➜  Local:   http://localhost:8080/
+  ➜  Network: http://192.168.0.2:8080/
