@@ -214,10 +214,16 @@ const StudyRow = memo(({
   expandedSnippetIndices,
   onToggleSnippet,
 }: StudyRowProps) => {
-  const firstOutcomeResult = study.outcomes?.find((o) => o.key_result)?.key_result || '—';
-  const openAlexUrl = normalizeOpenAlexStudyUrl(study.citation.openalex_id);
-  const doiUrl = study.citation.doi ? sanitizeUrl(`https://doi.org/${study.citation.doi}`) : null;
-  const expandedIndices = useMemo(() => new Set(expandedSnippetIndices.split(',')), [expandedSnippetIndices]);
+  // Performance Optimization: Stabilize derived strings to prevent recalculation when unrelated props change.
+  const firstOutcomeResult = useMemo(() => study.outcomes?.find((o) => o.key_result)?.key_result || '—', [study.outcomes]);
+  const openAlexUrl = useMemo(() => normalizeOpenAlexStudyUrl(study.citation.openalex_id), [study.citation.openalex_id]);
+  const doiUrl = useMemo(() => (study.citation.doi ? sanitizeUrl(`https://doi.org/${study.citation.doi}`) : null), [study.citation.doi]);
+
+  // Handle empty string correctly to avoid Set(['']) which would cause false matches.
+  const expandedIndices = useMemo(
+    () => new Set(expandedSnippetIndices ? expandedSnippetIndices.split(',') : []),
+    [expandedSnippetIndices],
+  );
 
   return (
     <Fragment>
@@ -388,6 +394,28 @@ export function ResultsTable({
   const [currentPage, setCurrentPage] = useState(1);
   const [expandedRows, setExpandedRows] = useState<Set<string>>(new Set());
   const [expandedSnippets, setExpandedSnippets] = useState<Set<string>>(new Set());
+
+  // Performance Optimization: Group expanded snippets by study_id in a single pass O(S).
+  // This avoids O(R*S) overhead in the render loop (where R is visible rows, S is total expanded snippets).
+  const expandedSnippetsByStudy = useMemo(() => {
+    const map = new Map<string, string[]>();
+    for (const key of expandedSnippets) {
+      const lastDashIndex = key.lastIndexOf('-');
+      if (lastDashIndex === -1) continue;
+      const studyId = key.substring(0, lastDashIndex);
+      const index = key.substring(lastDashIndex + 1);
+      if (!map.has(studyId)) {
+        map.set(studyId, []);
+      }
+      map.get(studyId)!.push(index);
+    }
+    const result = new Map<string, string>();
+    for (const [studyId, indices] of map.entries()) {
+      result.set(studyId, indices.join(','));
+    }
+    return result;
+  }, [expandedSnippets]);
+
   const [highlightedStudyId, setHighlightedStudyId] = useState<string | null>(null);
   const [pendingScrollStudyId, setPendingScrollStudyId] = useState<string | null>(null);
   const [referenceListOpen, setReferenceListOpen] = useState(false);
@@ -950,10 +978,7 @@ export function ResultsTable({
                     onToggle={toggleRow}
                     highlightedStudyId={highlightedStudyId}
                     pdf={study.citation.doi ? pdfsByDoi[study.citation.doi] : undefined}
-                    expandedSnippetIndices={Array.from(expandedSnippets)
-                      .filter(id => id.startsWith(`${study.study_id}-`))
-                      .map(id => id.split('-').pop())
-                      .join(',')}
+                    expandedSnippetIndices={expandedSnippetsByStudy.get(study.study_id) || ''}
                     onToggleSnippet={toggleSnippet}
                   />
                 ))}

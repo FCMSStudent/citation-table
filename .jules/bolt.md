@@ -19,3 +19,7 @@
 ## 2026-02-14 - [Consolidated Data Pass & Pagination Reset]
 **Learning:** Consolidating multiple `useMemo` hooks that perform sequential filter/map/sort operations into a single efficient pipeline (O(N) for filtering/scoring, O(N log N) for sorting) significantly reduces overhead for large datasets. Additionally, using `useMemo` to trigger state updates (like resetting pagination) is a React anti-pattern that triggers lint warnings; `useEffect` should be used for side-effect-driven state resets.
 **Action:** Merge multiple data-processing passes into one. Use `useEffect` for side-effect-driven state resets.
+
+## 2026-02-15 - [O(R*S) Render Loop Optimization]
+**Learning:** Passing a global Set of state IDs to children in a large list causes O(R*S) complexity (Rows * Set size) if each row filters the Set in the render loop. Pre-calculating a lookup Map in the parent component reduces this to O(R+S). Additionally, memoizing simple derived props (URLs, formatted strings) in memoized components prevents unnecessary re-calculations when unrelated props (like expand state) change.
+**Action:** Pre-calculate lookup Maps for row-specific state in the parent. Stabilize all derived props in list items with `useMemo`.
