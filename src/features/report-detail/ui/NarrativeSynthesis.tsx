@@ -1,8 +1,9 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import type { ReactNode } from 'react';
-import { RefreshCw, Sparkles, AlertCircle, AlertTriangle } from 'lucide-react';
+import { RefreshCw, Sparkles, AlertCircle, AlertTriangle, Copy, Check } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import { Button } from '@/shared/ui/Button';
+import { toast } from '@/shared/ui/Sonner';
 import { Badge } from '@/shared/ui/Badge';
 import { Skeleton } from '@/shared/ui/Skeleton';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/shared/ui/Tooltip';
@@ -42,6 +43,63 @@ function parseSynthesis(raw: string | null): ParsedSynthesis {
 function getCitationNumber(studyIndex: string): number | null {
   const idx = parseInt(studyIndex.replace('study-', ''), 10);
   return Number.isFinite(idx) && idx >= 0 ? idx + 1 : null;
+}
+
+function getStructuredMarkdown(data: SynthesisData): string {
+  return data.sections
+    .map((section) => {
+      const heading = `### ${section.heading}`;
+      const claims = section.claims
+        .map((claim) => {
+          const citations = claim.citations
+            .map((c) => {
+              const num = getCitationNumber(c);
+              return num ? `[${num}]` : c;
+            })
+            .join(', ');
+          return `${claim.text}${citations ? ` (${citations})` : ''}`;
+        })
+        .join('\n\n');
+      return `${heading}\n\n${claims}`;
+    })
+    .join('\n\n');
+}
+
+function CopyButton({ text }: { text: string }) {
+  const [copied, setCopied] = useState(false);
+  const timerRef = useRef<number>();
+
+  const handleCopy = async () => {
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopied(true);
+      toast.success('Copied to clipboard');
+      if (timerRef.current) window.clearTimeout(timerRef.current);
+      timerRef.current = window.setTimeout(() => setCopied(false), 2000);
+    } catch (err) {
+      console.error('Failed to copy text: ', err);
+      toast.error('Failed to copy');
+    }
+  };
+
+  useEffect(() => {
+    return () => {
+      if (timerRef.current) window.clearTimeout(timerRef.current);
+    };
+  }, []);
+
+  return (
+    <Button
+      variant="ghost"
+      size="sm"
+      onClick={handleCopy}
+      className="h-8 px-2 text-muted-foreground hover:text-foreground gap-1.5"
+      aria-label="Copy summary to clipboard"
+    >
+      {copied ? <Check className="h-3.5 w-3.5" /> : <Copy className="h-3.5 w-3.5" />}
+      <span className="text-xs">{copied ? 'Copied' : 'Copy'}</span>
+    </Button>
+  );
 }
 
 function WarningsPopover({ warnings }: { warnings: SynthesisWarning[] }) {
@@ -96,11 +154,13 @@ function SummaryFrame({
   warnings,
   children,
   onRegenerate,
+  copyText,
 }: {
   titleAddon?: ReactNode;
   warnings?: SynthesisWarning[];
   children: ReactNode;
   onRegenerate: () => void;
+  copyText?: string;
 }) {
   return (
     <div className="rounded-lg border bg-card p-4">
@@ -112,6 +172,7 @@ function SummaryFrame({
         </div>
         <div className="flex items-center gap-3">
           {!!warnings?.length && <WarningsPopover warnings={warnings} />}
+          {copyText && <CopyButton text={copyText} />}
           <Button variant="ghost" size="sm" onClick={onRegenerate} className="gap-2 text-muted-foreground hover:text-foreground">
             <RefreshCw className="h-3 w-3" />
             Regenerate
@@ -136,7 +197,11 @@ function ElicitStyleView({
   const canExpand = data.narrative.length > 360;
 
   return (
-    <SummaryFrame warnings={data.warnings || []} onRegenerate={onRegenerate}>
+    <SummaryFrame
+      warnings={data.warnings || []}
+      onRegenerate={onRegenerate}
+      copyText={data.narrative}
+    >
       <div
         className="prose prose-sm max-w-none text-foreground prose-p:my-2.5 prose-p:leading-relaxed prose-strong:text-foreground prose-strong:font-semibold"
         style={
@@ -157,6 +222,7 @@ function ElicitStyleView({
           type="button"
           className="mt-2 text-xs text-primary hover:underline"
           onClick={() => setExpanded((prev) => !prev)}
+          aria-expanded={expanded}
         >
           {expanded ? 'Read less' : 'Read more'}
         </button>
@@ -174,9 +240,9 @@ function StructuredSynthesisView({
 }) {
   return (
     <SummaryFrame
-      titleAddon={<Badge variant="outline" className="text-[10px]">Legacy</Badge>}
       warnings={data.warnings || []}
       onRegenerate={onRegenerate}
+      copyText={getStructuredMarkdown(data)}
     >
       <div className="space-y-4">
         {data.sections.map((section, si) => (
@@ -343,7 +409,11 @@ export function NarrativeSynthesis({
   }
 
   return (
-    <SummaryFrame titleAddon={<Badge variant="outline" className="text-[10px]">Legacy</Badge>} onRegenerate={generate}>
+    <SummaryFrame
+      titleAddon={<Badge variant="outline" className="text-[10px]">Legacy</Badge>}
+      onRegenerate={generate}
+      copyText={rawSynthesis}
+    >
       <div
         className="prose prose-sm max-w-none text-muted-foreground prose-headings:text-foreground prose-headings:text-sm prose-headings:font-semibold prose-headings:mt-4 prose-headings:mb-1 prose-p:my-1.5 prose-p:leading-relaxed"
         style={{
