@@ -15,3 +15,9 @@
 **Learning:** Table sorting headers should use `aria-sort` on the `<th>` element to communicate state, and the sorting button should have a dynamic `aria-label` that describes both the current state and the action of clicking (e.g., "Sort by Year (ascending). Click to sort descending"). For selection, always prefer semantic `Checkbox` components over custom icons to ensure proper roles and states are conveyed to assistive technologies.
 
 **Action:** Implement `aria-sort` and descriptive labels in sortable headers; use `Checkbox` components for row selection with labels providing row context.
+
+## 2025-05-17 - Actionable Copy to Clipboard
+
+**Learning:** Research-focused interfaces benefit significantly from "Copy to Clipboard" functionality for generated findings. Providing immediate visual feedback (e.g., toggling the icon to a checkmark) and a toast notification confirms the action and reduces user uncertainty. It's crucial to ensure the clipboard logic is robust (using navigator.clipboard) and properly cleaned up on component unmount to avoid side effects.
+
+**Action:** Implement "Copy" buttons for key findings and summaries, ensuring they include clear ARIA labels, visual state changes, and success feedback via toasts.
