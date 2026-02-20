@@ -1,9 +1,11 @@
-import { Fragment, memo, useCallback, useEffect, useMemo, useState } from 'react';
+import { Fragment, memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
+  Check,
   ChevronDown,
   ChevronLeft,
   ChevronRight,
   ChevronUp,
+  Copy,
   Download,
   ExternalLink,
   FileText,
@@ -23,6 +25,7 @@ import type {
 } from '@/shared/types/research';
 import { NarrativeSynthesis } from './NarrativeSynthesis';
 import { Button } from '@/shared/ui/Button';
+import { toast } from '@/shared/ui/Sonner';
 import { Badge } from '@/shared/ui/Badge';
 import { Switch } from '@/shared/ui/Switch';
 import { Input } from '@/shared/ui/Input';
@@ -379,6 +382,8 @@ export function ResultsTable({
   extractionStats,
 }: ResultsTableProps) {
   const [viewMode, setViewMode] = useState<ViewMode>('summary');
+  const [copied, setCopied] = useState(false);
+  const copyTimeoutRef = useRef<number | null>(null);
   const [sortBy, setSortBy] = useState<SortOption>('relevance');
   const [studyDesign, setStudyDesign] = useState<StudyDesignFilter>('all');
   const [explicitOnly, setExplicitOnly] = useState(false);
@@ -585,6 +590,30 @@ export function ResultsTable({
     trackReportEvent('report_view_switch', { from: viewMode, to: safeMode });
     setViewMode(safeMode);
   };
+
+  const handleCopyFindings = () => {
+    if (summaryData.claims.length === 0) return;
+
+    const findingsText = summaryData.claims
+      .map((c, i) => `${i + 1}. ${c.text}`)
+      .join('\n\n');
+
+    navigator.clipboard.writeText(findingsText).then(() => {
+      setCopied(true);
+      toast.success('Key findings copied to clipboard');
+
+      if (copyTimeoutRef.current) window.clearTimeout(copyTimeoutRef.current);
+      copyTimeoutRef.current = window.setTimeout(() => {
+        setCopied(false);
+      }, 2000);
+    });
+  };
+
+  useEffect(() => {
+    return () => {
+      if (copyTimeoutRef.current) window.clearTimeout(copyTimeoutRef.current);
+    };
+  }, []);
 
   const handleSortChange = (value: string) => {
     const nextSort: SortOption = value === 'year' ? 'year' : 'relevance';
@@ -875,7 +904,28 @@ export function ResultsTable({
 
           {summaryData.claims.length > 0 && (
             <div className="rounded-lg border bg-card p-4">
-              <h3 className="text-sm font-semibold text-foreground">Key findings</h3>
+              <div className="mb-3 flex items-center justify-between">
+                <h3 className="text-sm font-semibold text-foreground">Key findings</h3>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={handleCopyFindings}
+                  className="h-8 px-2 text-muted-foreground hover:text-foreground"
+                  aria-label="Copy key findings to clipboard"
+                >
+                  {copied ? (
+                    <>
+                      <Check className="h-3.5 w-3.5 text-green-500" />
+                      <span className="ml-1.5 text-xs">Copied</span>
+                    </>
+                  ) : (
+                    <>
+                      <Copy className="h-3.5 w-3.5" />
+                      <span className="ml-1.5 text-xs">Copy</span>
+                    </>
+                  )}
+                </Button>
+              </div>
               <ol className="mt-3 space-y-2">
                 {summaryData.claims.map((claim, idx) => (
                   <li key={`${idx}-${claim.text.slice(0, 20)}`} className="text-sm leading-relaxed text-foreground">
