@@ -217,7 +217,10 @@ const StudyRow = memo(({
   const firstOutcomeResult = study.outcomes?.find((o) => o.key_result)?.key_result || '—';
   const openAlexUrl = normalizeOpenAlexStudyUrl(study.citation.openalex_id);
   const doiUrl = study.citation.doi ? sanitizeUrl(`https://doi.org/${study.citation.doi}`) : null;
-  const expandedIndices = useMemo(() => new Set(expandedSnippetIndices.split(',')), [expandedSnippetIndices]);
+  // Performance: Split non-empty string to avoid Set(['']) which causes false positive matches.
+  const expandedIndices = useMemo(() => (
+    expandedSnippetIndices ? new Set(expandedSnippetIndices.split(',')) : new Set<string>()
+  ), [expandedSnippetIndices]);
 
   return (
     <Fragment>
@@ -463,19 +466,14 @@ export function ResultsTable({
   }, [results, partialResults, query]);
 
   // Consolidate sorting, filtering, and tier separation into a single efficient pipeline.
-  // Combining these reduces the number of full passes over the dataset (O(N)).
-  const { mainStudies, excludedStudies } = useMemo(() => {
-    const sorted = [...scoredStudies].sort((a, b) => {
-      if (a.completenessTier !== b.completenessTier) {
-        return a.completenessTier === 'strict' ? -1 : 1;
-      }
-      return sortBy === 'year' ? b.year - a.year : b.relevanceScore - a.relevanceScore;
-    });
-
+  // Optimizations:
+  // 1. Filter BEFORE sorting to reduce O(N log N) overhead.
+  // 2. Split into two useMemos to avoid re-filtering when ONLY sortBy changes.
+  const filteredStudies = useMemo(() => {
     const main: ScoredStudy[] = [];
     const excluded: ScoredStudy[] = [];
 
-    for (const study of sorted) {
+    for (const study of scoredStudies) {
       if (!matchesReportStudyDesignFilter(study, studyDesign)) continue;
 
       const outcomesText = getOutcomeText(study);
@@ -492,8 +490,37 @@ export function ResultsTable({
       }
     }
 
-    return { mainStudies: main, excludedStudies: excluded };
-  }, [scoredStudies, sortBy, studyDesign, explicitOnly, debouncedFind]);
+    return { main, excluded };
+  }, [scoredStudies, studyDesign, explicitOnly, debouncedFind]);
+
+  const { mainStudies, excludedStudies } = useMemo(() => {
+    const sortFn = (a: ScoredStudy, b: ScoredStudy) => {
+      if (a.completenessTier !== b.completenessTier) {
+        return a.completenessTier === 'strict' ? -1 : 1;
+      }
+      return sortBy === 'year' ? b.year - a.year : b.relevanceScore - a.relevanceScore;
+    };
+
+    return {
+      mainStudies: [...filteredStudies.main].sort(sortFn),
+      excludedStudies: [...filteredStudies.excluded].sort(sortFn),
+    };
+  }, [filteredStudies, sortBy]);
+
+  // Pre-calculate a lookup Map for expanded snippets to reduce complexity from O(R*S) to O(R+S).
+  // This avoids expensive nested filter/map/join operations in the render loop.
+  const snippetLookup = useMemo(() => {
+    const map = new Map<string, string[]>();
+    for (const key of expandedSnippets) {
+      const lastDashIndex = key.lastIndexOf('-');
+      if (lastDashIndex === -1) continue;
+      const studyId = key.substring(0, lastDashIndex);
+      const index = key.substring(lastDashIndex + 1);
+      if (!map.has(studyId)) map.set(studyId, []);
+      map.get(studyId)!.push(index);
+    }
+    return map;
+  }, [expandedSnippets]);
 
   const totalPages = Math.max(1, Math.ceil(mainStudies.length / PAGE_SIZE));
 
@@ -950,10 +977,7 @@ export function ResultsTable({
                     onToggle={toggleRow}
                     highlightedStudyId={highlightedStudyId}
                     pdf={study.citation.doi ? pdfsByDoi[study.citation.doi] : undefined}
-                    expandedSnippetIndices={Array.from(expandedSnippets)
-                      .filter(id => id.startsWith(`${study.study_id}-`))
-                      .map(id => id.split('-').pop())
-                      .join(',')}
+                    expandedSnippetIndices={snippetLookup.get(study.study_id)?.join(',') || ''}
                     onToggleSnippet={toggleSnippet}
                   />
                 ))}
