@@ -19,3 +19,7 @@
 ## 2026-02-14 - [Consolidated Data Pass & Pagination Reset]
 **Learning:** Consolidating multiple `useMemo` hooks that perform sequential filter/map/sort operations into a single efficient pipeline (O(N) for filtering/scoring, O(N log N) for sorting) significantly reduces overhead for large datasets. Additionally, using `useMemo` to trigger state updates (like resetting pagination) is a React anti-pattern that triggers lint warnings; `useEffect` should be used for side-effect-driven state resets.
 **Action:** Merge multiple data-processing passes into one. Use `useEffect` for side-effect-driven state resets.
+
+## 2026-02-15 - [Lookup Table and Filter-Before-Sort Optimization]
+**Learning:** High-frequency render loops in components like `ResultsTable` can become bottlenecks when prop calculations involve nested collections (O(R*S)). Moving these into a pre-calculated Map lookup (O(R+S)) significantly improves performance. Additionally, prioritize filtering before sorting to reduce the computational cost of the sort algorithm.
+**Action:** Use `useMemo` to create lookup Maps for derived state in lists. Always apply filters before sorting.

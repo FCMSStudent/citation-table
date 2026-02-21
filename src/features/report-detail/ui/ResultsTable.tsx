@@ -217,7 +217,11 @@ const StudyRow = memo(({
   const firstOutcomeResult = study.outcomes?.find((o) => o.key_result)?.key_result || '—';
   const openAlexUrl = normalizeOpenAlexStudyUrl(study.citation.openalex_id);
   const doiUrl = study.citation.doi ? sanitizeUrl(`https://doi.org/${study.citation.doi}`) : null;
-  const expandedIndices = useMemo(() => new Set(expandedSnippetIndices.split(',')), [expandedSnippetIndices]);
+  // Performance Practice (Data Integrity): Check if the string is empty first to avoid [''] from .split()
+  const expandedIndices = useMemo(
+    () => new Set(expandedSnippetIndices ? expandedSnippetIndices.split(',') : []),
+    [expandedSnippetIndices],
+  );
 
   return (
     <Fragment>
@@ -388,6 +392,24 @@ export function ResultsTable({
   const [currentPage, setCurrentPage] = useState(1);
   const [expandedRows, setExpandedRows] = useState<Set<string>>(new Set());
   const [expandedSnippets, setExpandedSnippets] = useState<Set<string>>(new Set());
+
+  // Performance Optimization (Lookup Tables): Pre-calculate a map of studyId to its expanded snippet indices.
+  // This reduces complexity from O(R*S) to O(R+S) by replacing nested filter/map calls in the render loop.
+  const expandedSnippetMap = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const key of expandedSnippets) {
+      // Use lastIndexOf('-') to reliably split composite keys that may contain dashes in the ID.
+      const lastDashIndex = key.lastIndexOf('-');
+      if (lastDashIndex === -1) continue;
+      const studyId = key.substring(0, lastDashIndex);
+      const index = key.substring(lastDashIndex + 1);
+
+      const current = map.get(studyId);
+      map.set(studyId, current ? `${current},${index}` : index);
+    }
+    return map;
+  }, [expandedSnippets]);
+
   const [highlightedStudyId, setHighlightedStudyId] = useState<string | null>(null);
   const [pendingScrollStudyId, setPendingScrollStudyId] = useState<string | null>(null);
   const [referenceListOpen, setReferenceListOpen] = useState(false);
@@ -462,10 +484,23 @@ export function ResultsTable({
     return Array.from(scoredById.values());
   }, [results, partialResults, query]);
 
-  // Consolidate sorting, filtering, and tier separation into a single efficient pipeline.
-  // Combining these reduces the number of full passes over the dataset (O(N)).
+  // Performance Optimization (Sorting Optimization): Prioritize filtering BEFORE sorting.
+  // This reduces the computational overhead from O(N_total log N_total) to O(N_filtered log N_filtered),
+  // improving responsiveness when narrowing large datasets.
   const { mainStudies, excludedStudies } = useMemo(() => {
-    const sorted = [...scoredStudies].sort((a, b) => {
+    const filtered = scoredStudies.filter((study) => {
+      if (!matchesReportStudyDesignFilter(study, studyDesign)) return false;
+
+      const outcomesText = getOutcomeText(study);
+      const isExplicitMatch = (study.outcomes?.length || 0) > 0 && !outcomesText.includes('no outcomes reported');
+      if (explicitOnly && !isExplicitMatch) return false;
+
+      if (debouncedFind && !getCachedStudySearchBlob(study).includes(debouncedFind)) return false;
+
+      return true;
+    });
+
+    const sorted = filtered.sort((a, b) => {
       if (a.completenessTier !== b.completenessTier) {
         return a.completenessTier === 'strict' ? -1 : 1;
       }
@@ -475,16 +510,8 @@ export function ResultsTable({
     const main: ScoredStudy[] = [];
     const excluded: ScoredStudy[] = [];
 
+    // Single-pass separation into main and excluded (low-value) studies.
     for (const study of sorted) {
-      if (!matchesReportStudyDesignFilter(study, studyDesign)) continue;
-
-      const outcomesText = getOutcomeText(study);
-      const isExplicitMatch = (study.outcomes?.length || 0) > 0 && !outcomesText.includes('no outcomes reported');
-      if (explicitOnly && !isExplicitMatch) continue;
-
-      if (debouncedFind && !getCachedStudySearchBlob(study).includes(debouncedFind)) continue;
-
-      // Single-pass separation into main and excluded (low-value) studies.
       if (isLowValueStudy(study, study.relevanceScore)) {
         excluded.push(study);
       } else {
@@ -950,10 +977,7 @@ export function ResultsTable({
                     onToggle={toggleRow}
                     highlightedStudyId={highlightedStudyId}
                     pdf={study.citation.doi ? pdfsByDoi[study.citation.doi] : undefined}
-                    expandedSnippetIndices={Array.from(expandedSnippets)
-                      .filter(id => id.startsWith(`${study.study_id}-`))
-                      .map(id => id.split('-').pop())
-                      .join(',')}
+                    expandedSnippetIndices={expandedSnippetMap.get(study.study_id) || ''}
                     onToggleSnippet={toggleSnippet}
                   />
                 ))}
