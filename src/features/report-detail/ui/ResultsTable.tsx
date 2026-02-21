@@ -24,6 +24,7 @@ import type {
 import { NarrativeSynthesis } from './NarrativeSynthesis';
 import { Button } from '@/shared/ui/Button';
 import { Badge } from '@/shared/ui/Badge';
+import { CopyButton } from '@/shared/ui/CopyButton';
 import { Switch } from '@/shared/ui/Switch';
 import { Input } from '@/shared/ui/Input';
 import { Tabs, TabsList, TabsTrigger } from '@/shared/ui/Tabs';
@@ -875,8 +876,15 @@ export function ResultsTable({
 
           {summaryData.claims.length > 0 && (
             <div className="rounded-lg border bg-card p-4">
-              <h3 className="text-sm font-semibold text-foreground">Key findings</h3>
-              <ol className="mt-3 space-y-2">
+              <div className="flex items-center justify-between mb-3">
+                <h3 className="text-sm font-semibold text-foreground">Key findings</h3>
+                <CopyButton
+                  content={summaryData.claims.map((c) => c.text).join('\n')}
+                  label="Copy"
+                  className="h-8 text-muted-foreground hover:text-foreground"
+                />
+              </div>
+              <ol className="space-y-2">
                 {summaryData.claims.map((claim, idx) => (
                   <li key={`${idx}-${claim.text.slice(0, 20)}`} className="text-sm leading-relaxed text-foreground">
                     {claim.text}{' '}
