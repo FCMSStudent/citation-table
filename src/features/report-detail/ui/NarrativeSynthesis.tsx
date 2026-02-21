@@ -1,9 +1,10 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import type { ReactNode } from 'react';
 import { RefreshCw, Sparkles, AlertCircle, AlertTriangle } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import { Button } from '@/shared/ui/Button';
 import { Badge } from '@/shared/ui/Badge';
+import { CopyButton } from '@/shared/ui/CopyButton';
 import { Skeleton } from '@/shared/ui/Skeleton';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/shared/ui/Tooltip';
 import { Popover, PopoverContent, PopoverTrigger } from '@/shared/ui/Popover';
@@ -96,11 +97,13 @@ function SummaryFrame({
   warnings,
   children,
   onRegenerate,
+  copyContent,
 }: {
   titleAddon?: ReactNode;
   warnings?: SynthesisWarning[];
   children: ReactNode;
   onRegenerate: () => void;
+  copyContent?: string;
 }) {
   return (
     <div className="rounded-lg border bg-card p-4">
@@ -112,6 +115,9 @@ function SummaryFrame({
         </div>
         <div className="flex items-center gap-3">
           {!!warnings?.length && <WarningsPopover warnings={warnings} />}
+          {copyContent && (
+            <CopyButton content={copyContent} label="Copy" className="text-muted-foreground hover:text-foreground" />
+          )}
           <Button variant="ghost" size="sm" onClick={onRegenerate} className="gap-2 text-muted-foreground hover:text-foreground">
             <RefreshCw className="h-3 w-3" />
             Regenerate
@@ -136,7 +142,7 @@ function ElicitStyleView({
   const canExpand = data.narrative.length > 360;
 
   return (
-    <SummaryFrame warnings={data.warnings || []} onRegenerate={onRegenerate}>
+    <SummaryFrame warnings={data.warnings || []} onRegenerate={onRegenerate} copyContent={data.narrative}>
       <div
         className="prose prose-sm max-w-none text-foreground prose-p:my-2.5 prose-p:leading-relaxed prose-strong:text-foreground prose-strong:font-semibold"
         style={
@@ -172,11 +178,22 @@ function StructuredSynthesisView({
   data: SynthesisData;
   onRegenerate: () => void;
 }) {
+  const copyContent = useMemo(() => {
+    return data.sections
+      .map((section) => {
+        const sectionText = section.heading ? `${section.heading}\n` : '';
+        const claimsText = section.claims.map((claim) => claim.text).join('\n');
+        return `${sectionText}${claimsText}`;
+      })
+      .join('\n\n');
+  }, [data.sections]);
+
   return (
     <SummaryFrame
       titleAddon={<Badge variant="outline" className="text-[10px]">Legacy</Badge>}
       warnings={data.warnings || []}
       onRegenerate={onRegenerate}
+      copyContent={copyContent}
     >
       <div className="space-y-4">
         {data.sections.map((section, si) => (
@@ -343,7 +360,11 @@ export function NarrativeSynthesis({
   }
 
   return (
-    <SummaryFrame titleAddon={<Badge variant="outline" className="text-[10px]">Legacy</Badge>} onRegenerate={generate}>
+    <SummaryFrame
+      titleAddon={<Badge variant="outline" className="text-[10px]">Legacy</Badge>}
+      onRegenerate={generate}
+      copyContent={rawSynthesis}
+    >
       <div
         className="prose prose-sm max-w-none text-muted-foreground prose-headings:text-foreground prose-headings:text-sm prose-headings:font-semibold prose-headings:mt-4 prose-headings:mb-1 prose-p:my-1.5 prose-p:leading-relaxed"
         style={{
